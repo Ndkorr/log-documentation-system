@@ -99,8 +99,10 @@ class LogApp(QWidget):
         combo_layout.addWidget(self.log_type_selector)
         
         self.category_selector = QComboBox(self)
-        self.category_selector.addItems(["Problem", "Solution", "Bug", "Changes"])
+        self.category_selector.addItems(["Problem ★", "Solution ■", "Bug ▲", "Changes ◆"])
         combo_layout.addWidget(self.category_selector)
+        
+        layout.addLayout(combo_layout)
         
         self.add_log_button = QPushButton("Add Log", self)
         self.add_log_button.clicked.connect(self.add_log)
@@ -222,6 +224,10 @@ class LogApp(QWidget):
             print("Adding log entry...")
             timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%SH]")
             additional_info = ""
+        
+            category = self.category_selector.currentText()
+            indicators = {"Problem ★": "★", "Solution ■": "■", "Bug ▲": "▲", "Changes ◆": "◆"}
+            category_icon = indicators.get(category, "")
             
             if self.log_type == "Debugging":
                 memory_usage, temperature = self.get_system_info()
@@ -229,7 +235,7 @@ class LogApp(QWidget):
             elif self.log_type == "General" and self.user_name:
                 additional_info = f" - User: {self.user_name}"
 
-            log_entry = f"{timestamp} [{self.log_type}] {log_text}{additional_info}"
+            log_entry = f"{category_icon} {timestamp} [{self.log_type}] {log_text}{additional_info}"
             item = QListWidgetItem(log_entry)
             
             # Apply the selected text color
@@ -260,14 +266,16 @@ class LogApp(QWidget):
         file_name, _ = QFileDialog.getSaveFileName(self, "Save Logs", "logs.lds", "Log Documentation System Files (*.lds)")
         if file_name:
             self.current_file = file_name
-            with open(file_name, "w") as file:
+            with open(file_name, "w", encoding="utf-8") as file:
                 for index in range(self.log_list.count()):
                     item = self.log_list.item(index)
                     log_text = item.text()
                     # Get the color of the log item
                     color = item.foreground().color().name()
+                    # Extract the category from the log text
+                    category = self.category_selector.currentText()
                     # Save the log text and color in the format: log_text|color
-                    file.write(f"{log_text}|{color}\n")
+                    file.write(f"{log_text}|{color}|{category}\n")
             print(f"Logs saved to {file_name}")
 
     def open_logs(self, file_path=None):
@@ -278,18 +286,21 @@ class LogApp(QWidget):
             self.current_file = file_path
             self.log_list.clear()  # Clear the current log list
             try:
-                with open(file_path, "r") as file:
+                with open(file_path, "r", encoding="utf-8") as file:
                     for line in file:
                         line = line.strip()
                         if "|" in line:
-                            # Split the line into log text and color
-                            log_text, color = line.rsplit("|", 1)
-                            item = QListWidgetItem(log_text)
-                            # Apply the color to the log item
-                            item.setForeground(QBrush(QColor(color)))
-                            self.log_list.addItem(item)
-                        else:
-                            print(f"Skipping invalid line: {line}")
+                            # Split the line into log text, color, and category
+                            parts = line.rsplit("|", 2)
+                            if len(parts) == 3:
+                                log_text, color, category = parts
+                                item = QListWidgetItem(log_text)
+                                # Apply the color to the log item
+                                item.setForeground(QBrush(QColor(color)))
+                                self.log_list.addItem(item)
+                                print(f"Loaded log: {log_text} with category: {category}")
+                            else:
+                                print(f"Skipping invalid line: {line}")
                 print(f"Logs loaded successfully from {file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to open file: {e}")
