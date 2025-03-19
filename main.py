@@ -2,15 +2,11 @@ from PyQt6.QtWidgets import QMenu, QLabel, QColorDialog, QApplication, QLineEdit
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QEvent, QPoint
 from PyQt6.QtGui import QColor, QBrush
 from datetime import datetime
-import sys, os
+import sys
 import psutil
-import clr
 import json
-
-# Load OpenHardwareMonitor library
-dll_path = r"C:\Users\HR-IT-MATTHEW-PC\Desktop\Projects\Applications\Documentation\OpenHardwareMonitorLib.dll"
-clr.AddReference(dll_path)
-from OpenHardwareMonitor import Hardware
+import wmi
+from pynvml import nvmlInit, nvmlDeviceGetHandleByIndex, nvmlDeviceGetUtilizationRates, nvmlShutdown
 
 class LogTextEdit(QTextEdit):
     logSubmitted = pyqtSignal()
@@ -27,32 +23,36 @@ class LogTextEdit(QTextEdit):
             super().keyPressEvent(event)
 
 class HardwareMonitor(QThread):
-    data_ready = pyqtSignal(str, str)  # Signal to send memory & temperature data
+    data_ready = pyqtSignal(str, str, str)  # Signal to send memory & temperature data
 
     def __init__(self):
         super().__init__()
-        self.computer = Hardware.Computer()
-        self.computer.MainboardEnabled = True
-        self.computer.CPUEnabled = True
-        self.computer.GPUEnabled = True
-        self.computer.Open()
-
+        self.wmi_interface = wmi.WMI()  # Initialize WMI interface
+    
+    def get_gpu_usage(self):
+        try:
+            nvmlInit()
+            handle = nvmlDeviceGetHandleByIndex(0)  # GPU 0
+            utilization = nvmlDeviceGetUtilizationRates(handle)
+            gpu_usage = f"GPU Usage: {utilization.gpu}%"
+            nvmlShutdown()
+            return gpu_usage
+        except Exception as e:
+            return f"GPU Usage: Error ({e})"
+    
     def run(self):
         while True:
+            # Fetch memory usage using psutil
             memory = psutil.virtual_memory()
             memory_usage = f"MemUsage: {memory.used // (1024 * 1024)}/{memory.total // (1024 * 1024)}MB ({memory.percent}% used)"
-            temperature = "Temp: N/A"
-
-            # Fetch CPU Temperature
-            for hardware in self.computer.Hardware:
-                hardware.Update()  # Make sure to update first
-                if hardware.HardwareType == Hardware.HardwareType.CPU:
-                    for sensor in hardware.Sensors:
-                        if sensor.SensorType == Hardware.SensorType.Temperature and sensor.Value is not None:
-                            temperature = f"CPU Temp: {sensor.Value} °C"
-                            break
-
-            self.data_ready.emit(memory_usage, temperature)
+            
+            # Fetch CPU usage using psutil
+            cpu_usage = f"CPU Usage: {psutil.cpu_percent(interval=1)}%"
+            # Fetch GPU usage using pynvml
+            gpu_usage = self.get_gpu_usage()
+            
+            # Emit the memory usage data
+            self.data_ready.emit(memory_usage, cpu_usage, gpu_usage)
             self.msleep(2000)  # Refresh every 2 seconds
 
 
@@ -65,11 +65,6 @@ class LogApp(QWidget):
         self.current_file = None
         self.user_name = ""
         self.log_type = "General"
-        self.computer = Hardware.Computer()
-        self.computer.MainboardEnabled = True
-        self.computer.CPUEnabled = True
-        self.computer.GPUEnabled = True
-        self.computer.Open()
         
         # Start the hardware monitoring thread
         self.hw_monitor = HardwareMonitor()
@@ -209,15 +204,14 @@ class LogApp(QWidget):
         dialog.setLayout(dialog_layout)
         dialog.show()
     
-    
-    def update_system_info(self, memory_usage, temperature):
-        self.memory_usage = memory_usage
-        self.temperature = temperature
-
     def get_system_info(self):
-        return self.memory_usage, self.temperature
+        return self.memory_usage
     
-
+    def update_system_info(self, memory_usage, cpu_usage, gpu_usage=None):
+        self.memory_usage = memory_usage
+        self.cpu_usage = cpu_usage
+        self.gpu_usage = gpu_usage
+        
     def add_log(self):
         log_text = self.log_input.toPlainText().strip()
         if log_text:
@@ -230,8 +224,10 @@ class LogApp(QWidget):
             category_icon = indicators.get(category, "")
             
             if self.log_type == "Debugging":
-                memory_usage, temperature = self.get_system_info()
-                additional_info = f" - {memory_usage} | {temperature}"
+                memory_usage = self.get_system_info()
+                cpu_usage = self.cpu_usage
+                gpu_usage = self.gpu_usage
+                additional_info = f" - {memory_usage}, {cpu_usage}, {gpu_usage}"
             elif self.log_type == "General" and self.user_name:
                 additional_info = f" - User: {self.user_name}"
 
