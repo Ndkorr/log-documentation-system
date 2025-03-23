@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QMenu, QLabel, QColorDialog, QApplication, QLineEdit, QListWidgetItem, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, QInputDialog, QFileDialog, QMessageBox, QComboBox
+from PyQt6.QtWidgets import QMenu, QProgressDialog, QMenuBar, QLabel, QColorDialog, QApplication, QLineEdit, QListWidgetItem, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, QInputDialog, QFileDialog, QMessageBox, QComboBox
 from PyQt6.QtCore import Qt, QSettings, QTimer, QThread, pyqtSignal, QEvent, QPoint
-from PyQt6.QtGui import QColor, QBrush, QShortcut, QKeySequence
+from PyQt6.QtGui import QColor, QBrush, QShortcut, QKeySequence, QAction
 from datetime import datetime
 import sys
 import psutil
@@ -119,6 +119,63 @@ class LogApp(QWidget):
         self.hw_monitor.start()
         print("LogApp initialized.")
 
+    def create_menu_bar(self, layout):
+        menu_bar = QMenuBar(self)
+        layout.setMenuBar(menu_bar)  # Attach menu bar to layout
+
+        # Recent Files Menu
+        self.recent_menu = QMenu("Recent", self)
+        menu_bar.addMenu(self.recent_menu)
+        self.update_recent_files_menu()
+        
+        # Help Menu
+        help_menu = QMenu("Help", self)
+        menu_bar.addMenu(help_menu)
+        help_action = QAction("How to Use", self)
+        help_action.triggered.connect(self.show_help)
+        help_menu.addAction(help_action)
+    
+    def update_recent_files_menu(self):
+        self.recent_menu.clear()  # Clear previous menu items
+        settings = QSettings("MyCompany", "LogDocumentationSystem")
+        
+        recent_files = settings.value("recent_files", [])
+        
+        # Ensure recent_files is a list (QSettings may return a single string)
+        if not isinstance(recent_files, list):
+            recent_files = [recent_files] if recent_files else []
+    
+        self.recent_files = recent_files  # Store it properly
+        
+        for file_path in self.recent_files:
+            action = QAction(file_path, self)
+            action.triggered.connect(lambda checked, path=file_path: self.open_logs(path))
+            self.recent_menu.addAction(action)
+            
+        
+
+    def load_recent_files(self):
+        settings = QSettings("MyCompany", "LogDocumentationSystem")
+        self.recent_files = settings.value("recent_files", [])
+        
+        # Ensure it is a list (QSettings may return None or a string instead)
+        if not isinstance(self.recent_files, list):
+            self.recent_files = []
+    
+    def save_recent_file(self, file_path):
+        if file_path not in self.recent_files:
+            self.recent_files.insert(0, file_path)
+            self.recent_files = self.recent_files[:5]  # Limit to last 5 files
+            
+        settings = QSettings("MyCompany", "LogDocumentationSystem")
+        settings.setValue("recent_files", self.recent_files)
+        
+        self.update_recent_files_menu()  # Update the menu dynamically
+    
+    def show_help(self):
+        QMessageBox.information(self, "How to Use", "1. Open or create a log file.\n2. Add logs using the text input.\n3. Save logs to keep them.\n4. Use 'Recent' to quickly access previous logs.")
+
+    
     def init_ui(self):
         print("Setting up UI...")
         self.setWindowTitle("Log Documentation System")
@@ -126,7 +183,10 @@ class LogApp(QWidget):
         self.setFixedSize(500, 400)  # Make window not resizable
         self.center()
 
-        layout = QVBoxLayout()
+        layout = QVBoxLayout(self)
+        
+        self.create_menu_bar(layout)  # Create the menu bar and add it to layout
+        self.setLayout(layout)
         
         self.log_input = LogTextEdit(self)
         self.log_input.setPlaceholderText("Enter your log entry here...")
@@ -218,7 +278,7 @@ class LogApp(QWidget):
         # Auto Save Functionality
         self.auto_save_timer = QTimer(self)
         self.auto_save_timer.timeout.connect(self.auto_save_logs)
-        self.auto_save_timer.start(5 * 60 * 1000)  # 5 minutes in milliseconds
+        self.auto_save_timer.start(30 * 1000)  # 30 sec in milliseconds
     
     def center(self):
         screen_geometry = QApplication.primaryScreen().availableGeometry()
@@ -458,25 +518,50 @@ class LogApp(QWidget):
             file_path, _ = QFileDialog.getOpenFileName(self, "Open Logs", "", "Log Documentation System Files (*.lds)")
         if file_path:
             self.current_file = file_path
+            self.save_recent_file(file_path)
             self.log_list.clear()  # Clear the current log list
+            
+            
             try:
                 with open(file_path, "r", encoding="utf-8") as file:
-                    for line in file:
-                        line = line.strip()
-                        if line:  # Ensure the line is not empty
-                            # Create a QLabel and set the saved HTML content
-                            label = QLabel()
-                            label.setText(line)
-                            label.setTextFormat(Qt.TextFormat.RichText)
-                            label.setWordWrap(False)
-                            label.adjustSize()
+                    lines = file.readlines()  # Read all lines from the file
+                
+                # Create a progress dialog
+                progress_dialog = QProgressDialog("Loading Please Wait...", "Cancel", 0, len(lines), self)
+                progress_dialog.setWindowTitle("Loading Logs")
+                progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+                progress_dialog.setMinimumDuration(0)  # Show immediately
+                progress_dialog.setValue(0) 
+                    
+                for i, line in enumerate(lines):
+                    if progress_dialog.wasCanceled():
+                        self.log_list.clear()   # Clear all log items
+                        self.current_file = None  # Reset the current file reference
+                        QMessageBox.information(self, "Loading Cancelled", "The loading process has been cancelled.")
+                        print("Loading canceled by user.")
+                        break
+                    line = line.strip()
                         
-                            # Create a QListWidgetItem and set its size hint to the label's size
-                            item = QListWidgetItem()
-                            item.setSizeHint(label.sizeHint())
-                            self.log_list.addItem(item)
-                            self.log_list.setItemWidget(item, label)
-                            print(f"Loaded log: {line}")
+                    if line:  # Ensure the line is not empty
+                        # Create a QLabel and set the saved HTML content
+                        label = QLabel()
+                        label.setText(line)
+                        label.setTextFormat(Qt.TextFormat.RichText)
+                        label.setWordWrap(False)
+                        label.adjustSize()
+                        
+                        # Create a QListWidgetItem and set its size hint to the label's size
+                        item = QListWidgetItem()
+                        item.setSizeHint(label.sizeHint())
+                        self.log_list.addItem(item)
+                        self.log_list.setItemWidget(item, label)
+                        print(f"Loaded log: {line}")
+
+                    # Update the progress dialog
+                    progress_dialog.setValue(i + 1)
+                    QApplication.processEvents()  # Allow the UI to update
+                
+                progress_dialog.close()
                 print(f"Logs loaded successfully from {file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to open file: {e}")

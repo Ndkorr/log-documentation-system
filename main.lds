@@ -116,4 +116,10 @@
 <span style="color:red;">★</span> <span style="color:#000000;">[2025-03-23 09:57:05H] [Debugging] Changes suddenly disappear from the git version control system - MemUsage: 5508/8150MB (67.6% used), CPU Usage: 6.2%, GPU Usage: Error (Not Supported)</span>
 <span style="color:yellow;">■</span> <span style="color:#000000;">[2025-03-23 09:57:31H] [Debugging] recover using git reflog - this will track all commited changes - MemUsage: 5431/8150MB (66.6% used), CPU Usage: 17.7%, GPU Usage: Error (Not Supported)</span>
 <span style="color:yellow;">■</span> <span style="color:#000000;">[2025-03-23 09:58:22H] [Debugging] then find the commit id then type git reset --hard 1e2cc3eg <exampleid> - MemUsage: 5484/8150MB (67.3% used), CPU Usage: 22.7%, GPU Usage: Error (Not Supported)</span>
->>>>>>> 09234a9e487a23d3219863c6bafab8d2e61f486e
+<span style="color:green;"></span> <span style="color:#000000;">[2025-03-23 17:41:44H] [General] Add access to certain page on the documents by adding hyperlinking.</span>
+<span style="color:green;"></span> <span style="color:#000000;">[2025-03-23 17:57:05H] [General] Add a menu bar where it contains recent and help buttons</span>
+<span style="color:blue;">◆</span> <span style="color:#000000;">[2025-03-23 21:29:11H] [General] Implemented the menu bar</span>
+<span style="color:red;">★</span> <span style="color:#000000;">[2025-03-23 21:30:03H] [General] Takes too long to load a multi-line</span>
+<span style="color:yellow;">■</span> <span style="color:#000000;">[2025-03-23 21:31:13H] [General] Add a loading screen to compensate or make a visual that the opening file takes some time to load</span>
+<span style="color:blue;">◆</span> <span style="color:#000000;">[2025-03-23 22:01:33H] [General] Added loading screen upon opening logs that is dependent on number of logs</span>
+<span style="color:blue;">◆</span> <span style="color:#000000;">[2025-03-23 22:12:30H] [General] Readjust loading logs</span>
