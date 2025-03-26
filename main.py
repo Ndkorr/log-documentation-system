@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QMenu, QProgressDialog, QMenuBar, QLabel, QColorDialog, QApplication, QLineEdit, QListWidgetItem, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, QInputDialog, QFileDialog, QMessageBox, QComboBox
 from PyQt6.QtCore import Qt, QSettings, QTimer, QThread, pyqtSignal, QEvent, QPoint
-from PyQt6.QtGui import QColor, QBrush, QShortcut, QKeySequence, QAction
+from PyQt6.QtGui import QColor, QTextDocument, QTextCursor, QBrush, QShortcut, QKeySequence, QAction
 from datetime import datetime
 import sys
 import psutil
@@ -8,9 +8,10 @@ import json
 import wmi
 from pynvml import nvmlInit, nvmlDeviceGetHandleByIndex, nvmlDeviceGetUtilizationRates, nvmlShutdown
 from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
-from PyQt6.QtGui import QTextDocument
 import os
 import subprocess
+import re
+import fitz
 
 class LogTextEdit(QTextEdit):
     logSubmitted = pyqtSignal()
@@ -107,6 +108,14 @@ class LogApp(QWidget):
         self.current_file = None
         self.user_name = ""
         self.log_type = "General"
+        
+        # Initialize counters for different log types
+        self.log_counters = {
+            "Problem ★": 0,
+            "Solution ■": 0,
+            "Bug ▲": 0,
+            "Changes ◆": 0,
+        }
         
         # Initialize PDF-related attributes
         self.pdf_title = "Log Documentation"  # Default PDF title
@@ -250,9 +259,23 @@ class LogApp(QWidget):
         self.customize_button.clicked.connect(self.set_user_name)
         button_layout.addWidget(self.customize_button)
         
-        self.export_pdf_button = QPushButton("Export to PDF", self)
-        self.export_pdf_button.clicked.connect(self.export_to_pdf)
-        button_layout.addWidget(self.export_pdf_button)
+        # Modify export button
+        self.export_button = QPushButton("Export to", self)
+        export_menu = QMenu(self.export_button)
+        
+        # Add "Export to PDF" option
+        export_pdf_action = QAction("Export to PDF", self)
+        export_pdf_action.triggered.connect(self.export_to_pdf)
+        export_menu.addAction(export_pdf_action)
+
+        # Add "Export to HTML" option
+        export_html_action = QAction("Export to HTML", self)
+        export_html_action.triggered.connect(self.export_to_html)
+        export_menu.addAction(export_html_action)
+
+        # Attach the menu to the button
+        self.export_button.setMenu(export_menu)
+        button_layout.addWidget(self.export_button)
         
         layout.addLayout(button_layout)
         
@@ -405,6 +428,14 @@ class LogApp(QWidget):
             }
             icon_color = category_colors.get(category, "green")  # Fallback to green if category not found
             
+            # Auto-increment counter for the selected category
+            if category in self.log_counters:
+                self.log_counters[category] += 1
+                log_number = f" #{self.log_counters[category]}"
+        
+            else:
+                log_number = ""  # If not tracked, don't append a number
+            
             if self.log_type == "Debugging":
                 memory_usage = self.get_system_info()
                 cpu_usage = self.cpu_usage
@@ -416,17 +447,21 @@ class LogApp(QWidget):
             # Use the customized text color for the main log entry text
             main_text_color = self.text_color.name() if hasattr(self, 'text_color') else "black"  # Default to black
 
+            # Format the log text using format_text
+            formatted_log_text = self.format_text(log_text)
             
             # Create the log entry with HTML formatting
             log_entry = (
                 f'<span style="color:{icon_color};">{category_icon}</span> '
-                f'<span style="color:{main_text_color};">{timestamp} [{self.log_type}] {log_text}{additional_info}</span>'
+                f'<span style="color:{main_text_color};">{timestamp} [{self.log_type}] {formatted_log_text}{additional_info}{log_number}</span>'
             )
             
             # Create a QLabel to render the rich text
             label = QLabel()
             label.setText(log_entry)
             label.setTextFormat(Qt.TextFormat.RichText)  # Enable rich text
+            label.setOpenExternalLinks(False)  # Disable external links
+            label.linkActivated.connect(self.handle_internal_link)  # Connect internal link handler
             label.setWordWrap(False)  # Allow text wrapping
             label.setSizePolicy(label.sizePolicy().horizontalPolicy(), label.sizePolicy().verticalPolicy())
 
@@ -445,6 +480,13 @@ class LogApp(QWidget):
             
             self.log_input.clear()
             print("Log entry added successfully.")
+            
+            # **Save updated counters to JSON**
+            if self.current_file:
+                json_file = self.current_file.replace(".lds", ".json")
+                with open(json_file, "w", encoding="utf-8") as json_out:
+                    json.dump(self.log_counters, json_out, indent=4)
+            
         else:
             QMessageBox.warning(self, "Invalid Input", "Log entry cannot be empty.")
             print("Failed to add log: Empty input.")
@@ -506,6 +548,14 @@ class LogApp(QWidget):
                     label = self.log_list.itemWidget(item)
                     if isinstance(label, QLabel):
                         file.write(label.text() + "\n")
+                        
+            
+            # **Save the counters to a JSON file**
+            json_file = file_name.replace(".lds", ".json")
+            with open(json_file, "w", encoding="utf-8") as json_out:
+                json.dump(self.log_counters, json_out, indent=4)
+        
+            print(f"Counters saved to {json_file}")                
             print(f"Logs saved to {file_name}")
 
         self.setWindowTitle("Log Documentation System - FIle saved")  # Update title
@@ -520,6 +570,30 @@ class LogApp(QWidget):
             self.current_file = file_path
             self.save_recent_file(file_path)
             self.log_list.clear()  # Clear the current log list
+            
+            # Try loading counters from JSON
+            json_file = file_path.replace(".lds", ".json")
+            if os.path.exists(json_file):
+                try:
+                    with open(json_file, "r", encoding="utf-8") as json_in:
+                        self.log_counters = json.load(json_in)
+                    print(f"Loaded log counters from {json_file}: {self.log_counters}")
+                except Exception as e:
+                    print(f"Error loading log counters: {e}")
+                    self.log_counters = {
+                        "Problem ★": 0,
+                        "Solution ■": 0,
+                        "Bug ▲": 0,
+                        "Changes ◆": 0,
+                    }
+            else:
+                # If no JSON file exists, reset counters and detect them manually
+                self.log_counters = {
+                    "Problem ★": 0,
+                    "Solution ■": 0,
+                    "Bug ▲": 0,
+                    "Changes ◆": 0,
+                }
             
             
             try:
@@ -543,10 +617,13 @@ class LogApp(QWidget):
                     line = line.strip()
                         
                     if line:  # Ensure the line is not empty
+                        
                         # Create a QLabel and set the saved HTML content
                         label = QLabel()
                         label.setText(line)
                         label.setTextFormat(Qt.TextFormat.RichText)
+                        label.setOpenExternalLinks(False)  # Disable external links
+                        label.linkActivated.connect(self.handle_internal_link)  # Connect internal link handler
                         label.setWordWrap(False)
                         label.adjustSize()
                         
@@ -563,6 +640,17 @@ class LogApp(QWidget):
                 
                 progress_dialog.close()
                 print(f"Logs loaded successfully from {file_path}")
+                
+                # If no JSON exists, try detecting counters
+                if not os.path.exists(json_file):
+                    self.detect_log_counters()
+                
+                # Scroll to the last item in the log list
+                if self.log_list.count() > 0:
+                    last_item = self.log_list.item(self.log_list.count() - 1)
+                    self.log_list.scrollToItem(last_item)
+                    print("Scrolled to the latest log entry.")
+                
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to open file: {e}")
                 print(f"Error opening file: {e}")
@@ -675,6 +763,7 @@ class LogApp(QWidget):
                         margin-bottom: {line_spacing * 3}px; 
                         white-space: pre-wrap; 
                         /* Ensures text wrapping */ }}
+                    a {{ color: blue; text-decoration: underline; }}
                 </style>
             </head>
             <body>
@@ -690,6 +779,23 @@ class LogApp(QWidget):
                 text = label.text()
                 html_content += f"<p class='log-entry'>{text}</p>"
         
+        # Append explanations at the end of the PDF
+        html_content += "<hr><h2>Definitions</h2><ul>"        
+        
+        keyword_definitions = {
+            "TensorFlow": "TensorFlow is an open-source machine learning framework developed by Google.",
+            "PyQt": "PyQt is a set of Python bindings for Qt libraries used for GUI development.",
+            "AI": "Artificial Intelligence (AI) refers to the simulation of human intelligence in machines."
+        }
+        
+        for keyword, definition in keyword_definitions.items():
+            # Add a bookmark for each keyword definition
+            definition_anchor = f"def_{keyword}"
+
+            # Add the definition with a bookmark
+            html_content += f'<li><b name="{definition_anchor}">{keyword}:</b> {definition}</li>'
+
+
         html_content += "</body></html>"
     
         doc.setHtml(html_content)
@@ -721,7 +827,7 @@ class LogApp(QWidget):
             if response == QMessageBox.StandardButton.Open:
                 self.open_pdf(file_path)
                 print(f"PDF exported successfully to {file_path}")
-
+    
     def clear_logs(self):
         # Confirm the action with the user (optional)
         reply = QMessageBox.question(self, "Clear Logs", 
@@ -742,11 +848,10 @@ class LogApp(QWidget):
                     if isinstance(label, QLabel):
                         file.write(label.text() + "\n")
             print(f"Logs auto-saved to {self.current_file}")
+            self.setWindowTitle("Log Documentation System - Auto-saved")  # Update title
+            QTimer.singleShot(8000, lambda: self.setWindowTitle("Log Documentation System"))  # Reset after 2 seconds
         else:
             print("Auto-save skipped: No file selected")
-        
-        self.setWindowTitle("Log Documentation System - Auto-saved")  # Update title
-        QTimer.singleShot(8000, lambda: self.setWindowTitle("Log Documentation System"))  # Reset after 2 seconds
 
     def save_user_config(self):
         settings = QSettings("MyCompany", "LogDocumentationSystem")
@@ -772,7 +877,163 @@ class LogApp(QWidget):
                 subprocess.call(["xdg-open", file_path])
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open PDF:\n{str(e)}")
-      
+    
+    def format_text(self, text):
+        """Convert Markdown-like syntax into HTML for QLabel."""
+        text = re.sub(r"\*([^*]+)\*", r"<i>\1</i>", text)  # *italic* → <i>italic</i>
+        text = re.sub(r"_([^_]+)_", r"<u>\1</u>", text)    # _underline_ → <u>underline</u>
+        text = re.sub(r"\[([^\]]+)\]\((#.*?)\)", r'<a href="\2">\1</a>', text)  # Internal links only
+        
+        # Define keywords and their descriptions
+        keyword_definitions = {
+            "TensorFlow": "TensorFlow is an open-source machine learning framework developed by Google.",
+            "PyQt": "PyQt is a set of Python bindings for Qt libraries used for GUI development.",
+            "AI": "Artificial Intelligence (AI) refers to the simulation of human intelligence in machines."
+        }
+
+        # Replace keywords with HTML links
+        for keyword, definition in keyword_definitions.items():
+            text = re.sub(rf"\b{keyword}\b", f'<a href="#{keyword}">{keyword}</a>', text)
+        
+        return text
+    
+    def handle_internal_link(self, link):
+        """Handle internal navigation within the document."""
+        print(f"Navigating to: {link}")
+        
+        keyword_definitions = {
+            "TensorFlow": "TensorFlow is an open-source machine learning framework developed by Google.",
+            "PyQt": "PyQt is a set of Python bindings for Qt libraries used for GUI development.",
+            "AI": "Artificial Intelligence (AI) refers to the simulation of human intelligence in machines."
+        }
+        keyword = link.lstrip("#")  # Remove '#' from link
+        if keyword in keyword_definitions:
+            QMessageBox.information(self, keyword, keyword_definitions[keyword])
+        
+        # Example: Scroll to a specific log entry or section
+        for index in range(self.log_list.count()):
+            item = self.log_list.item(index)
+            label = self.log_list.itemWidget(item)
+            if isinstance(label, QLabel) and link in label.text():
+                self.log_list.scrollToItem(item)
+                print(f"Scrolled to item containing: {link}")
+                break 
+    
+    def export_to_html(self):
+        # Get user-defined values
+        font_size = self.pdf_font_size  # Reuse PDF settings if desired
+        line_spacing = self.pdf_line_spacing
+        title_text = self.pdf_title
+
+        # Start building the HTML content
+        html_content = f"""
+        <html>
+            <head>
+                <meta charset="utf-8">
+                <title>{title_text}</title>
+                <style>
+                    body {{
+                        font-size: {font_size}pt;
+                        line-height: {line_spacing}em;
+                        font-family: Arial, sans-serif;
+                    }}
+                    h1 {{
+                        text-align: center;
+                        font-size: {font_size + 6}pt;
+                        font-weight: bold;
+                        margin-bottom: {line_spacing * 5}px;
+                    }}
+                    .log-entry {{
+                        margin-bottom: {line_spacing * 3}px;
+                        white-space: pre-wrap;
+                    }}
+                    a {{
+                        color: blue;
+                        text-decoration: underline;
+                    }}
+                </style>
+            </head>
+            <body>
+                <h1>{title_text}</h1>
+        """
+
+        # Loop through each log entry in the log_list
+        for index in range(self.log_list.count()):
+            item = self.log_list.item(index)
+            label = self.log_list.itemWidget(item)
+            if isinstance(label, QLabel):
+                # Get the HTML text for the log entry
+                text = label.text()
+                html_content += f"<p class='log-entry'>{text}</p>"
+
+        # Append definitions or any additional sections as needed
+        html_content += """
+                <hr>
+                <h2>Definitions</h2>
+                <ul>
+                    <li><b id="TensorFlow">TensorFlow:</b> TensorFlow is an open-source machine learning framework developed by Google.</li>
+                    <li><b id="PyQt">PyQt:</b> PyQt is a set of Python bindings for Qt libraries used for GUI development.</li>
+                    <li><b id="AI">AI:</b> Artificial Intelligence (AI) refers to the simulation of human intelligence in machines.</li>
+                </ul>
+            </body>
+        </html>
+        """
+        
+        #
+
+        # Ask the user for a file location to save the HTML file
+        file_path, _ = QFileDialog.getSaveFileName(self, "Export HTML", "", "HTML Files (*.html)")
+        if file_path:
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(html_content)
+                # Confirmation Dialog
+                msg = QMessageBox(self)
+                msg.setIcon(QMessageBox.Icon.Information)
+                msg.setWindowTitle("HTML Exported")
+                msg.setText(f"HTML file has been saved successfully!\n\nLocation:\n{file_path}")
+                msg.setStandardButtons(QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Ok)
+
+                # Handle user response (Open PDF if clicked)
+                response = msg.exec()
+                if response == QMessageBox.StandardButton.Open:
+                    self.open_pdf(file_path)
+                    print(f"PDF exported successfully to {file_path}")
+            
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to export HTML:\n{e}")
+
+    def detect_log_counters(self):
+        """Detect the highest log number for each category in the currently loaded file."""
+        print("Detecting highest log counters...")
+
+        # Reset before scanning
+        detected_counters = {
+            "Problem ★": 0,
+            "Solution ■": 0,
+            "Bug ▲": 0,
+            "Changes ◆": 0,
+        }
+
+        pattern = re.compile(r"(Problem ★|Solution ■|Bug ▲|Changes ◆).*?#(\d+)\b")  # Updated regex
+
+        for index in range(self.log_list.count()):
+            item = self.log_list.item(index)
+            label = self.log_list.itemWidget(item)
+            if isinstance(label, QLabel):
+                text = self.strip_html(label.text())  # Remove HTML formatting
+                match = pattern.search(text)
+
+                if match:
+                    category = match.group(1)
+                    number = int(match.group(2))
+                    detected_counters[category] = max(detected_counters[category], number)
+                    
+        # Update class counters AFTER the loop to avoid resetting mid-detection
+        self.log_counters = detected_counters
+        print("Detected log counters:", self.log_counters)
+
+
 
 if __name__ == "__main__":
     print("Starting application...")
