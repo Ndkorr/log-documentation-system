@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QMenu, QProgressDialog, QMenuBar, QLabel, QColorDialog, QApplication, QLineEdit, QListWidgetItem, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, QInputDialog, QFileDialog, QMessageBox, QComboBox
-from PyQt6.QtCore import Qt, QSettings, QTimer, QThread, pyqtSignal, QEvent, QPoint
-from PyQt6.QtGui import QColor, QTextDocument, QTextCursor, QBrush, QShortcut, QKeySequence, QAction
+from PyQt6.QtWidgets import QMenu, QDialog, QProgressDialog, QMenuBar, QLabel, QColorDialog, QApplication, QLineEdit, QListWidgetItem, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, QInputDialog, QFileDialog, QMessageBox, QComboBox
+from PyQt6.QtCore import Qt, QRect, QPropertyAnimation, QSettings, QTimer, QThread, pyqtSignal, QEvent, QPoint
+from PyQt6.QtGui import QColor, QBrush, QShortcut, QKeySequence, QAction, QTextDocument
 from datetime import datetime
 import sys
 import psutil
@@ -11,7 +11,173 @@ from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
 import os
 import subprocess
 import re
-import fitz
+import random
+import string
+import names
+
+class RestorePointWindow(QDialog):  # Change QWidget to QDialog
+    def __init__(self, restore_points, parent=None):
+        super().__init__(parent)
+        self.restore_points = restore_points  # Store restore points
+        self.initUI()
+        self.parent_widget = parent
+
+    def initUI(self):
+        self.setWindowTitle("Restore Points")
+        self.setGeometry(100, 100, 400, 300)
+
+        self.main_layout = QVBoxLayout()  # Renamed to avoid conflict with QWidget.layout()
+        
+        # Restore Points List
+        self.restore_list = QListWidget()
+        self.restore_list.addItems(self.restore_points.keys())
+        self.main_layout.addWidget(self.restore_list)
+        
+        # Buttons Layout
+        self.buttons_layout = QHBoxLayout()
+
+        # Expand Button
+        self.expand_button = QPushButton("View Restore Point")
+        self.expand_button.clicked.connect(self.expandView)
+        self.buttons_layout.addWidget(self.expand_button)
+
+        self.main_layout.addLayout(self.buttons_layout)
+        
+        # Log Widgets (Initially Hidden)
+        self.log_container = QHBoxLayout()
+        
+        # Latest Logs (Non-editable)
+        self.latest_logs = QTextEdit()
+        self.latest_logs.setPlaceholderText("Latest Logs")
+        self.latest_logs.setReadOnly(True)  # Make it non-editable
+        
+        # Restore Point Logs (Non-editable)
+        self.restore_logs = QTextEdit()
+        self.restore_logs.setPlaceholderText("Restore Point Logs")
+        self.restore_logs.setReadOnly(True)  # Make it non-editable
+        
+        self.log_container.addWidget(self.latest_logs)
+        self.log_container.addWidget(self.restore_logs)
+        
+        self.main_layout.addLayout(self.log_container)
+        
+        # Initially hide log containers
+        self.latest_logs.setVisible(False)
+        self.restore_logs.setVisible(False)
+        
+        self.setLayout(self.main_layout)
+        
+        # center the dialog
+        self.center()
+
+    def expandView(self):
+        selected_item = self.restore_list.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self, "No Selection", "Please select a restore point to view.")
+            return
+
+        restore_point_name = selected_item.text()
+        restore_logs = self.restore_points.get(restore_point_name, [])
+
+        # Display the restore point logs
+        self.restore_logs.clear()  # Clear any existing text
+        self.restore_logs.setHtml("<br>".join(restore_logs))  # Use setHtml for rich text logs
+
+        # Display the current logs from the main application
+        if self.parent_widget:
+            current_logs = []
+            for i in range(self.parent_widget.log_list.count()):
+                item = self.parent_widget.log_list.item(i)
+                label = self.parent_widget.log_list.itemWidget(item)
+                if isinstance(label, QLabel):
+                    current_logs.append(label.text())  # Get the HTML text from QLabel
+            self.latest_logs.clear()  # Clear any existing text
+            self.latest_logs.setHtml("<br>".join(current_logs))  # Use setHtml for rich text logs
+
+        # Animate the horizontal expansion of the window
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        target_width = 800  # Target width for the expanded window
+        target_geometry = QRect(
+            (screen_geometry.width() - target_width) // 2,  # Center horizontally
+            self.geometry().y(),  # Keep the current vertical position
+            target_width,
+            self.geometry().height()
+        )
+
+        self.animation = QPropertyAnimation(self, b"geometry")
+        self.animation.setDuration(500)  # Animation duration in milliseconds
+        self.animation.setStartValue(self.geometry())
+        self.animation.setEndValue(target_geometry)
+        self.animation.finished.connect(self.showLogs)  # Show logs after animation
+        self.animation.start()
+
+    def showLogs(self):
+        # Hide restore list and show logs
+        self.restore_list.setVisible(False)
+        self.latest_logs.setVisible(True)
+        self.restore_logs.setVisible(True)
+
+        # Add "Restore this Version" button
+        self.restore_version_button = QPushButton("Restore this Version")
+        self.restore_version_button.clicked.connect(self.restoreVersion)
+        self.buttons_layout.addWidget(self.restore_version_button)
+
+        self.expand_button.setText("Back")
+        self.expand_button.clicked.disconnect()
+        self.expand_button.clicked.connect(self.collapseView)
+
+    def collapseView(self):
+        # Animate the horizontal collapse of the window
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        default_width = 400  # Default width for the window
+        target_geometry = QRect(
+            (screen_geometry.width() - default_width) // 2,  # Center horizontally
+            self.geometry().y(),  # Keep the current vertical position
+            default_width,
+            self.geometry().height()
+        )
+
+        self.animation = QPropertyAnimation(self, b"geometry")
+        self.animation.setDuration(300)  # Animation duration in milliseconds
+        self.animation.setStartValue(self.geometry())
+        self.animation.setEndValue(target_geometry)
+        self.animation.finished.connect(self.restoreDefaultView)  # Restore default view after animation
+        self.animation.start()
+
+    def restoreDefaultView(self):
+        # Show restore list and hide logs
+        self.restore_list.setVisible(True)
+        self.latest_logs.setVisible(False)
+        self.restore_logs.setVisible(False)
+
+        # Remove "Restore this Version" button
+        if hasattr(self, 'restore_version_button'):
+            self.buttons_layout.removeWidget(self.restore_version_button)
+            self.restore_version_button.deleteLater()
+            del self.restore_version_button
+
+        self.expand_button.setText("View Restore Point")
+        self.expand_button.clicked.disconnect()
+        self.expand_button.clicked.connect(self.expandView)
+
+    def restoreVersion(self):
+        selected_item = self.restore_list.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self, "No Selection", "Please select a restore point to restore.")
+            return
+
+        restore_point_name = selected_item.text()
+        if self.parent_widget:
+            self.parent_widget.restore_version(restore_point_name)
+            QMessageBox.information(self, "Restore Successful", f"Restored to version: {restore_point_name}")
+            self.close()  # Close the dialog after restoring
+
+    def center(self):
+        """Center the dialog on the screen."""
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        window_geometry = self.frameGeometry()
+        window_geometry.moveCenter(screen_geometry.center())
+        self.move(window_geometry.topLeft())
 
 class LogTextEdit(QTextEdit):
     logSubmitted = pyqtSignal()
@@ -62,6 +228,18 @@ class LogTextEdit(QTextEdit):
                 self.parent_widget.log_type_selector.setCurrentIndex(index + 1)
             event.accept()
         
+        elif event.key() == Qt.Key.Key_Z and (event.modifiers() & Qt.KeyboardModifier.ControlModifier) and self.parent_widget:
+            # Undo action
+            if self.parent_widget:
+                self.parent_widget.undo()
+            event.accept()
+        
+        elif event.key() == Qt.Key.Key_Y and (event.modifiers() & Qt.KeyboardModifier.ControlModifier) and self.parent_widget:
+            # Redo action
+            if self.parent_widget:
+                self.parent_widget.redo()
+            event.accept()
+        
         else:
             super().keyPressEvent(event)  # Process other keys normally
             
@@ -109,6 +287,13 @@ class LogApp(QWidget):
         self.user_name = ""
         self.log_type = "General"
         
+        # Add Undo/Redo Stacks
+        self.undo_stack = []  # Stores previous log states
+        self.redo_stack = []  # Stores undone states
+        
+        # **Store entire log restore points**
+        self.restore_points = {}  # {version_name: log_snapshot}
+        
         # Initialize counters for different log types
         self.log_counters = {
             "Problem ★": 0,
@@ -143,6 +328,21 @@ class LogApp(QWidget):
         help_action = QAction("How to Use", self)
         help_action.triggered.connect(self.show_help)
         help_menu.addAction(help_action)
+        
+        # **Version Control Menu (Fixed Naming)**
+        version_menu = QMenu("Version Control", self)
+        menu_bar.addMenu(version_menu)
+
+        # Restore Menu
+        save_version_action = QAction("Create Restore Point", self)
+        save_version_action.triggered.connect(self.create_restore_point)
+        
+        # **View Log Versions Action (Fix Name & Connect Correctly)**
+        view_versions_action = QAction("View Log Versions", self)
+        view_versions_action.triggered.connect(self.view_restore_points)
+    
+        version_menu.addAction(view_versions_action)
+        version_menu.addAction(save_version_action)
     
     def update_recent_files_menu(self):
         self.recent_menu.clear()  # Clear previous menu items
@@ -298,10 +498,18 @@ class LogApp(QWidget):
         self.export_pdf_shortcut = QShortcut(QKeySequence("Ctrl+P"), self)
         self.export_pdf_shortcut.activated.connect(self.export_to_pdf)
         
+        # Hotkey for Undo
+        undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        undo_shortcut.activated.connect(self.undo)
+
+        # Hotkey for Redo
+        redo_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self)
+        redo_shortcut.activated.connect(self.redo)
+        
         # Auto Save Functionality
         self.auto_save_timer = QTimer(self)
         self.auto_save_timer.timeout.connect(self.auto_save_logs)
-        self.auto_save_timer.start(30 * 1000)  # 30 sec in milliseconds
+        self.auto_save_timer.start(60 * 1000)  # 60 sec in milliseconds
     
     def center(self):
         screen_geometry = QApplication.primaryScreen().availableGeometry()
@@ -411,6 +619,11 @@ class LogApp(QWidget):
     def add_log(self):
         log_text = self.log_input.toPlainText().strip()
         if log_text:
+            
+            # Save current state before modification
+            self.undo_stack.append(self.get_log_state())  
+            self.redo_stack.clear()  # Clear redo stack when adding a new log
+            
             print("Adding log entry...")
             timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%SH]")
             additional_info = ""
@@ -478,6 +691,10 @@ class LogApp(QWidget):
             self.log_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             self.log_list.setHorizontalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
             
+            # Automatically create a restore point every 10 logs
+            if self.log_list.count() % 5 == 0:
+                self.auto_create_restore_point()
+            
             self.log_input.clear()
             print("Log entry added successfully.")
             
@@ -503,11 +720,11 @@ class LogApp(QWidget):
         if isinstance(label, QLabel):
             # Get the plain text version of the current log entry
             current_text = self.strip_html(label.text())
-        
+    
             # Open a dialog pre-filled with the current log text
             plain_text, ok = QInputDialog.getText(self, "Edit Log", "Modify your log entry:", text="")
             if ok and plain_text.strip():
-                timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+                timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%SH]")
                 category = self.category_selector.currentText()
                 indicators = {"Problem ★": "★", "Solution ■": "■", "Bug ▲": "▲", "Changes ◆": "◆", "Just Details": ""}
                 category_icon = indicators.get(category, "")
@@ -670,16 +887,40 @@ class LogApp(QWidget):
         item = self.log_list.itemAt(pos)
         if item:
             menu = QMenu()
+            # Get the selected log text
+            label = self.log_list.itemWidget(item)
+            log_text = self.strip_html(label.text()) if isinstance(label, QLabel) else ""
+            
+            # Check if the log is a Bug or Problem
+            is_resolvable = "★" in log_text or "▲" in log_text
+            
             delete_action = menu.addAction("Delete")
             edit_action = menu.addAction("Edit")
+            
+            # Add "Resolve" option only for Bugs & Problems
+            resolve_action = None
+            if is_resolvable:
+                resolve_action = menu.addAction("Resolve")
+            
             action = menu.exec(self.log_list.viewport().mapToGlobal(pos))
+            
+            if action is None:
+                return  # Exit function without doing anything
+            
             if action == delete_action:
                 row = self.log_list.row(item)
                 self.log_list.takeItem(row)
                 print("Log entry deleted.")
+                
             elif action == edit_action:
                 self.edit_log(item)
                 print("Log entry edited.")
+                
+            elif action == resolve_action:
+                self.resolve_log(item)
+                print("Log entry resolved.")
+                
+            
     
     def save_color_to_config(self):
         config = {"text_color": self.text_color.name() if hasattr(self, 'text_color') else "#008000"}  # Default to green
@@ -1032,7 +1273,276 @@ class LogApp(QWidget):
         # Update class counters AFTER the loop to avoid resetting mid-detection
         self.log_counters = detected_counters
         print("Detected log counters:", self.log_counters)
+        
+    
+    def resolve_log(self, item):
+        """Mark a Bug or Problem as Resolved."""
+        label = self.log_list.itemWidget(item)
+    
+        if isinstance(label, QLabel):
+            current_text = label.text()  # Get **existing HTML** (to keep links)
 
+            # Check if it's already resolved
+            if "Resolved" in current_text:
+                QMessageBox.information(self, "Already Resolved", "This log entry is already marked as resolved.")
+                return
+
+            # Modify the text to add "(Resolved)" with green background only for the word "Resolved"
+            updated_text = f'{current_text} <span style="background-color: green; color: white;">Resolved</span>'
+            label.setText(updated_text)
+            print("Log entry marked as resolved with green background only for the word 'Resolved'.")
+
+    def get_log_state(self):
+        """Returns a snapshot of the current log list (for undo/redo)."""
+        state = []
+        for index in range(self.log_list.count()):
+            item = self.log_list.item(index)
+            label = self.log_list.itemWidget(item)
+            if isinstance(label, QLabel):
+                state.append(label.text())  # Store log text
+        return state
+
+    def undo(self):
+        if self.undo_stack:
+            self.redo_stack.append(self.get_log_state())  # Save current state before undoing
+            last_state = self.undo_stack.pop()  # Get the last saved state
+            self.restore_log_state(last_state)
+            print("Undo performed.")
+        else:
+            print("Nothing to undo.")
+    
+    def redo(self):
+        if self.redo_stack:
+            self.undo_stack.append(self.get_log_state())  # Save current state before redoing
+            next_state = self.redo_stack.pop()  # Get the redo state
+            self.restore_log_state(next_state)
+            print("Redo performed.")
+        else:
+            print("Nothing to redo.")
+            
+    def restore_log_state(self, state):
+        """Restores the log list to a previous state."""
+        self.log_list.clear()  # Clear current logs
+        for log in state:
+            label = QLabel()
+            label.setText(log)
+            label.setTextFormat(Qt.TextFormat.RichText)
+            label.setOpenExternalLinks(False)
+            label.linkActivated.connect(self.handle_internal_link)
+            label.setWordWrap(False)
+
+            item = QListWidgetItem()
+            self.log_list.addItem(item)
+            self.log_list.setItemWidget(item, label)
+        
+    def create_restore_point(self):
+        """Save the current logs as a restore point with a timestamped name."""
+        version_name, ok = QInputDialog.getText(self, "Create Restore Point", "Enter a version name:")
+    
+        if not ok or not version_name.strip():
+            return  # User canceled
+
+        # Generate 6 random alphanumeric characters
+        random_prefix = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
+        
+        # Get the current date in YYYY-MM-DD format
+        current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%SH")
+        
+        version_name = f"[{current_date}]  -  {version_name.strip()}  |  {random_prefix}"
+        
+        # Capture all logs in a list
+        log_snapshot = []
+        for i in range(self.log_list.count()):
+            item = self.log_list.item(i)
+            label = self.log_list.itemWidget(item)
+            if isinstance(label, QLabel):
+                log_snapshot.append(label.text())  # Save formatted log entry
+
+        # Store the snapshot
+        self.restore_points[version_name] = log_snapshot
+        print(f"Restore point '{version_name}' saved.")
+
+    def view_restore_points(self):
+        """Show the Restore Points window."""
+        if not self.restore_points:
+            QMessageBox.information(self, "No Restore Points", "No restore points available.")
+            return
+
+        self.restore_window = RestorePointWindow(self.restore_points, self)
+        self.restore_window.show()
+
+    def compare_versions(self, version_name):
+        """Compare a restore point with the latest log version."""
+        if version_name not in self.restore_points:
+            QMessageBox.warning(self, "Invalid Version", "This restore point does not exist.")
+            return
+
+        old_logs = self.restore_points[version_name]
+        new_logs = [self.log_list.itemWidget(self.log_list.item(i)).text() for i in range(self.log_list.count())]
+
+        differences = []
+        for i, (old_log, new_log) in enumerate(zip(old_logs, new_logs)):
+            if old_log != new_log:
+                differences.append(f"Line {i+1} changed:\n- OLD: {old_log}\n- NEW: {new_log}\n")
+
+        # Find logs added after the saved version
+        if len(new_logs) > len(old_logs):
+            for i in range(len(old_logs), len(new_logs)):
+                differences.append(f"New log added: {new_logs[i]}")
+
+        if differences:
+            QMessageBox.information(self, "Comparison Result", "\n\n".join(differences))
+        else:
+            QMessageBox.information(self, "No Differences", "The selected restore point matches the latest version.")
+
+    def restore_version(self, version_name):
+        """Restore logs to a selected restore point."""
+        if version_name not in self.restore_points:
+            QMessageBox.warning(self, "Invalid Version", "This restore point does not exist.")
+            return
+
+        self.log_list.clear()  # Clear current logs
+        for log_entry in self.restore_points[version_name]:
+            label = QLabel()
+            label.setText(log_entry)
+            label.setTextFormat(Qt.TextFormat.RichText)
+            label.setOpenExternalLinks(False)
+            label.linkActivated.connect(self.handle_internal_link)
+            label.setWordWrap(False)
+
+            item = QListWidgetItem()
+            self.log_list.addItem(item)
+            self.log_list.setItemWidget(item, label)
+
+        print(f"Logs restored to version: {version_name}")
+
+    def auto_create_restore_point(self):
+        """Automatically create a restore point with a randomly generated name."""
+        # Predefined lists of names
+        person = names.get_first_name()
+        places = [
+            "New York", "Paris", "London", "Tokyo", "Beijing", "Sydney", "Los Angeles", "Moscow", "Berlin", "Dubai",
+            "Rome", "Cairo", "Rio de Janeiro", "Seoul", "Bangkok", "Toronto", "Mexico City", "Singapore", "Hong Kong", "Madrid",
+            "Barcelona", "Mumbai", "Delhi", "Shanghai", "Istanbul", "Lisbon", "Vienna", "Amsterdam", "Stockholm", "Oslo",
+            "Helsinki", "Copenhagen", "Dublin", "Edinburgh", "Venice", "Prague", "Budapest", "Warsaw", "Athens", "Brussels",
+            "Zurich", "Geneva", "Cape Town", "Johannesburg", "Buenos Aires", "Santiago", "Lima", "Bogotá", "Quito", "Havana",
+            "Kuala Lumpur", "Jakarta", "Manila", "Ho Chi Minh City", "Taipei", "Osaka", "Kyoto", "Kolkata", "Chennai", "Jakarta",
+            "San Francisco", "Chicago", "Boston", "Houston", "Miami", "Las Vegas", "Seattle", "Philadelphia", "Washington D.C.", "Atlanta",
+            "San Diego", "Phoenix", "Denver", "Portland", "Honolulu", "Vancouver", "Montreal", "Ottawa", "Calgary", "Quebec City",
+            "Guadalajara", "Monterrey", "Medellín", "Recife", "Brasília", "Sao Paulo", "Curitiba", "Salvador", "Fortaleza", "Montevideo",
+            "Sofia", "Bucharest", "Belgrade", "Sarajevo", "Zagreb", "Ljubljana", "Skopje", "Tallinn", "Riga", "Vilnius",
+            "Bratislava", "Luxembourg", "San Juan", "Reykjavik", "Anchorage", "Honolulu", "Casablanca", "Marrakech", "Tunis", "Algiers",
+            "Accra", "Lagos", "Nairobi", "Addis Ababa", "Khartoum", "Luanda", "Harare", "Dar es Salaam", "Kampala", "Dakar",
+            "Doha", "Riyadh", "Mecca", "Medina", "Muscat", "Abu Dhabi", "Kuwait City", "Tehran", "Baghdad", "Damascus",
+            "Beirut", "Amman", "Jerusalem", "Gaza", "Ankara", "Baku", "Tbilisi", "Yerevan", "Astana", "Bishkek",
+            "Tashkent", "Ashgabat", "Dushanbe", "Ulaanbaatar", "Novosibirsk", "Yekaterinburg", "Kazan", "Nizhny Novgorod", "Saint Petersburg", "Sochi",
+            "Vladivostok", "Hanoi", "Yangon", "Phnom Penh", "Vientiane", "Male", "Dhaka", "Thimphu", "Colombo", "Port Moresby",
+            "Hobart", "Wellington", "Christchurch", "Auckland", "Suva", "Port Vila", "Apia", "Nuku'alofa", "Tarawa", "Majuro",
+            "Palikir", "Honiara", "Jakarta", "Makassar", "Medan", "Surabaya", "Bali", "Bandung", "Davao", "Cebu",
+            "Baguio", "Iloilo", "Vigan", "Zamboanga", "Tacloban", "Legazpi", "Cagayan de Oro", "Dumaguete", "Puerto Princesa", "Tagaytay",
+            "Bacolod", "Pampanga", "Subic", "General Santos", "Batangas", "Santa Cruz", "Antipolo", "Lucena", "Tuguegarao", "Butuan"
+        ]
+        foods = [
+            "Pizza", "Burger", "Pasta", "Sushi", "Tacos", "Ramen", "Dumplings", "Pancakes", "Fried Chicken", "Steak",
+            "Salmon", "Lasagna", "Grilled Cheese", "Biryani", "Falafel", "Chow Mein", "Pho", "Shawarma", "Hotdog", "Samosa",
+            "Mac and Cheese", "BBQ Ribs", "Peking Duck", "Ceviche", "Paella", "Tuna Tartare", "Goulash", "Jambalaya",
+            "Carbonara", "Pad Thai", "Eggs Benedict", "Croissant", "Bruschetta", "Curry", "Kebab", "Kimchi", "Gyoza",
+            "Miso Soup", "Bulgogi", "Fish and Chips", "Quesadilla", "Enchiladas", "Tamales", "Chili Con Carne", "Fajitas",
+            "Gumbo", "Clam Chowder", "Meatballs", "Ratatouille", "Caprese Salad", "Cordon Bleu", "Poutine", "Pierogi",
+            "Beef Stroganoff", "Hummus", "Baba Ganoush", "Empanadas", "Tortellini", "Arroz Con Pollo", "Moussaka", "Frittata",
+            "Shepherd’s Pie", "Jollof Rice", "Satay", "Arepas", "Tandoori Chicken", "Chimichanga", "Pita Bread", "Muffins",
+            "Cupcakes", "Brownies", "Cheesecake", "Chocolate Cake", "Donuts", "Apple Pie", "Baklava", "Churros", "Gelato",
+            "Creme Brulee", "Tiramisu", "Mango Sticky Rice", "Pavlova", "Gulab Jamun", "Macarons", "Strawberry Shortcake",
+            "Panna Cotta", "Fruit Salad", "Waffles", "French Toast", "Rice Pudding", "Matcha Ice Cream", "Banana Bread",
+            "Carrot Cake", "Scones", "Eclairs", "Mochi", "Halva", "Nougat", "Truffles", "Pecan Pie", "Custard Tart",
+            "Marshmallow", "Chocolate Fondue", "Lemon Tart", "Pretzels", "Cornbread", "Bagels", "Garlic Bread", "Spring Rolls",
+            "Edamame", "Cabbage Rolls", "Sausages", "Stuffed Peppers", "Meatloaf", "Corn on the Cob", "Pickles", "Baked Beans",
+            "Coleslaw", "Potato Salad", "Hush Puppies", "Onion Rings", "Deviled Eggs", "Sushi Rolls", "Tofu", "Tempura",
+            "Tteokbokki", "Shakshuka", "Lentil Soup", "Seafood Boil", "Gnocchi", "Borscht", "Lamb Chops", "Chicken Tikka",
+            "Vegetable Stir Fry", "Teriyaki Chicken", "Caesar Salad", "Cobb Salad", "Greek Salad", "Tabbouleh", "Poke Bowl",
+            "Bento Box", "Lobster Bisque", "Calamari", "Coconut Shrimp", "Stuffed Mushrooms", "Artichoke Dip", "Nachos",
+            "Garlic Butter Shrimp", "Oysters Rockefeller", "Scallops", "Bratwurst", "Duck Confit", "Beef Wellington",
+            "Surf and Turf", "Sweet and Sour Chicken", "Kung Pao Chicken", "Sesame Chicken", "Honey Glazed Ham",
+            "Roast Turkey", "Prime Rib", "Lamb Kebab", "Fried Rice", "Udon Noodles", "Okonomiyaki", "Chicken Parmesan",
+            "Baked Ziti", "Cornish Pasty", "Croquettes", "Tostones", "Pho Ga", "Sopa de Lima", "Kimchi Jjigae",
+            "Vichyssoise", "Bouillabaisse", "Pork Adobo", "Chicken Inasal", "Pancit", "Bicol Express", "Halo-Halo",
+            "Leche Flan", "Turon", "Ensaymada", "Bibingka", "Kare-Kare", "Sinangag", "Longganisa", "Laing", "Pandesal",
+            "Sisig", "Chicharon", "Taho", "Lugaw", "Dinuguan", "Crispy Pata", "Inihaw na Liempo", "Pinakbet", "Ginataan",
+            "Lumpia", "Arroz Caldo", "Champorado", "Bangus", "Sinigang", "Bulalo", "Dinengdeng", "Lechon Kawali", "Menudo",
+            "Paksiw na Baboy", "Tortang Talong", "Ginataang Hipon", "Kaldereta", "Batchoy"
+        ]
+        animals = [
+            "Lion", "Tiger", "Elephant", "Zebra", "Panda", "Kangaroo", "Giraffe", "Dolphin", "Eagle", "Wolf",
+            "Cheetah", "Bear", "Rhinoceros", "Hippopotamus", "Crocodile", "Jaguar", "Leopard", "Ostrich", "Parrot", "Otter",
+            "Penguin", "Lemur", "Koala", "Sloth", "Armadillo", "Chameleon", "Gorilla", "Chimpanzee", "Orangutan", "Peacock",
+            "Buffalo", "Bison", "Moose", "Antelope", "Camel", "Caribou", "Gazelle", "Hyena", "Iguana", "Komodo Dragon",
+            "Lynx", "Meerkat", "Narwhal", "Ocelot", "Platypus", "Quokka", "Raccoon", "Seahorse", "Tasmanian Devil", "Walrus",
+            "Yak", "Anaconda", "Barracuda", "Blue Whale", "Clownfish", "Dugong", "Emu", "Fennec Fox", "Gecko", "Hammerhead Shark",
+            "Indian Cobra", "Jackal", "King Cobra", "Lobster", "Macaw", "Numbat", "Octopus", "Pufferfish", "Quail", "Raven",
+            "Scorpion", "Tarantula", "Uakari", "Vulture", "Wolverine", "Xerus", "Yellowfin Tuna", "Zorilla", "Alligator", "Badger",
+            "Caiman", "Dingo", "Echidna", "Ferret", "Goat", "Hedgehog", "Indian Star Tortoise", "Jellyfish", "Koi Fish", "Llama",
+            "Mongoose", "Nightingale", "Okapi", "Pangolin", "Quetzal", "Roadrunner", "Siberian Husky", "Toucan", "Urial", "Vicuña",
+            "Weasel", "X-ray Tetra", "Yak", "Zebra Shark", "Anglerfish", "Butterfly", "Catfish", "Dragonfly", "Electric Eel",
+            "Firefly", "Goldfish", "Hermit Crab", "Indian Elephant", "Japanese Spider Crab", "Killer Whale", "Leafy Seadragon",
+            "Mandrill", "Nautilus", "Owl", "Pika", "Queen Angelfish", "Red Panda", "Salamander", "Tarsier", "Unicornfish",
+            "Vampire Bat", "Woodpecker", "Xenopus", "Yeti Crab", "Zebra Finch", "Aye-Aye", "Basilisk", "Cuttlefish", "Dung Beetle",
+            "Eel", "Fossa", "Galápagos Tortoise", "Horseshoe Crab", "Indian Peafowl", "Javan Rhino", "Kiwi", "Leafcutter Ant",
+            "Manatee", "Nudibranch", "Oyster", "Peregrine Falcon", "Quagga", "Rattlesnake", "Swan", "Tiger Shark", "Uromastyx",
+            "Vampire Squid", "Wombat", "Xenarthra", "Yabby", "Zebra Mussel", "Arabian Oryx", "Bobcat", "Coyote", "Dhole",
+            "Eurasian Lynx", "Flying Squirrel", "Groundhog", "Harpy Eagle", "Indian Starling", "Japanese Macaque",
+            "Kakapo", "Lace Monitor", "Margay", "Nilgai", "Osprey", "Potoroo", "Quillback", "Ringtail", "Snow Leopard",
+            "Tree Kangaroo", "Upland Sandpiper", "Volcano Rabbit", "Warty Frogfish", "Xenops", "Yapok", "Zebra Swallowtail",
+            "African Wild Dog", "Blue Jay", "Capybara", "Dusky Dolphin", "Eastern Coral Snake", "Frigatebird", "Greater Kudu",
+            "Hawaiian Monk Seal", "Indian Gharial", "Javanese Cat", "Kermode Bear", "Long-Eared Owl", "Mexican Axolotl",
+            "Northern Cardinal", "Ocelated Turkey", "Pelican", "Quokka", "Rufous Hummingbird", "Sandhill Crane",
+            "Tufted Puffin", "Umbrella Cockatoo", "Venezuelan Poodle Moth", "Western Green Mamba", "Xantus's Hummingbird",
+            "Yellow Mongoose", "Zebra Duiker"
+        ]
+        
+        
+        # Randomly select one name from each category
+        random_place = random.choice(places)
+        random_food = random.choice(foods)
+        random_animal = random.choice(animals)
+
+        random_choice = [random_animal, random_food, random_place, person]
+        #random_choices = random.choice(random_choice)
+        
+        # Store selected name on a set
+        selected_names = set()
+        
+        # Create a function to remove picked names on a set
+        def pick_unique_name():
+            while True:
+                # Choose a random name from the selected category
+                random_choices = random.choice(random_choice)
+
+                # Ensure the name is unique
+                if random_choices not in selected_names:
+                    selected_names.add(random_choices)  # Mark as used
+                    random_choice.remove(random_choices)  # Remove from list
+                    return random_choices
+        
+        # Generate 6 random alphanumeric characters
+        random_prefix = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
+        
+        # Get the current date in YYYY-MM-DD format
+        current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%SH")
+        
+        # Combine the selected names to form a unique restore point name
+        restore_point_name = f"[{current_date}]  -  {pick_unique_name()}  |  {random_prefix}"
+
+        # Capture all logs in a list
+        log_snapshot = []
+        for i in range(self.log_list.count()):
+            item = self.log_list.item(i)
+            label = self.log_list.itemWidget(item)
+            if isinstance(label, QLabel):
+                log_snapshot.append(label.text())  # Save formatted log entry
+
+        # Store the snapshot
+        self.restore_points[restore_point_name] = log_snapshot
+        print(f"Automatic restore point '{restore_point_name}' created.")
 
 
 if __name__ == "__main__":
