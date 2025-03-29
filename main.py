@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QMenu, QDialog, QProgressDialog, QMenuBar, QLabel, QColorDialog, QApplication, QLineEdit, QListWidgetItem, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, QInputDialog, QFileDialog, QMessageBox, QComboBox
 from PyQt6.QtCore import Qt, QRect, QPropertyAnimation, QSettings, QTimer, QThread, pyqtSignal, QEvent, QPoint
-from PyQt6.QtGui import QColor, QBrush, QShortcut, QKeySequence, QAction, QTextDocument
+from PyQt6.QtGui import QColor, QFont, QBrush, QShortcut, QKeySequence, QAction, QTextDocument
 from datetime import datetime
 import sys
 import psutil
@@ -15,6 +15,159 @@ import random
 import string
 import names
 
+
+class DictionaryDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Dictionary")
+        self.setGeometry(100, 100, 700, 450)
+
+        self.main_layout = QHBoxLayout()
+        
+        # Keyword List
+        self.keyword_list = QListWidget(self)
+        self.add_static_item("Keywords")  # Add static title
+        self.keyword_list.itemClicked.connect(self.display_definition)
+        self.keyword_list.setFixedWidth(200)  # Set minimum width for keyword list
+        self.main_layout.addWidget(self.keyword_list)
+        
+        # Definition Section
+        self.definition_layout = QVBoxLayout()
+        self.definition_list = QListWidget(self)
+        self.definition_layout.addWidget(self.definition_list)
+        
+        # Buttons
+        self.button_layout = QHBoxLayout()
+        self.add_button = QPushButton("Add", self)
+        self.add_button.clicked.connect(self.add_keyword)
+        self.button_layout.addWidget(self.add_button)
+        
+        self.delete_button = QPushButton("Delete", self)
+        self.delete_button.clicked.connect(self.delete_keyword)
+        self.button_layout.addWidget(self.delete_button)
+        
+        self.definition_layout.addLayout(self.button_layout)
+        self.main_layout.addLayout(self.definition_layout)
+        
+        self.setLayout(self.main_layout)
+        self.dictionary = {}  # Store definitions
+        
+        self.center()
+
+    def add_list_item(self, word):
+        item_widget = QWidget()
+        layout = QHBoxLayout()
+        label = QLabel(word)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(label)
+        layout.setContentsMargins(5, 2, 5, 2)
+        item_widget.setLayout(layout)
+        
+        list_item = QListWidgetItem(word)
+        list_item.setSizeHint(item_widget.sizeHint())
+        
+        self.keyword_list.addItem(list_item)
+        
+    
+    def add_static_item(self, text):
+        """ Adds a non-clickable, non-deletable item to the list """
+        static_item = QListWidgetItem(text)
+        static_item.setFlags(Qt.ItemFlag.NoItemFlags)  # Disable interactions
+        static_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft)  # Center text
+        static_item.setBackground(QBrush(QColor(220, 220, 220)))
+        static_item.setFont(QLabel().font())  # Use default font
+        static_item.setForeground(QBrush(QColor(0, 0, 0)))  # Black text color
+        static_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))  # Bold font
+        static_item.setData(Qt.ItemDataRole.UserRole, "static")  # Mark as static
+        self.keyword_list.addItem(static_item)  # Add to list
+        
+    def add_keyword(self):
+        # Prompt user for a keyword
+        word, ok = QInputDialog.getText(self, "Add Keyword", "Enter new keyword:")
+    
+        if ok and word.strip():  # Ensure input is not empty
+            word = word.strip()
+
+            # Check if keyword already exists
+            if word in self.dictionary:
+                QMessageBox.warning(self, "Duplicate Keyword", "This keyword already exists!")
+                return
+
+            # Prompt user for a definition
+            definition, ok_def = QInputDialog.getText(self, "Add Definition", f"Enter definition for '{word}':")
+        
+            if ok_def and definition.strip():
+                definition = definition.strip()
+
+                # Store in dictionary
+                self.dictionary[word] = definition
+
+                # Add keyword visually
+                self.add_list_item(word)
+
+                # Auto-select new item
+                self.select_keyword(word)
+    
+    def select_keyword(self, word):
+        """Find and select the keyword in the list."""
+        for i in range(self.keyword_list.count()):
+            item = self.keyword_list.item(i)
+            if item and item.text() == word:
+                self.keyword_list.setCurrentRow(i)
+                self.display_definition(self.keyword_list.item(i))
+                break
+            
+    def delete_keyword(self):
+        """Delete the selected keyword and its definition."""
+        selected_item = self.keyword_list.currentItem()
+        if selected_item:
+            word = selected_item.text()
+            if word in self.dictionary:
+                del self.dictionary[word]  # Remove the keyword from the dictionary
+            self.keyword_list.takeItem(self.keyword_list.row(selected_item))  # Remove the item from the list
+            self.definition_list.clear()  # Clear the definition area
+
+    def display_definition(self, item):
+        """Display the definition of the selected keyword."""
+        word = item.text()  # Get the keyword text from the clicked item
+        definition = self.dictionary.get(word, "No definition available.")  # Fetch the definition
+
+        # Clear previous definitions
+        self.definition_list.clear()
+
+        # Create a custom widget with QLabel to display the formatted text
+        item_widget = QWidget()
+        layout = QVBoxLayout()
+
+        title_label = QLabel(f"<b>{word}:</b>")  # Styled title with the keyword
+        text_label = QLabel(definition)
+        text_label.setWordWrap(True)  # Allow multiline text
+        
+        # Adjust font size for the definition text
+        font = QFont()
+        font.setPointSize(11)  # Set the desired font size
+        text_label.setFont(font)
+
+        layout.addWidget(title_label)
+        layout.addWidget(text_label)
+        layout.setContentsMargins(5, 2, 5, 2)
+
+        item_widget.setLayout(layout)
+
+        list_item = QListWidgetItem()
+        list_item.setSizeHint(item_widget.sizeHint())
+
+        self.definition_list.addItem(list_item)
+        self.definition_list.setItemWidget(list_item, item_widget)
+        
+    def center(self):
+        """Center the dialog on the screen."""
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        window_geometry = self.frameGeometry()
+        window_geometry.moveCenter(screen_geometry.center())
+        self.move(window_geometry.topLeft())
+
+
 class RestorePointWindow(QDialog):  # Change QWidget to QDialog
     def __init__(self, restore_points, parent=None):
         super().__init__(parent)
@@ -25,7 +178,7 @@ class RestorePointWindow(QDialog):  # Change QWidget to QDialog
     def initUI(self):
         self.setWindowTitle("Restore Points")
         self.setGeometry(100, 100, 400, 300)
-
+        
         self.main_layout = QVBoxLayout()  # Renamed to avoid conflict with QWidget.layout()
         
         # Restore Points List
@@ -81,7 +234,7 @@ class RestorePointWindow(QDialog):  # Change QWidget to QDialog
 
         # Display the restore point logs
         self.restore_logs.clear()  # Clear any existing text
-        self.restore_logs.setHtml("<br>".join(restore_logs))  # Use setHtml for rich text logs
+        self.restore_logs.setHtml(f"<b>Restore Point</b><br>" + "<br>".join(restore_logs))  # Add label and use setHtml for rich text logs
 
         # Display the current logs from the main application
         if self.parent_widget:
@@ -92,7 +245,7 @@ class RestorePointWindow(QDialog):  # Change QWidget to QDialog
                 if isinstance(label, QLabel):
                     current_logs.append(label.text())  # Get the HTML text from QLabel
             self.latest_logs.clear()  # Clear any existing text
-            self.latest_logs.setHtml("<br>".join(current_logs))  # Use setHtml for rich text logs
+            self.latest_logs.setHtml(f"<b>Latest Logs</b><br>" + "<br>".join(current_logs))  # Use setHtml for rich text logs
 
         # Animate the horizontal expansion of the window
         screen_geometry = QApplication.primaryScreen().availableGeometry()
@@ -110,6 +263,8 @@ class RestorePointWindow(QDialog):  # Change QWidget to QDialog
         self.animation.setEndValue(target_geometry)
         self.animation.finished.connect(self.showLogs)  # Show logs after animation
         self.animation.start()
+        
+        self.setWindowTitle(f"{restore_point_name}")  # Update title
 
     def showLogs(self):
         # Hide restore list and show logs
@@ -138,11 +293,13 @@ class RestorePointWindow(QDialog):  # Change QWidget to QDialog
         )
 
         self.animation = QPropertyAnimation(self, b"geometry")
-        self.animation.setDuration(300)  # Animation duration in milliseconds
+        self.animation.setDuration(1000)  # Animation duration in milliseconds
         self.animation.setStartValue(self.geometry())
         self.animation.setEndValue(target_geometry)
         self.animation.finished.connect(self.restoreDefaultView)  # Restore default view after animation
         self.animation.start()
+        
+        self.setWindowTitle("Restore Points")  # Update title
 
     def restoreDefaultView(self):
         # Show restore list and hide logs
@@ -178,6 +335,7 @@ class RestorePointWindow(QDialog):  # Change QWidget to QDialog
         window_geometry = self.frameGeometry()
         window_geometry.moveCenter(screen_geometry.center())
         self.move(window_geometry.topLeft())
+    
 
 class LogTextEdit(QTextEdit):
     logSubmitted = pyqtSignal()
@@ -283,6 +441,7 @@ class LogApp(QWidget):
         print("Initializing LogApp...")
         self.load_color_from_config()  # Load the saved color
         self.init_ui()
+        self.load_keyword_definitions()  # Load keyword definitions
         self.current_file = None
         self.user_name = ""
         self.log_type = "General"
@@ -328,6 +487,10 @@ class LogApp(QWidget):
         help_action = QAction("How to Use", self)
         help_action.triggered.connect(self.show_help)
         help_menu.addAction(help_action)
+        
+        dictionary_action = QAction("Dictionary", self)
+        dictionary_action.triggered.connect(self.open_dictionary)
+        help_menu.addAction(dictionary_action)
         
         # **Version Control Menu (Fixed Naming)**
         version_menu = QMenu("Version Control", self)
@@ -410,7 +573,7 @@ class LogApp(QWidget):
         combo_layout.addWidget(self.log_type_selector)
         
         self.category_selector = QComboBox(self)
-        self.category_selector.addItems(["Just Details", "Problem ★", "Solution ■", "Bug ▲", "Changes ◆"])
+        self.category_selector.addItems(["Just Details", "Problem ★", "Bug ▲", "Changes ◆"])
         combo_layout.addWidget(self.category_selector)
         
         layout.addLayout(combo_layout)
@@ -788,6 +951,9 @@ class LogApp(QWidget):
             self.save_recent_file(file_path)
             self.log_list.clear()  # Clear the current log list
             
+            # Load restore points
+            self.load_restore_points()
+            
             # Try loading counters from JSON
             json_file = file_path.replace(".lds", ".json")
             if os.path.exists(json_file):
@@ -892,15 +1058,20 @@ class LogApp(QWidget):
             log_text = self.strip_html(label.text()) if isinstance(label, QLabel) else ""
             
             # Check if the log is a Bug or Problem
-            is_resolvable = "★" in log_text or "▲" in log_text
+            is_resolvable = "▲" in log_text
             
             delete_action = menu.addAction("Delete")
             edit_action = menu.addAction("Edit")
             
-            # Add "Resolve" option only for Bugs & Problems
-            resolve_action = None
+            # Add "Fix" option only for Bugs
+            fix_action = None
             if is_resolvable:
-                resolve_action = menu.addAction("Resolve")
+                fix_action = menu.addAction("Fix")
+            
+            # Add "Solution" option only for Problems
+            solution_action = None
+            if "★" in log_text:
+                solution_action = menu.addAction("Add Solution")
             
             action = menu.exec(self.log_list.viewport().mapToGlobal(pos))
             
@@ -916,11 +1087,57 @@ class LogApp(QWidget):
                 self.edit_log(item)
                 print("Log entry edited.")
                 
-            elif action == resolve_action:
+            elif action == fix_action:
                 self.resolve_log(item)
                 print("Log entry resolved.")
                 
+            elif action == solution_action:
+                self.add_solution(item)
+                print("Solution added for the problem.")
+
+    def add_solution(self, item):
+        """Add a solution log corresponding to a problem log and mark it as Resolved."""
+        label = self.log_list.itemWidget(item)
+        if isinstance(label, QLabel):
+            problem_text = self.strip_html(label.text())
             
+            # Check if the problem is already resolved
+            if "Resolved" in problem_text:
+                QMessageBox.information(self, "Already Resolved", "This problem is already marked as resolved.")
+                return
+            
+            match = re.search(r"★.*?#(\d+)", problem_text)
+            if match:
+                problem_number = match.group(1)
+                solution_text, ok = QInputDialog.getText(self, "Add Solution", f"Enter solution for Problem #{problem_number}:")
+                if ok and solution_text.strip():
+                    # Add the solution log
+                    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%SH]")
+                    solution_entry = (
+                        f'<span style="color:yellow;">■</span> '
+                        f'<span style="color:black;">{timestamp} [Solution] {solution_text.strip()} - Solution #{problem_number}</span>'
+                    )
+                    solution_label = QLabel()
+                    solution_label.setText(solution_entry)
+                    solution_label.setTextFormat(Qt.TextFormat.RichText)
+                    solution_label.setOpenExternalLinks(False)
+                    solution_label.linkActivated.connect(self.handle_internal_link)
+                    solution_label.setWordWrap(False)
+
+                    solution_item = QListWidgetItem()
+                    self.log_list.addItem(solution_item)
+                    self.log_list.setItemWidget(solution_item, solution_label)
+                    self.log_list.scrollToItem(solution_item)
+
+                    # Mark the problem log as Resolved
+                    updated_problem_text = (
+                        f'{label.text()} <span style="background-color: green; color: white;">Resolved</span>'
+                    )
+                    label.setText(updated_problem_text)
+
+                    print(f"Solution #{problem_number} added successfully and Problem #{problem_number} marked as Resolved.")
+                else:
+                    QMessageBox.warning(self, "Invalid Input", "Solution entry cannot be empty.")
     
     def save_color_to_config(self):
         config = {"text_color": self.text_color.name() if hasattr(self, 'text_color') else "#008000"}  # Default to green
@@ -1020,24 +1237,11 @@ class LogApp(QWidget):
                 text = label.text()
                 html_content += f"<p class='log-entry'>{text}</p>"
         
-        # Append explanations at the end of the PDF
-        html_content += "<hr><h2>Definitions</h2><ul>"        
-        
-        keyword_definitions = {
-            "TensorFlow": "TensorFlow is an open-source machine learning framework developed by Google.",
-            "PyQt": "PyQt is a set of Python bindings for Qt libraries used for GUI development.",
-            "AI": "Artificial Intelligence (AI) refers to the simulation of human intelligence in machines."
-        }
-        
-        for keyword, definition in keyword_definitions.items():
-            # Add a bookmark for each keyword definition
-            definition_anchor = f"def_{keyword}"
-
-            # Add the definition with a bookmark
-            html_content += f'<li><b name="{definition_anchor}">{keyword}:</b> {definition}</li>'
-
-
-        html_content += "</body></html>"
+        # Append keyword definitions at the end of the PDF
+        html_content += "<hr><h2>Definitions</h2><ul>"
+        for keyword, definition in getattr(self, 'keyword_definitions', {}).items():
+            html_content += f"<li><b>{keyword}:</b> {definition}</li>"
+        html_content += "</ul></body></html>"
     
         doc.setHtml(html_content)
     
@@ -1125,40 +1329,23 @@ class LogApp(QWidget):
         text = re.sub(r"_([^_]+)_", r"<u>\1</u>", text)    # _underline_ → <u>underline</u>
         text = re.sub(r"\[([^\]]+)\]\((#.*?)\)", r'<a href="\2">\1</a>', text)  # Internal links only
         
-        # Define keywords and their descriptions
-        keyword_definitions = {
-            "TensorFlow": "TensorFlow is an open-source machine learning framework developed by Google.",
-            "PyQt": "PyQt is a set of Python bindings for Qt libraries used for GUI development.",
-            "AI": "Artificial Intelligence (AI) refers to the simulation of human intelligence in machines."
-        }
-
-        # Replace keywords with HTML links
-        for keyword, definition in keyword_definitions.items():
+        # Use user-defined keywords from the dictionary
+        for keyword, definition in getattr(self, 'keyword_definitions', {}).items():
             text = re.sub(rf"\b{keyword}\b", f'<a href="#{keyword}">{keyword}</a>', text)
-        
+
         return text
     
     def handle_internal_link(self, link):
         """Handle internal navigation within the document."""
         print(f"Navigating to: {link}")
         
-        keyword_definitions = {
-            "TensorFlow": "TensorFlow is an open-source machine learning framework developed by Google.",
-            "PyQt": "PyQt is a set of Python bindings for Qt libraries used for GUI development.",
-            "AI": "Artificial Intelligence (AI) refers to the simulation of human intelligence in machines."
-        }
         keyword = link.lstrip("#")  # Remove '#' from link
-        if keyword in keyword_definitions:
-            QMessageBox.information(self, keyword, keyword_definitions[keyword])
+        if keyword in getattr(self, 'keyword_definitions', {}):
+            definition = self.keyword_definitions[keyword]
+            QMessageBox.information(self, f"Definition: {keyword}", definition)
+        else:
+            QMessageBox.warning(self, "Keyword Not Found", f"No definition found for '{keyword}'.")
         
-        # Example: Scroll to a specific log entry or section
-        for index in range(self.log_list.count()):
-            item = self.log_list.item(index)
-            label = self.log_list.itemWidget(item)
-            if isinstance(label, QLabel) and link in label.text():
-                self.log_list.scrollToItem(item)
-                print(f"Scrolled to item containing: {link}")
-                break 
     
     def export_to_html(self):
         # Get user-defined values
@@ -1207,20 +1394,15 @@ class LogApp(QWidget):
                 text = label.text()
                 html_content += f"<p class='log-entry'>{text}</p>"
 
-        # Append definitions or any additional sections as needed
+        # Append keyword definitions at the end of the HTML
         html_content += """
                 <hr>
-                <h2>Definitions</h2>
+                <h2>Keyword Definitions</h2>
                 <ul>
-                    <li><b id="TensorFlow">TensorFlow:</b> TensorFlow is an open-source machine learning framework developed by Google.</li>
-                    <li><b id="PyQt">PyQt:</b> PyQt is a set of Python bindings for Qt libraries used for GUI development.</li>
-                    <li><b id="AI">AI:</b> Artificial Intelligence (AI) refers to the simulation of human intelligence in machines.</li>
-                </ul>
-            </body>
-        </html>
         """
-        
-        #
+        for keyword, definition in getattr(self, 'keyword_definitions', {}).items():
+            html_content += f'<li><a name="{keyword}"><b>{keyword}:</b></a> {definition}</li>'
+        html_content += "</ul></body></html>"
 
         # Ask the user for a file location to save the HTML file
         file_path, _ = QFileDialog.getSaveFileName(self, "Export HTML", "", "HTML Files (*.html)")
@@ -1276,21 +1458,21 @@ class LogApp(QWidget):
         
     
     def resolve_log(self, item):
-        """Mark a Bug or Problem as Resolved."""
+        """Mark a Bug as Fixed."""
         label = self.log_list.itemWidget(item)
     
         if isinstance(label, QLabel):
             current_text = label.text()  # Get **existing HTML** (to keep links)
 
-            # Check if it's already resolved
-            if "Resolved" in current_text:
-                QMessageBox.information(self, "Already Resolved", "This log entry is already marked as resolved.")
+            # Check if it's already fixed
+            if "Fixed" in current_text:
+                QMessageBox.information(self, "Already Fixe", "This log entry is already marked as fixed.")
                 return
 
-            # Modify the text to add "(Resolved)" with green background only for the word "Resolved"
-            updated_text = f'{current_text} <span style="background-color: green; color: white;">Resolved</span>'
+            # Modify the text to add "(Fixed)" with green background only for the word "Fixed"
+            updated_text = f'{current_text} <span style="background-color: green; color: white;">Fixed</span>'
             label.setText(updated_text)
-            print("Log entry marked as resolved with green background only for the word 'Resolved'.")
+            print("Log entry marked as fixed with green background only for the word 'Fixed'.")
 
     def get_log_state(self):
         """Returns a snapshot of the current log list (for undo/redo)."""
@@ -1351,15 +1533,11 @@ class LogApp(QWidget):
         version_name = f"[{current_date}]  -  {version_name.strip()}  |  {random_prefix}"
         
         # Capture all logs in a list
-        log_snapshot = []
-        for i in range(self.log_list.count()):
-            item = self.log_list.item(i)
-            label = self.log_list.itemWidget(item)
-            if isinstance(label, QLabel):
-                log_snapshot.append(label.text())  # Save formatted log entry
+        log_snapshot = [self.log_list.itemWidget(self.log_list.item(i)).text() for i in range(self.log_list.count())]
 
         # Store the snapshot
         self.restore_points[version_name] = log_snapshot
+        self.save_restore_points()  # Save restore points to JSON
         print(f"Restore point '{version_name}' saved.")
 
     def view_restore_points(self):
@@ -1533,17 +1711,71 @@ class LogApp(QWidget):
         restore_point_name = f"[{current_date}]  -  {pick_unique_name()}  |  {random_prefix}"
 
         # Capture all logs in a list
-        log_snapshot = []
-        for i in range(self.log_list.count()):
-            item = self.log_list.item(i)
-            label = self.log_list.itemWidget(item)
-            if isinstance(label, QLabel):
-                log_snapshot.append(label.text())  # Save formatted log entry
+        log_snapshot = [self.log_list.itemWidget(self.log_list.item(i)).text() for i in range(self.log_list.count())]
 
         # Store the snapshot
         self.restore_points[restore_point_name] = log_snapshot
+        self.save_restore_points()  # Save restore points to JSON
         print(f"Automatic restore point '{restore_point_name}' created.")
+    
+    def save_restore_points(self):
+        """Save restore points to a JSON file."""
+        if self.current_file:
+            json_file = self.current_file.replace(".lds", "_restore_points.json")
+            with open(json_file, "w", encoding="utf-8") as file:
+                json.dump(self.restore_points, file, indent=4, ensure_ascii=False)
+            print(f"Restore points saved to {json_file}")
+        
+    def load_restore_points(self):
+        """Load restore points from a JSON file."""
+        if self.current_file:
+            json_file = self.current_file.replace(".lds", "_restore_points.json")
+            if os.path.exists(json_file):
+                try:
+                    with open(json_file, "r", encoding="utf-8") as file:
+                        self.restore_points = json.load(file)
+                    print(f"Restore points loaded from {json_file}")
+                except Exception as e:
+                    print(f"Error loading restore points: {e}")
+                    self.restore_points = {}
+            else:
+                self.restore_points = {}
+    
+    def open_dictionary(self):
+        """Open the DictionaryDialog and update keyword definitions."""
+        self.dictionary_dialog = DictionaryDialog(self)
+        self.dictionary_dialog.dictionary = getattr(self, 'keyword_definitions', {})  # Load existing definitions
+        
+        # Populate the keyword list in the dialog
+        for keyword in sorted(self.dictionary_dialog.dictionary.keys()):
+            self.dictionary_dialog.add_list_item(keyword)
+    
+        self.dictionary_dialog.show()
 
+        # Update keyword definitions when the dialog is closed
+        def update_keywords():
+            self.keyword_definitions = self.dictionary_dialog.dictionary
+            self.save_keyword_definitions()  # Save updated definitions to a file
+
+        self.dictionary_dialog.finished.connect(update_keywords)
+        
+    def save_keyword_definitions(self):
+        """Save keyword definitions to a JSON file."""
+        file_path = os.path.join(os.getcwd(), "keyword_definitions.json")
+        with open(file_path, "w", encoding="utf-8") as file:
+            json.dump(getattr(self, 'keyword_definitions', {}), file, indent=4)
+        print(f"Keyword definitions saved to {file_path}")
+
+    def load_keyword_definitions(self):
+        """Load keyword definitions from a JSON file."""
+        file_path = os.path.join(os.getcwd(), "keyword_definitions.json")
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as file:
+                self.keyword_definitions = json.load(file)
+            print(f"Keyword definitions loaded from {file_path}")
+        else:
+            self.keyword_definitions = {}
+    
 
 if __name__ == "__main__":
     print("Starting application...")
