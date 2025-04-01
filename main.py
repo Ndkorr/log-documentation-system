@@ -1,9 +1,10 @@
-from PyQt6.QtWidgets import QMenu, QDialog, QProgressDialog, QMenuBar, QLabel, QColorDialog, QApplication, QLineEdit, QListWidgetItem, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, QInputDialog, QFileDialog, QMessageBox, QComboBox
-from PyQt6.QtCore import Qt, QRect, QPropertyAnimation, QSettings, QTimer, QThread, pyqtSignal, QEvent, QPoint
-from PyQt6.QtGui import QColor, QFont, QBrush, QShortcut, QKeySequence, QAction, QTextDocument
+from PyQt6.QtWidgets import QMainWindow, QSlider, QMenu, QDialog, QProgressDialog, QMenuBar, QLabel, QColorDialog, QApplication, QLineEdit, QListWidgetItem, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, QInputDialog, QFileDialog, QMessageBox, QComboBox, QScrollArea, QSizePolicy, QGraphicsDropShadowEffect
+from PyQt6.QtCore import Qt, QSize, QRect, QPropertyAnimation, QSettings, QTimer, QThread, pyqtSignal, QEvent, QPoint, QEasingCurve, QSequentialAnimationGroup
+from PyQt6.QtGui import QColor, QFont, QBrush, QShortcut, QKeySequence, QAction, QTextDocument, QPixmap, QCursor
 from datetime import datetime
 import sys
 import psutil
+from typing import Optional
 import json
 import wmi
 from pynvml import nvmlInit, nvmlDeviceGetHandleByIndex, nvmlDeviceGetUtilizationRates, nvmlShutdown
@@ -14,33 +15,357 @@ import re
 import random
 import string
 import names
+import shutil
+import time
 
+
+
+
+class ClickableLabel(QLabel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)        
+        # Set pointer cursor to indicate clickability
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.original_pixmap: Optional[QPixmap] = None
+        self.original_pixmap = None
+        # Store the original stylesheet so we can revert back on hover out.
+        self.base_style = "font-size: 15px; padding: 5px;"
+        self.setStyleSheet(self.base_style)
+        # Optionally, prepare a drop shadow effect
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(10)
+        self.shadow.setColor(QColor(0, 0, 0, 160))
+        self.shadow.setOffset(0, 0)
+
+    def enterEvent(self, event):
+        hover_style = self.base_style + "background-color: #f0f0f0;"
+        self.setStyleSheet(hover_style)
+        # Create a new drop shadow effect every time on hover
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(0, 0, 0, 160))
+        shadow.setOffset(0, 0)
+        self.setGraphicsEffect(shadow)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        # Revert to the original style when not hovered.
+        self.setStyleSheet(self.base_style)
+        self.setGraphicsEffect(None)
+        super().leaveEvent(event) 
+    
+    def mousePressEvent(self, event):
+        # Use the stored original pixmap if available, otherwise fall back to the current pixmap
+        if hasattr(self, "original_pixmap") and self.original_pixmap:
+            self.viewer = ImageViewerWindow(self.original_pixmap)
+            self.viewer.show()
+        elif self.pixmap():
+            self.viewer = ImageViewerWindow(self.pixmap())
+            self.viewer.show()
+        super().mousePressEvent(event)
+
+
+# Subclass QScrollArea to enable panning with mouse drag.
+class PannableScrollArea(QScrollArea):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setMouseTracking(True)
+        self.dragging = False
+        self.last_pos = QPoint()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.dragging = True
+            self.last_pos = event.pos()
+            self.setCursor(QCursor(Qt.CursorShape.ClosedHandCursor))
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.dragging:
+            delta = event.pos() - self.last_pos
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            self.last_pos = event.pos()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.dragging = False
+            self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+        super().mouseReleaseEvent(event)
+
+
+# Image Viewer Window with zoom overlay and mouse wheel zooming.
+class ImageViewerWindow(QMainWindow):
+    def __init__(self, pixmap, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Image Viewer")
+        self.original_pixmap = pixmap  # Original image
+        self.fit_scale = 1.0  # Scale factor to fit the window (computed on show)
+        self.zoom_percent = 0  # Relative zoom percentage deviation (0 means fit-to-window)
+        self.current_scale = 1.0  # Actual scale applied
+
+        # Central widget and layout.
+        central_widget = QWidget(self)
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Use the pannable scroll area instead of a standard QScrollArea.
+        self.scroll_area = PannableScrollArea(self)
+        layout.addWidget(self.scroll_area)
+
+        # Image label inside the scroll area.
+        self.image_label = QLabel(self)
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setPixmap(self.original_pixmap)
+        self.scroll_area.setWidget(self.image_label)
+
+        # Overlay widget to display zoom info.
+        self.overlay = QLabel(self)
+        self.overlay.setStyleSheet("background-color: rgba(0, 0, 0, 100); color: white; padding: 3px;")
+        self.overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.overlay.move(10, 10)
+        self.overlay.resize(230, 30)
+        self.overlay.setText("Zoom: 100%   Size: -")
+
+        # Install an event filter on the viewport for mouse wheel zoom.
+        self.scroll_area.viewport().installEventFilter(self)
+
+        # Set a reasonable default window size.
+        self.resize(800, 600)
+
+    def showEvent(self, event):
+        """Compute the fit-to-window scale factor when the window is shown."""
+        super().showEvent(event)
+        viewport_size = self.scroll_area.viewport().size()
+        if self.original_pixmap:
+            pixmap_size = self.original_pixmap.size()
+            scale_w = viewport_size.width() / pixmap_size.width()
+            scale_h = viewport_size.height() / pixmap_size.height()
+            self.fit_scale = min(scale_w, scale_h)
+            # Start at fit-to-window (zoom_percent = 0).
+            self.zoom_percent = 0
+            self.current_scale = self.fit_scale
+            self.update_image()
+            self.update_overlay()
+
+    def eventFilter(self, source, event):
+        # Use mouse wheel events over the scroll area's viewport for zooming.
+        if source == self.scroll_area.viewport() and event.type() == QEvent.Type.Wheel:
+            self.handle_wheel_event(event)
+            return True  # Consume the event.
+        return super().eventFilter(source, event)
+
+    def handle_wheel_event(self, event):
+        """Adjust zoom based on mouse wheel scrolling (% per notch)."""
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self.zoom_by(20)
+        else:
+            self.zoom_by(-20)
+
+    def zoom_by(self, delta_percent):
+        """Adjust the zoom percentage and update the image."""
+        self.zoom_percent += delta_percent
+        # Clamp the zoom percent between -100% and +500% relative to fit-to-window.
+        self.zoom_percent = max(-100, min(500, self.zoom_percent))
+        self.current_scale = self.fit_scale * (1 + self.zoom_percent / 100.0)
+        self.update_image()
+        self.update_overlay()
+
+    def update_image(self):
+        """Scale the original pixmap using the current scale and update the label."""
+        if self.original_pixmap:
+            new_width = int(self.original_pixmap.width() * self.current_scale)
+            new_height = int(self.original_pixmap.height() * self.current_scale)
+            scaled_pixmap = self.original_pixmap.scaled(
+                QSize(new_width, new_height),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            self.image_label.setPixmap(scaled_pixmap)
+
+    def update_overlay(self):
+        """Update the overlay text to show current zoom and original image dimensions."""
+        if self.original_pixmap:
+            # Use original dimensions for static size information.
+            original_width = self.original_pixmap.width()
+            original_height = self.original_pixmap.height()
+            # Show zoom relative to the fit-to-window baseline (0 means fit).
+            zoom_text = f"{'+' if self.zoom_percent > 0 else ''}{self.zoom_percent}%"
+            self.overlay.setText(f"Zoom: {zoom_text}   Original Size: {original_width}x{original_height}px")
+
+class ClickableDefinitionLabel(QLabel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
+        self.full_definition = ""  # Initialize the full_definition attribute
+        
+        # Set pointer cursor to indicate clickability
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        # Store the original stylesheet so we can revert back on hover out.
+        self.base_style = "font-size: 15px; padding: 5px;"
+        self.setStyleSheet(self.base_style)
+        # Optionally, prepare a drop shadow effect
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(10)
+        self.shadow.setColor(QColor(0, 0, 0, 160))
+        self.shadow.setOffset(0, 0)
+
+    def enterEvent(self, event):
+        hover_style = self.base_style + "background-color: #f0f0f0;"
+        self.setStyleSheet(hover_style)
+        # Create a new drop shadow effect every time on hover
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(0, 0, 0, 160))
+        shadow.setOffset(0, 0)
+        self.setGraphicsEffect(shadow)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        # Revert to the original style when not hovered.
+        self.setStyleSheet(self.base_style)
+        self.setGraphicsEffect(None)
+        super().leaveEvent(event)    
+    
+    def mousePressEvent(self, event):
+        viewer = DefinitionViewer(self.full_definition, self)
+        viewer.exec()
+        super().mousePressEvent(event)
+        
+
+class DefinitionViewer(QDialog):
+    def __init__(self, full_text, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Full Definition")
+        self.resize(400, 300)
+        
+        layout = QVBoxLayout(self)
+        
+        # Use a scroll area to handle very long text
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        layout.addWidget(scroll_area)
+        
+        content_widget = QLabel(full_text, self)
+        content_widget.setWordWrap(True)
+        content_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        scroll_area.setWidget(content_widget)
+
+        self.setLayout(layout)
+        self.center() 
+        
+        # Start the zoom-in animation when the dialog is shown
+        self.start_zoom_animation()   
+            
+    def start_zoom_animation(self):
+        """Animate the zoom-in effect for the dialog."""
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        center_point = screen_geometry.center()
+
+        # Start with a small size at the center of the screen
+        start_geometry = QRect(
+            center_point.x() - 50,  # Small width
+            center_point.y() - 50,  # Small height
+            100,  # Initial width
+            100   # Initial height
+        )
+
+        # End with the dialog's normal geometry
+        end_geometry = self.geometry()
+
+        # Set the dialog's initial geometry
+        self.setGeometry(start_geometry)
+
+        # Create the animation
+        self.animation = QPropertyAnimation(self, b"geometry")
+        self.animation.setDuration(500)  # Animation duration in milliseconds
+        self.animation.setStartValue(start_geometry)
+        self.animation.setEndValue(end_geometry)
+        self.animation.setEasingCurve(QEasingCurve.Type.OutQuad)  # Smooth easing curve
+
+        # Start the animation
+        self.animation.start()
+        
+    def center(self):
+        """Center the dialog on the screen."""
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        window_geometry = self.frameGeometry()
+        window_geometry.moveCenter(screen_geometry.center())
+        self.move(window_geometry.topLeft())
 
 class DictionaryDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Dictionary")
         self.setGeometry(100, 100, 700, 450)
+        self.setFixedSize(700, 450)
 
         self.main_layout = QHBoxLayout()
         
-        # Keyword List
+        # Left side layout (Search + Keyword List)
+        self.left_layout = QVBoxLayout()
+        self.search_box = QLineEdit(self)
+        self.search_box.setPlaceholderText("Search keywords...")
+        self.search_box.setFixedWidth(200)
+        self.search_box.textChanged.connect(self.search_keywords)
+        self.left_layout.addWidget(self.search_box)
+        
         self.keyword_list = QListWidget(self)
-        self.add_static_item("Keywords")  # Add static title
         self.keyword_list.itemClicked.connect(self.display_definition)
-        self.keyword_list.setFixedWidth(200)  # Set minimum width for keyword list
-        self.main_layout.addWidget(self.keyword_list)
+        self.keyword_list.setFixedWidth(200)
+        self.left_layout.addWidget(self.keyword_list)
+        
+        # Add a static item at the top
+        self.add_static_item("Keywords")
+        
+        self.main_layout.addLayout(self.left_layout)
         
         # Definition Section
         self.definition_layout = QVBoxLayout()
-        self.definition_list = QListWidget(self)
-        self.definition_layout.addWidget(self.definition_list)
+        # Replace the normal QLabel with our ClickableDefinitionLabel.
+        self.definition_label = ClickableDefinitionLabel(self)
+        self.definition_label.setWordWrap(True)
+        self.definition_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.definition_label.setStyleSheet("font-size: 15px; padding: 5px;")
+        self.definition_label.setText("Select a keyword to view its definition.")
+        # Store the full definition text separately
+        self.definition_label.full_definition = "Select a keyword to view its definition."
+        self.definition_layout.addWidget(self.definition_label)
+        
+        # Create a container layout for the "Example" label and the image preview label with no spacing.
+        self.image_container_layout = QVBoxLayout()
+        self.image_container_layout.setSpacing(0)  # No spacing between the "Example" label and the image preview
+        
+        # New "Example" label; initially hidden
+        self.example_label = QLabel("Example", self)
+        self.example_label.setStyleSheet("font-weight: bold;")
+        self.example_label.setVisible(False)
+        self.image_container_layout.addWidget(self.example_label)
+        
+        # Add image preview label (clickable)
+        self.image_label = ClickableLabel(self)
+        self.image_label.setFixedHeight(100)  # Preview height; adjust as needed.
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setStyleSheet("border: 1px solid #ccc;")
+        self.image_label.setVisible(False)
+        self.image_container_layout.addWidget(self.image_label)
+        
+        # Add the container layout to the definition layout.
+        self.definition_layout.addLayout(self.image_container_layout)
         
         # Buttons
         self.button_layout = QHBoxLayout()
         self.add_button = QPushButton("Add", self)
         self.add_button.clicked.connect(self.add_keyword)
         self.button_layout.addWidget(self.add_button)
+        
+        self.edit_button = QPushButton("Edit", self)
+        self.edit_button.clicked.connect(self.edit_keyword)
+        self.button_layout.addWidget(self.edit_button)
         
         self.delete_button = QPushButton("Delete", self)
         self.delete_button.clicked.connect(self.delete_keyword)
@@ -51,6 +376,10 @@ class DictionaryDialog(QDialog):
         
         self.setLayout(self.main_layout)
         self.dictionary = {}  # Store definitions
+        self.keyword_images = {}
+        
+        # Load previously saved definitions and images.
+        self.load_keyword_definitions()
         
         self.center()
 
@@ -98,15 +427,45 @@ class DictionaryDialog(QDialog):
         
             if ok_def and definition.strip():
                 definition = definition.strip()
+                
+                # Ask the user if they want to add an example image.
+                add_img = QMessageBox.question(
+                    self,
+                    "Add Image?",
+                    "Do you want to add an example image for this keyword?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
 
+                image_path = None
+                if add_img == QMessageBox.StandardButton.Yes:
+                    file_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
+                    if file_path:
+                        # Define a local folder to store keyword images.
+                        local_dir = os.path.join(os.getcwd(), "keyword_images")
+                        if not os.path.exists(local_dir):
+                            os.makedirs(local_dir)
+                        # Create a unique filename using the keyword and current timestamp.
+                        unique_name = f"{word}_{int(time.time())}{os.path.splitext(file_path)[1]}"
+                        dest_path = os.path.join(local_dir, unique_name)
+                        try:
+                            shutil.copy(file_path, dest_path)
+                            image_path = dest_path
+                        except Exception as e:
+                            QMessageBox.warning(self, "Image Error", f"Could not copy image:\n{e}")
+                
                 # Store in dictionary
                 self.dictionary[word] = definition
+                if image_path:
+                    self.keyword_images[word] = image_path
 
                 # Add keyword visually
                 self.add_list_item(word)
 
                 # Auto-select new item
                 self.select_keyword(word)
+                
+                # Save the updated dictionary and image paths.
+                self.save_keyword_definitions()
     
     def select_keyword(self, word):
         """Find and select the keyword in the list."""
@@ -122,43 +481,55 @@ class DictionaryDialog(QDialog):
         selected_item = self.keyword_list.currentItem()
         if selected_item:
             word = selected_item.text()
-            if word in self.dictionary:
-                del self.dictionary[word]  # Remove the keyword from the dictionary
-            self.keyword_list.takeItem(self.keyword_list.row(selected_item))  # Remove the item from the list
-            self.definition_list.clear()  # Clear the definition area
+            
+            # Confirmation Dialog
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setWindowTitle("Caution")
+            msg.setText(f"Are you sure you want to delete '{word}'?")
+            msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            
+            if msg.exec() == QMessageBox.StandardButton.Yes:
+                if word in self.dictionary:
+                    del self.dictionary[word]  # Remove the keyword from the dictionary
+                self.keyword_list.takeItem(self.keyword_list.row(selected_item))  # Remove the item from the list
+                self.definition_label.clear()  # Clear the definition area
+            
+            else:
+                pass
 
     def display_definition(self, item):
-        """Display the definition of the selected keyword."""
-        word = item.text()  # Get the keyword text from the clicked item
-        definition = self.dictionary.get(word, "No definition available.")  # Fetch the definition
+        word = item.text()
+        full_def = self.dictionary.get(word, "No definition available.")
+        # For preview purposes, truncate if too long (e.g., show first 200 characters)
+        preview_text = full_def if len(full_def) <= 780 else full_def[:780] + "..."
+        formatted_definition = f"<b>{word}:</b><br>{preview_text}"
+        self.definition_label.setText(formatted_definition)
+        self.definition_label.full_definition = full_def
 
-        # Clear previous definitions
-        self.definition_list.clear()
-
-        # Create a custom widget with QLabel to display the formatted text
-        item_widget = QWidget()
-        layout = QVBoxLayout()
-
-        title_label = QLabel(f"<b>{word}:</b>")  # Styled title with the keyword
-        text_label = QLabel(definition)
-        text_label.setWordWrap(True)  # Allow multiline text
-        
-        # Adjust font size for the definition text
-        font = QFont()
-        font.setPointSize(11)  # Set the desired font size
-        text_label.setFont(font)
-
-        layout.addWidget(title_label)
-        layout.addWidget(text_label)
-        layout.setContentsMargins(5, 2, 5, 2)
-
-        item_widget.setLayout(layout)
-
-        list_item = QListWidgetItem()
-        list_item.setSizeHint(item_widget.sizeHint())
-
-        self.definition_list.addItem(list_item)
-        self.definition_list.setItemWidget(list_item, item_widget)
+        image_path = self.keyword_images.get(word)
+        if image_path:
+            pixmap = QPixmap(image_path)
+            if not pixmap.isNull():
+                # Store the original pixmap before scaling
+                self.image_label.original_pixmap = pixmap
+                scaled_pixmap = pixmap.scaled(
+                    self.image_label.width(),
+                    self.image_label.height(), 
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.image_label.setPixmap(scaled_pixmap)
+                self.image_label.setVisible(True)
+                self.example_label.setVisible(True)
+            else:
+                self.image_label.clear()
+                self.image_label.setVisible(False)
+                self.example_label.setVisible(False)
+        else:
+            self.image_label.clear()
+            self.image_label.setVisible(False)
+            self.example_label.setVisible(False)
         
     def center(self):
         """Center the dialog on the screen."""
@@ -166,7 +537,102 @@ class DictionaryDialog(QDialog):
         window_geometry = self.frameGeometry()
         window_geometry.moveCenter(screen_geometry.center())
         self.move(window_geometry.topLeft())
+    
+    def edit_keyword(self):
+        """Edit the definition and/or image of the selected keyword."""
+        selected_item = self.keyword_list.currentItem()
+        if selected_item:
+            # Prevent editing of static items
+            if selected_item.data(Qt.ItemDataRole.UserRole) == "static":
+                return
+        
+            word = selected_item.text()
+            current_def = self.dictionary.get(word, "")
+            current_image = self.keyword_images.get(word, None)
 
+            # Prompt the user to edit the definition
+            new_def, ok = QInputDialog.getText(self, "Edit Definition", f"Edit definition for '{word}':", text=current_def)
+            if ok and new_def.strip():
+                self.dictionary[word] = new_def.strip()
+
+            # Ask the user if they want to update the image
+            update_image = QMessageBox.question(
+                self,
+                "Update Image?",
+                f"Do you want to update the image for '{word}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+
+            if update_image == QMessageBox.StandardButton.Yes:
+                file_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
+                if file_path:
+                    # Define a local folder to store keyword images
+                    local_dir = os.path.join(os.getcwd(), "keyword_images")
+                    if not os.path.exists(local_dir):
+                        os.makedirs(local_dir)
+                
+                    # Create a unique filename using the keyword and current timestamp
+                    unique_name = f"{word}_{int(time.time())}{os.path.splitext(file_path)[1]}"
+                    dest_path = os.path.join(local_dir, unique_name)
+                    try:
+                        shutil.copy(file_path, dest_path)
+                        self.keyword_images[word] = dest_path
+                    except Exception as e:
+                        QMessageBox.warning(self, "Image Error", f"Could not copy image:\n{e}")
+
+            # Update the displayed definition and image
+            self.display_definition(selected_item)
+
+            # Save the updated definitions and images
+            self.save_keyword_definitions()
+    
+    def search_keywords(self, text):
+        """Filter the keyword list based on the search box."""
+        for i in range(self.keyword_list.count()):
+            item = self.keyword_list.item(i)
+            if item is not None:
+                # Do not hide static item
+                if item.data(Qt.ItemDataRole.UserRole) == "static":
+                    item.setHidden(False)
+                else:
+                    # Show items containing the search text (case-insensitive)
+                    item.setHidden(text.lower() not in item.text().lower())
+    
+    
+    def save_keyword_definitions(self):
+        """Save keyword definitions to a JSON file."""
+        definitions_file = os.path.join(os.getcwd(), "keyword_definitions.json")
+        with open(definitions_file, "w", encoding="utf-8") as file:
+            json.dump(getattr(self, 'keyword_definitions', {}), file, indent=4)
+        print(f"Keyword definitions saved to {definitions_file}")
+
+        # Save image paths separately
+        images_file = os.path.join(os.getcwd(), "keyword_images.json")
+        with open(images_file, "w", encoding="utf-8") as file:
+            json.dump(getattr(self, 'keyword_images', {}), file, indent=4)
+        print(f"Keyword images saved to {images_file}")
+
+    def load_keyword_definitions(self):
+        """Load keyword definitions and image paths from separate JSON files."""
+        definitions_file = os.path.join(os.getcwd(), "keyword_definitions.json")
+        images_file = os.path.join(os.getcwd(), "keyword_images.json")
+
+        # Load definitions
+        if os.path.exists(definitions_file):
+            with open(definitions_file, "r", encoding="utf-8") as file:
+                self.keyword_definitions = json.load(file)
+            print(f"Keyword definitions loaded from {definitions_file}")
+        else:
+            self.keyword_definitions = {}
+
+        # Load image paths
+        if os.path.exists(images_file):
+            with open(images_file, "r", encoding="utf-8") as file:
+                self.keyword_images = json.load(file)
+            print(f"Keyword images loaded from {images_file}")
+        else:
+            self.keyword_images = {}
+            
 
 class RestorePointWindow(QDialog):  # Change QWidget to QDialog
     def __init__(self, restore_points, parent=None):
