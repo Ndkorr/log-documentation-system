@@ -1,5 +1,5 @@
-from PyQt6.QtWidgets import QMainWindow, QSlider, QMenu, QDialog, QProgressDialog, QMenuBar, QLabel, QColorDialog, QApplication, QLineEdit, QListWidgetItem, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, QInputDialog, QFileDialog, QMessageBox, QComboBox, QScrollArea, QSizePolicy, QGraphicsDropShadowEffect
-from PyQt6.QtCore import Qt, QSize, QRect, QPropertyAnimation, QSettings, QTimer, QThread, pyqtSignal, QEvent, QPoint, QEasingCurve, QSequentialAnimationGroup
+from PyQt6.QtWidgets import QMainWindow, QFrame, QDateEdit, QSlider, QMenu, QDialog, QProgressDialog, QMenuBar, QLabel, QColorDialog, QApplication, QLineEdit, QListWidgetItem, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, QInputDialog, QFileDialog, QMessageBox, QComboBox, QScrollArea, QSizePolicy, QGraphicsDropShadowEffect
+from PyQt6.QtCore import Qt, QDate, QSize, QRect, QPropertyAnimation, QSettings, QTimer, QThread, pyqtSignal, QEvent, QPoint, QEasingCurve, QSequentialAnimationGroup
 from PyQt6.QtGui import QColor, QFont, QBrush, QShortcut, QKeySequence, QAction, QTextDocument, QPixmap, QCursor
 from datetime import datetime
 import sys
@@ -18,6 +18,411 @@ import names
 import shutil
 import time
 
+
+class NavigationPane(QFrame):
+    fileDoubleClicked = pyqtSignal(str)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet("background-color: #FFFFFF;")
+        self.setFixedWidth(0)  # Start hidden
+        self.init_ui()
+        
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        label = QLabel("Recent Files:")
+        label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        layout.addWidget(label)
+        
+        self.list_widget = QListWidget()
+        item_font = QFont("Arial", 14)
+        self.list_widget.setFont(item_font)
+        self.list_widget.setSpacing(10)
+        layout.addWidget(self.list_widget)
+        
+        # Load recent files from QSettings (for demonstration)
+        settings = QSettings("MyCompany", "LogDocumentationSystem")
+        recent_files = settings.value("recent_files", [])
+        if not isinstance(recent_files, list):
+            recent_files = [recent_files] if recent_files else []
+        for file_path in recent_files:
+            filename = os.path.basename(file_path)
+            item = QListWidgetItem(filename)
+            item.setToolTip(file_path)
+            self.list_widget.addItem(item)
+            
+        # Connect double-click signal to our handler.
+        self.list_widget.itemDoubleClicked.connect(self.handle_item_double_clicked)
+        
+    def handle_item_double_clicked(self, item: QListWidgetItem):
+        # Retrieve the full file path from the tooltip.
+        file_path = item.toolTip()
+        # Emit the custom signal with the full file path.
+        self.fileDoubleClicked.emit(file_path)
+
+# A simple clickable label for the hamburger icon.
+class ClickableLabelBurger(QLabel):
+    clicked = pyqtSignal()
+    
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        # Create a shadow effect that will serve as our "border"
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(0)  # start with no blur (no glow)
+        self.shadow.setColor(Qt.GlobalColor.blue)  # choose your border/glow color
+        self.shadow.setOffset(0)
+        self.setGraphicsEffect(self.shadow)
+        
+        # Animation for the shadow's blur radius
+        self.anim = QPropertyAnimation(self.shadow, b"blurRadius")
+        self.anim.setDuration(300)
+        
+        
+    def mousePressEvent(self, event):
+        self.clicked()  # Call the connected slot
+        super().mousePressEvent(event)
+        
+    def enterEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(15)  # Adjust this value to control the "thickness" of the glow
+        self.anim.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(0)
+        self.anim.start()
+        super().leaveEvent(event)
+        
+    def clicked(self):
+        # Placeholder method; override in subclass or connect externally.
+        pass
+        
+
+# Minimal clickable label for text-only clickable elements.
+class AnimatedClickableLabel(QLabel):
+    clicked = pyqtSignal()
+    
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)    
+        
+        # Create a shadow effect that will serve as our "border"
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(0)  # start with no blur (no glow)
+        self.shadow.setColor(Qt.GlobalColor.blue)  # choose your border/glow color
+        self.shadow.setOffset(0)
+        self.setGraphicsEffect(self.shadow)
+        
+        # Animation for the shadow's blur radius
+        self.anim = QPropertyAnimation(self.shadow, b"blurRadius")
+        self.anim.setDuration(300)
+        
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+        super().mousePressEvent(event)
+        
+    def enterEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(15)  # Adjust this value to control the "thickness" of the glow
+        self.anim.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(0)
+        self.anim.start()
+        super().leaveEvent(event)
+
+# SetupWindow: used when creating a new project.
+class SetupWindow(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create New Project")
+        self.setFixedSize(400, 300)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)  # Increase spacing between widgets
+        
+        layout.addWidget(QLabel("Log Type:"))
+        self.log_type_combo = QComboBox()
+        self.log_type_combo.addItems(["General", "Debugging"])
+        layout.addWidget(self.log_type_combo)
+        
+        layout.addWidget(QLabel("User Name:"))
+        self.name_input = QLineEdit()
+        layout.addWidget(self.name_input)
+        
+        layout.addWidget(QLabel("PDF Title:"))
+        self.pdf_title_input = QLineEdit()
+        layout.addWidget(self.pdf_title_input)
+        
+        # Instead of buttons, use clickable text for OK/Cancel.
+        self.ok_label = AnimatedClickableLabel("OK")
+        self.ok_label.setStyleSheet("color: blue; text-decoration: underline; margin: 10px;")
+        self.ok_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ok_label.clicked.connect(self.accept)
+        layout.addWidget(self.ok_label)
+        
+        self.cancel_label = AnimatedClickableLabel("Cancel")
+        self.cancel_label.setStyleSheet("color: blue; text-decoration: underline; margin: 10px;")
+        self.cancel_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cancel_label.clicked.connect(self.reject)
+        layout.addWidget(self.cancel_label)
+
+    def get_setup_data(self):
+        return {
+            "log_type": self.log_type_combo.currentText(),
+            "user_name": self.name_input.text().strip(),
+            "pdf_title": self.pdf_title_input.text().strip(),
+        }
+
+# WelcomeWindow: initial launcher window with a large hamburger icon and clickable text links.
+class WelcomeWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Welcome to LDS")
+        self.resize(800, 450)
+        self.setFixedSize(800, 450)
+        self.setStyleSheet("background-color: #FFFFFF;")
+        self.init_ui()
+
+    def init_ui(self):
+        central_widget = QWidget(self)
+        self.setCentralWidget(central_widget)
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        
+        # Create the navigation pane
+        self.nav_pane = NavigationPane(self)
+        self.nav_pane.fileDoubleClicked.connect(self.open_logs)
+        main_layout.addWidget(self.nav_pane)
+        
+        # Create main content area.
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(content_widget, 0)
+        
+        # Top bar with hamburger icon.
+        top_bar = QHBoxLayout()
+        self.hamburger_label = ClickableLabelBurger("☰")
+        font = QFont()
+        font.setPointSize(26)
+        self.hamburger_label.setFont(font)
+        self.hamburger_label.setStyleSheet("margin: 10px; padding: 5px; border-radius: 5px;")
+        # Connect the hamburger click event to toggle navigation pane.
+        self.hamburger_label.clicked = self.toggle_nav_pane
+        top_bar.addWidget(self.hamburger_label, alignment=Qt.AlignmentFlag.AlignLeft)
+        top_bar.addStretch()
+        content_layout.addLayout(top_bar)
+        
+        # Title label
+        title_label = QLabel("WELCOME TO LDS")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_label.setFont(QFont("Inter SemiBold", 34, QFont.Weight.Bold))
+        title_label.setStyleSheet("color: black; margin-top: 0px; margin-bottom: 30px;")
+        content_layout.addWidget(title_label)
+        
+        # Clickable text for actions.
+        self.create_new_label = AnimatedClickableLabel("Create New Project")
+        self.create_new_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.create_new_label.setFont(QFont("Arial", 18))
+        self.create_new_label.setStyleSheet("""margin-right: 250px;
+            margin-left: 250px;
+            margin-bottom: 5px;
+            padding: 10px;
+            border-radius: 15px;
+        """)
+        self.create_new_label.clicked.connect(self.create_new_project)
+        content_layout.addWidget(self.create_new_label)
+        
+        self.open_project_label = AnimatedClickableLabel("Open Project")
+        self.open_project_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.open_project_label.setFont(QFont("Arial", 18))
+        self.open_project_label.setStyleSheet("""
+            margin-right: 290px;
+            margin-left: 290px;
+            margin-bottom: 5px;
+            padding: 10px;
+            border-radius: 15px;
+        """)
+        self.open_project_label.clicked.connect(self.open_project)
+        content_layout.addWidget(self.open_project_label)
+        
+        self.docs_label = AnimatedClickableLabel("Documentations")
+        self.docs_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.docs_label.setFont(QFont("Arial", 18))
+        self.docs_label.setStyleSheet("""
+            margin-right: 270px;
+            margin-left: 270px;
+            margin-bottom: 5px;
+            padding: 10px;
+            border-radius: 15px;
+        """)
+        self.docs_label.clicked.connect(self.open_documentations)
+        content_layout.addWidget(self.docs_label)
+        
+        content_layout.addStretch()
+        
+        # Flag to track if nav pane is open.
+        self.nav_open = False
+
+    def show_recent_menu(self):
+        # Load recent projects from QSettings.
+        settings = QSettings("MyCompany", "LogDocumentationSystem")
+        recent_files = settings.value("recent_files", [])
+        if not isinstance(recent_files, list):
+            recent_files = [recent_files] if recent_files else []
+        
+        # Create a QMenu and add recent file actions.
+        menu = QMenu()
+        for file_path in recent_files:
+            action = QAction(file_path, self)
+            action.triggered.connect(lambda checked, path=file_path: self.open_logs(path))
+            menu.addAction(action)
+        # Show the menu just below the hamburger icon.
+        menu.exec(self.hamburger_label.mapToGlobal(QPoint(0, self.hamburger_label.height())))
+    
+    
+    def create_new_project(self):
+        # Open the setup dialog to get project customizations.
+        setup_dialog = SetupWindow(self)
+        if setup_dialog.exec() == QDialog.DialogCode.Accepted:
+            setup_data = setup_dialog.get_setup_data()
+            self.launch_main_app(setup_data)
+
+    def open_project(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Open Project", "", "LDS Files (*.lds *.ldsg *.ldsd)")
+        if file_path:
+            # Determine mode by file extension.
+            if file_path.endswith("ldsg"):
+                log_mode = "General"
+            elif file_path.endswith("ldsd"):
+                log_mode = "Debugging"
+            else:
+                log_mode = "General"  # fallback
+            setup_data = {"file_path": file_path, "log_type": log_mode}
+            self.launch_main_app(setup_data)
+
+    def open_logs(self, file_path):
+        # Determine log type by file extension:
+        if file_path.endswith("ldsg"):
+            log_mode = "General"
+        elif file_path.endswith("ldsd"):
+            log_mode = "Debugging"
+        else:
+            log_mode = "General"  # Fallback if extension is not recognized.
+    
+        setup_data = {
+            "file_path": os.path.abspath(file_path),
+            "log_type": log_mode
+        }
+        self.launch_main_app(setup_data)
+
+    def open_documentations(self):
+        QMessageBox.information(self, "Documentation", "Documentation goes here...")
+
+    def launch_main_app(self, setup_data):
+        from main import LogApp  # Import your LogApp class
+        file_path = setup_data.get("file_path", None)
+        log_type = setup_data.get("log_type", "General")
+    
+        # Create a new instance of LogApp with the correct mode.
+        self.main_window = LogApp(log_mode=log_type, file_path=file_path)
+    
+        # Optionally pass other settings like user name and PDF title
+        self.main_window.user_name = setup_data.get("user_name", "")
+        self.main_window.pdf_title = setup_data.get("pdf_title", "Log Documentation")
+    
+        self.main_window.show()
+        self.close()
+    
+    def toggle_nav_pane(self):
+        # Animate the width of the navigation pane.
+        start_width = self.nav_pane.width()
+        end_width = 300 if not self.nav_open else 0  # 200px width when open.
+        self.animation = QPropertyAnimation(self.nav_pane, b"minimumWidth")
+        self.animation.setDuration(300)
+        self.animation.setStartValue(start_width)
+        self.animation.setEndValue(end_width)
+        self.animation.setEasingCurve(QEasingCurve.Type.OutQuad)
+        self.animation.start()
+        
+        # Change the hamburger icon if needed.
+        if not self.nav_open:
+            self.hamburger_label.setText("X")  # Change icon to "X" when open.
+            font = QFont()
+            font.setPointSize(26)  # Set a smaller font size
+            font.setBold(True)  # Make it bold
+            self.hamburger_label.setFont(font)
+        else:
+            self.hamburger_label.setText("☰")  # Change back to hamburger.
+            
+        self.nav_open = not self.nav_open
+
+
+class FilterDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Filter Logs")
+        self.resize(350, 150)
+        self.setFixedSize(350, 150)
+        layout = QVBoxLayout(self)
+        
+        # Date range filter section.
+        date_range_layout = QHBoxLayout()
+        
+        start_label = QLabel("Start Date:")
+        date_range_layout.addWidget(start_label)
+        self.start_date_edit = QDateEdit(self)
+        self.start_date_edit.setCalendarPopup(True)
+        self.start_date_edit.setDate(QDate.currentDate())
+        date_range_layout.addWidget(self.start_date_edit)
+        
+        end_label = QLabel("End Date:")
+        date_range_layout.addWidget(end_label)
+        self.end_date_edit = QDateEdit(self)
+        self.end_date_edit.setCalendarPopup(True)
+        self.end_date_edit.setDate(QDate.currentDate())
+        date_range_layout.addWidget(self.end_date_edit)
+        
+        layout.addLayout(date_range_layout)
+        
+        # Log type filter section.
+        type_layout = QHBoxLayout()
+        type_label = QLabel("Select Log Type:")
+        type_layout.addWidget(type_label)
+        self.type_combo = QComboBox(self)
+        self.type_combo.addItem("All")
+        self.type_combo.addItems(["Just Details", "Problem ★" , "Solution ■", "Bug ▲", "Changes ◆"])  # Updated options
+        type_layout.addWidget(self.type_combo)
+        layout.addLayout(type_layout)
+        
+        # Buttons for applying or canceling.
+        button_layout = QHBoxLayout()
+        self.apply_btn = QPushButton("Apply Filter", self)
+        self.apply_btn.clicked.connect(self.accept)
+        button_layout.addWidget(self.apply_btn)
+        self.cancel_btn = QPushButton("Cancel", self)
+        self.cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_btn)
+        layout.addLayout(button_layout)
+    
+    def get_filters(self):
+        # Return the selected start date, end date strings, and log type.
+        start_date = self.start_date_edit.date().toString("yyyy-MM-dd")
+        end_date = self.end_date_edit.date().toString("yyyy-MM-dd")
+        log_type = self.type_combo.currentText()
+        return start_date, end_date, log_type
 
 
 
@@ -837,20 +1242,6 @@ class LogTextEdit(QTextEdit):
             if index < self.parent_widget.category_selector.count() - 1:
                 self.parent_widget.category_selector.setCurrentIndex(index + 1)
             event.accept()  # Prevent default behavior (cursor movement)
-
-        elif event.key() == Qt.Key.Key_Left and (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) and self.parent_widget:
-            # Move log type left
-            index = self.parent_widget.log_type_selector.currentIndex()
-            if index > 0:
-                self.parent_widget.log_type_selector.setCurrentIndex(index - 1)
-            event.accept()
-
-        elif event.key() == Qt.Key.Key_Right and (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) and self.parent_widget:
-            # Move log type right
-            index = self.parent_widget.log_type_selector.currentIndex()
-            if index < self.parent_widget.log_type_selector.count() - 1:
-                self.parent_widget.log_type_selector.setCurrentIndex(index + 1)
-            event.accept()
         
         elif event.key() == Qt.Key.Key_Z and (event.modifiers() & Qt.KeyboardModifier.ControlModifier) and self.parent_widget:
             # Undo action
@@ -902,15 +1293,16 @@ class HardwareMonitor(QThread):
 
 
 class LogApp(QWidget):
-    def __init__(self):
+    def __init__(self, log_mode="General", file_path=None):
         super().__init__()
         print("Initializing LogApp...")
+        self.log_mode = log_mode
+        self.log_type = "General" if log_mode == "General" else "Debugging"
         self.load_color_from_config()  # Load the saved color
         self.init_ui()
         self.load_keyword_definitions()  # Load keyword definitions
         self.current_file = None
         self.user_name = ""
-        self.log_type = "General"
         
         # Add Undo/Redo Stacks
         self.undo_stack = []  # Stores previous log states
@@ -937,6 +1329,10 @@ class LogApp(QWidget):
         self.hw_monitor.data_ready.connect(self.update_system_info)
         self.hw_monitor.start()
         print("LogApp initialized.")
+        
+        # If a file_path is provided, load the logs immediately.
+        if file_path:
+            self.open_logs(file_path)
 
     def create_menu_bar(self, layout):
         menu_bar = QMenuBar(self)
@@ -954,9 +1350,20 @@ class LogApp(QWidget):
         help_action.triggered.connect(self.show_help)
         help_menu.addAction(help_action)
         
+        # Dictionary Menu
         dictionary_action = QAction("Dictionary", self)
         dictionary_action.triggered.connect(self.open_dictionary)
         help_menu.addAction(dictionary_action)
+        
+        # Add Filter Logs action under Help.
+        filter_action = QAction("Filter Logs", self)
+        filter_action.triggered.connect(self.open_filter_dialog)
+        help_menu.addAction(filter_action)
+        
+        # Optionally, add a Clear Filter action.
+        clear_filter_action = QAction("Clear Filters", self)
+        clear_filter_action.triggered.connect(self.clear_filters)
+        help_menu.addAction(clear_filter_action)
         
         # **Version Control Menu (Fixed Naming)**
         version_menu = QMenu("Version Control", self)
@@ -974,24 +1381,24 @@ class LogApp(QWidget):
         version_menu.addAction(save_version_action)
     
     def update_recent_files_menu(self):
-        self.recent_menu.clear()  # Clear previous menu items
+        self.recent_menu.clear()
         settings = QSettings("MyCompany", "LogDocumentationSystem")
-        
         recent_files = settings.value("recent_files", [])
-        
-        # Ensure recent_files is a list (QSettings may return a single string)
         if not isinstance(recent_files, list):
             recent_files = [recent_files] if recent_files else []
-    
-        self.recent_files = recent_files  # Store it properly
-        
+
+        self.recent_files = recent_files
         for file_path in self.recent_files:
+            # Filter based on current log type
+            if self.log_type == "General" and not file_path.endswith("ldsg"):
+                continue
+            if self.log_type == "Debugging" and not file_path.endswith("ldsd"):
+                continue
             action = QAction(file_path, self)
             action.triggered.connect(lambda checked, path=file_path: self.open_logs(path))
             self.recent_menu.addAction(action)
             
-        
-
+            
     def load_recent_files(self):
         settings = QSettings("MyCompany", "LogDocumentationSystem")
         self.recent_files = settings.value("recent_files", [])
@@ -1009,6 +1416,7 @@ class LogApp(QWidget):
         settings.setValue("recent_files", self.recent_files)
         
         self.update_recent_files_menu()  # Update the menu dynamically
+    
     
     def show_help(self):
         QMessageBox.information(self, "How to Use", "1. Open or create a log file.\n2. Add logs using the text input.\n3. Save logs to keep them.\n4. Use 'Recent' to quickly access previous logs.")
@@ -1033,13 +1441,34 @@ class LogApp(QWidget):
         
         combo_layout = QHBoxLayout()
         
-        self.log_type_selector = QComboBox(self)
-        self.log_type_selector.addItems(["General", "Debugging"])
-        self.log_type_selector.currentTextChanged.connect(self.change_log_type)
-        combo_layout.addWidget(self.log_type_selector)
+        log_type_label = QLabel(f"Log Type: {self.log_type}", self)
+        if self.log_type == "General":
+            log_type_label.setStyleSheet("""
+            border: 1px solid black;
+            background: qlineargradient(
+            x1: 0, y1: 0, x2: 1, y2: 0,
+            stop: 0 #d4acfa, stop: 1 #f27cc3
+            );
+            font-weight: bold;
+            """)
+        else:
+            log_type_label.setStyleSheet("""
+            border: 1px solid black;
+            background: qlineargradient(
+            x1: 0, y1: 0, x2: 1, y2: 0,
+            stop: 0 #42f5d7, stop: 1 #14b7fc
+            );
+            font-weight: bold;
+            """)
+        
+        combo_layout.addWidget(log_type_label)
         
         self.category_selector = QComboBox(self)
-        self.category_selector.addItems(["Just Details", "Problem ★", "Bug ▲", "Changes ◆"])
+        if self.log_type == "General":
+            self.category_selector.addItems(["Just Details", "Problem ★", "Bug ▲", "Changes ◆"])
+        else:
+            self.category_selector.addItems(["Just Details", "Bug ▲"])    
+        
         combo_layout.addWidget(self.category_selector)
         
         layout.addLayout(combo_layout)
@@ -1065,7 +1494,8 @@ class LogApp(QWidget):
         
         # Enable drag-and-drop functionality
         self.setAcceptDrops(True)
-        self.drop_area = QLabel("Drag and drop a .lds file here", self)
+        filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
+        self.drop_area = QLabel("Drag and drop a " + f"{filter_json}" + " file here", self)
         self.drop_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.drop_area.setStyleSheet("border: 2px dashed #aaa; padding: 60.49px;")
         self.drop_area.setAcceptDrops(True)  # Enable drag-and-drop for this widget
@@ -1327,11 +1757,8 @@ class LogApp(QWidget):
             self.log_input.clear()
             print("Log entry added successfully.")
             
-            # **Save updated counters to JSON**
-            if self.current_file:
-                json_file = self.current_file.replace(".lds", ".json")
-                with open(json_file, "w", encoding="utf-8") as json_out:
-                    json.dump(self.log_counters, json_out, indent=4)
+            # Save updated counters to JSON
+            self.save_log_counters()
             
         else:
             QMessageBox.warning(self, "Invalid Input", "Log entry cannot be empty.")
@@ -1384,7 +1811,11 @@ class LogApp(QWidget):
         if self.current_file:
             file_name = self.current_file
         else:
-            file_name, _ = QFileDialog.getSaveFileName(self, "Save Logs", "logs.lds", "Log Documentation System Files (*.lds)")
+            # Use different default file names based on the log mode.
+            default_name = "logs.ldsg" if self.log_type == "General" else "logs.ldsd"
+            # Update the filter accordingly.
+            filter_str = "General Logs (*.ldsg)" if self.log_type == "General" else "Debugging Logs (*.ldsd)"
+            file_name, _ = QFileDialog.getSaveFileName(self, "Save Logs", default_name, filter_str)
     
         if file_name:
             self.current_file = file_name  # Update current file if a new one is chosen
@@ -1395,9 +1826,9 @@ class LogApp(QWidget):
                     if isinstance(label, QLabel):
                         file.write(label.text() + "\n")
                         
-            
+            filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
             # **Save the counters to a JSON file**
-            json_file = file_name.replace(".lds", ".json")
+            json_file = file_name.replace(filter_json, ".json")
             with open(json_file, "w", encoding="utf-8") as json_out:
                 json.dump(self.log_counters, json_out, indent=4)
         
@@ -1411,7 +1842,8 @@ class LogApp(QWidget):
     def open_logs(self, file_path=None):
         print("Opening logs...")
         if not file_path:  # If no file path is provided, use the file dialog
-            file_path, _ = QFileDialog.getOpenFileName(self, "Open Logs", "", "Log Documentation System Files (*.lds)")
+            filter_str = "General Logs (*.ldsg)" if self.log_type == "General" else "Debugging Logs (*.ldsd)"
+            file_path, _ = QFileDialog.getOpenFileName(self, "Open Logs", "", filter_str)
         if file_path:
             self.current_file = file_path
             self.save_recent_file(file_path)
@@ -1419,9 +1851,9 @@ class LogApp(QWidget):
             
             # Load restore points
             self.load_restore_points()
-            
+            filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
             # Try loading counters from JSON
-            json_file = file_path.replace(".lds", ".json")
+            json_file = file_path.replace(filter_json, ".json")
             if os.path.exists(json_file):
                 try:
                     with open(json_file, "r", encoding="utf-8") as json_in:
@@ -1581,7 +2013,7 @@ class LogApp(QWidget):
                     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%SH]")
                     solution_entry = (
                         f'<span style="color:yellow;">■</span> '
-                        f'<span style="color:black;">{timestamp} [Solution] {solution_text.strip()} - Solution #{problem_number}</span>'
+                        f'<span style="color:black;">{timestamp} [General] {solution_text.strip()} - Solution #{problem_number}</span>'
                     )
                     solution_label = QLabel()
                     solution_label.setText(solution_entry)
@@ -1623,10 +2055,11 @@ class LogApp(QWidget):
             
     def dragEnterEvent(self, event):
         print("dragEnterEvent triggered")
+        filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
         if event.mimeData().hasUrls():
             for url in event.mimeData().urls():
                 print("URL:", url.toLocalFile())
-                if url.toLocalFile().lower().endswith(".lds"):
+                if url.toLocalFile().lower().endswith(filter_json):
                     self.drop_area.show()
                     self.log_list.hide()
                     event.acceptProposedAction()
@@ -1639,13 +2072,14 @@ class LogApp(QWidget):
 
     def dropEvent(self, event):
         print("dropEvent triggered")
+        filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
         for url in event.mimeData().urls():
             file_path = url.toLocalFile()
-            if file_path.lower().endswith(".lds"):
+            if file_path.lower().endswith(filter_json):
                 self.open_logs(file_path)
                 break
         else:
-            QMessageBox.warning(self, "Invalid File", "Please select a valid .lds file.")
+            QMessageBox.warning(self, "Invalid File", "Please select a valid" + f"{filter_json}" + "file.")
     
         self.drop_area.hide()
         self.log_list.show()
@@ -2186,16 +2620,18 @@ class LogApp(QWidget):
     
     def save_restore_points(self):
         """Save restore points to a JSON file."""
+        filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
         if self.current_file:
-            json_file = self.current_file.replace(".lds", "_restore_points.json")
+            json_file = self.current_file.replace(filter_json, "_restore_points.json")
             with open(json_file, "w", encoding="utf-8") as file:
                 json.dump(self.restore_points, file, indent=4, ensure_ascii=False)
             print(f"Restore points saved to {json_file}")
         
     def load_restore_points(self):
         """Load restore points from a JSON file."""
+        filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
         if self.current_file:
-            json_file = self.current_file.replace(".lds", "_restore_points.json")
+            json_file = self.current_file.replace(filter_json, "_restore_points.json")
             if os.path.exists(json_file):
                 try:
                     with open(json_file, "r", encoding="utf-8") as file:
@@ -2242,10 +2678,91 @@ class LogApp(QWidget):
         else:
             self.keyword_definitions = {}
     
+    def open_filter_dialog(self):
+        """Open the filter dialog and apply filtering if the user accepts."""
+        dialog = FilterDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            start_date, end_date, log_type = dialog.get_filters()
+            self.filter_logs(start_date, end_date, log_type)
+                   
+
+    def filter_logs(self, start_date, end_date, log_type):
+        # Convert dates.
+        start_date = QDate.fromString(start_date, "yyyy-MM-dd")
+        end_date = QDate.fromString(end_date, "yyyy-MM-dd")
+    
+        # Define a mapping from descriptive log type to its icon.
+        log_type_icons = {
+            "Problem ★": "★",
+            "Solution ■": "■",
+            "Bug ▲": "▲",
+            "Changes ◆": "◆"
+        }
+        # Extract the icon that should be present.
+        expected_icon = log_type_icons.get(log_type, "")
+    
+        for i in range(self.log_list.count()):
+            item = self.log_list.item(i)
+            label = self.log_list.itemWidget(item)
+            if isinstance(label, QLabel):
+                plain_text = self.strip_html(label.text())
+                date_match = re.search(r"\[(\d{4}-\d{2}-\d{2})", plain_text)
+                if date_match:
+                    log_date = QDate.fromString(date_match.group(1), "yyyy-MM-dd")
+                else:
+                    #item.setHidden(True)
+                    continue
+            
+                date_ok = start_date <= log_date <= end_date
+
+                if log_type == "All":
+                    # Check if expected icon is in the plain text.
+                    type_ok = True
+                    
+                elif log_type == "Just Details":
+                    # "Just Details" should not contain any of the icons.
+                    type_ok = not any(icon in plain_text for icon in ["★", "■", "▲", "◆"])
+                    
+                else:
+                    expected_icon = log_type_icons.get(log_type, "")
+                    type_ok = expected_icon in plain_text
+
+                if item is not None:
+                    item.setHidden(not (date_ok and type_ok))
+                    
+    def clear_filters(self):
+        """Reset filtering to show all logs."""
+        for i in range(self.log_list.count()):
+            item = self.log_list.item(i)
+            item.setHidden(False)
+            
+            # Scroll to the last item in the log list
+            if self.log_list.count() > 0:
+                last_item = self.log_list.item(self.log_list.count() - 1)
+                self.log_list.scrollToItem(last_item)
+                print("Scrolled to the latest log entry.")
+    
+    def strip_html(self, html_text):
+        doc = QTextDocument()
+        doc.setHtml(html_text)
+        return doc.toPlainText()
+    
+    def save_log_counters(self):
+        """Save the log counters to a JSON file."""
+        filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
+        if self.current_file:
+            json_file = self.current_file.replace(filter_json, ".json")
+            try:
+                with open(json_file, "w", encoding="utf-8") as json_out:
+                    json.dump(self.log_counters, json_out, indent=4)
+                print(f"Log counters saved to {json_file}")
+            except Exception as e:
+                print(f"Error saving log counters: {e}")
+
 
 if __name__ == "__main__":
     print("Starting application...")
     app = QApplication(sys.argv)
-    window = LogApp()
+    window = WelcomeWindow()
     window.show()
     sys.exit(app.exec())
