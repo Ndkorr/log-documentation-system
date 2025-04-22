@@ -1,6 +1,25 @@
-from PyQt6.QtWidgets import QMainWindow, QFrame, QDateEdit, QSlider, QMenu, QDialog, QProgressDialog, QMenuBar, QLabel, QColorDialog, QApplication, QLineEdit, QListWidgetItem, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QListWidget, QInputDialog, QFileDialog, QMessageBox, QComboBox, QScrollArea, QSizePolicy, QGraphicsDropShadowEffect
-from PyQt6.QtCore import Qt, QDate, QSize, QRect, QPropertyAnimation, QSettings, QTimer, QThread, pyqtSignal, QEvent, QPoint, QEasingCurve, QSequentialAnimationGroup
-from PyQt6.QtGui import QColor, QFont, QBrush, QShortcut, QKeySequence, QAction, QTextDocument, QPixmap, QCursor
+from PyQt6.QtWidgets import (
+    QMainWindow, QFrame, QDateEdit, QSlider, 
+    QMenu, QDialog, QProgressDialog, QMenuBar, 
+    QLabel, QColorDialog, QApplication, QLineEdit, 
+    QListWidgetItem, QWidget, QVBoxLayout, QHBoxLayout, 
+    QTextEdit, QPushButton, QListWidget, QInputDialog, 
+    QFileDialog, QMessageBox, QComboBox, QScrollArea, 
+    QSizePolicy, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
+    QSpacerItem, QStackedWidget, QTabWidget, QToolButton,
+    QPlainTextEdit
+    )
+from PyQt6.QtCore import (
+    Qt, QDate, QSize, QRect, 
+    QPropertyAnimation, QSettings, QTimer, 
+    QThread, pyqtSignal, QEvent, QPoint, 
+    QEasingCurve, QSequentialAnimationGroup,
+    )
+from PyQt6.QtGui import (
+    QColor, QFont, QBrush, QShortcut, 
+    QKeySequence, QAction, QTextDocument, 
+    QPixmap, QCursor, QIntValidator
+    )
 from datetime import datetime
 import sys
 import psutil
@@ -17,6 +36,1864 @@ import string
 import names
 import shutil
 import time
+
+
+def get_config_dir():
+    config_dir = os.path.join(os.getcwd(), "config")
+    if not os.path.exists(config_dir):
+        os.makedirs(config_dir)
+    return config_dir
+
+
+
+class AnimatedPushButton(QPushButton):
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        # Modern stylesheet with rounded corners.
+        self.setStyleSheet("""
+            QPushButton:hover {
+                background-color: #E0F0FF;
+            }
+            QPushButton:pressed {
+                background-color: #B0D4FF;
+            }
+        """)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Create and assign a shadow effect.
+        self.effect = QGraphicsDropShadowEffect(self)
+        self.effect.setBlurRadius(0)
+        self.effect.setColor(Qt.GlobalColor.magenta)
+        self.effect.setOffset(0)
+        self.setGraphicsEffect(self.effect)
+        # Animation for the shadow's blur radius.
+        self.anim = QPropertyAnimation(self.effect, b"blurRadius")
+        self.anim.setDuration(300)
+    
+    def enterEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self.effect.blurRadius())
+        self.anim.setEndValue(15)
+        self.anim.start()
+        super().enterEvent(event)
+    
+    def leaveEvent(self, a0):
+        self.anim.stop()
+        self.anim.setStartValue(self.effect.blurRadius())
+        self.anim.setEndValue(0)
+        self.anim.start()
+        super().leaveEvent(a0)
+            
+
+class AnimateClickableLabel(QLabel):
+    clicked = pyqtSignal()
+    
+    def __init__(self, text="", parent=None, wizard=None):
+        super().__init__(text, parent)
+        self.wizard = wizard  # Store the wizard reference
+        # Set an initial style for padding and rounded corners (if desired)
+        self.setStyleSheet("""
+            font-size: 17px;
+            padding: 10px;
+            margin-left: 15px;
+            margin-right: 15px;
+            border: 1px solid transparent;
+            border-radius: 15px;
+        """)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setProperty("selected", False)
+        
+        # Create a shadow effect that will serve as our "border"
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(0)  # start with no blur (no glow)
+        self.shadow.setColor(Qt.GlobalColor.blue)  # choose your border/glow color
+        self.shadow.setOffset(0)
+        self.setGraphicsEffect(self.shadow)
+        
+        # Animation for the shadow's blur radius
+        self.anim = QPropertyAnimation(self.shadow, b"blurRadius")
+        self.anim.setDuration(300)
+        
+    def mousePressEvent(self, ev):
+        if ev is not None and ev.button() == Qt.MouseButton.LeftButton:
+            if self.wizard:  # Use the wizard reference to call the method
+                self.wizard.option_clicked(self)
+        
+    def enterEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(15)  # Adjust this value to control the "thickness" of the glow
+        self.anim.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, a0):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(0)
+        self.anim.start()
+        super().leaveEvent(a0)
+    
+    def setSelected(self, selected):
+        self.setProperty("selected", selected)
+        if selected:
+            self.setStyleSheet("""
+                font-size: 17px;
+                padding: 10px;
+                margin-left: 15px;
+                margin-right: 15px;
+                border: 1px solid #0078d7;
+                border-radius: 15px;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #d4acfa, stop: 1 #f27cc3
+                    );
+                font-weight: bold;
+            """)
+        else:
+            self.setStyleSheet("""
+                font-size: 17px;
+                padding: 10px;
+                margin-left: 15px;
+                margin-right: 15px;
+                border: 1px solid transparent;
+                border-radius: 15px;
+            """)
+
+
+class AnimatedClickableLabel2(QLabel):
+    clicked = pyqtSignal()
+    
+    def __init__(self, text="", parent=None, wizard=None):
+        super().__init__(text, parent)
+        self.wizard = wizard  # Store the wizard reference
+        # Set an initial style for padding and rounded corners (if desired)
+        self.setStyleSheet("""
+            font-size: 17px;
+            padding: 10px;
+            margin-left: 15px;
+            margin-right: 15px;
+            border: 1px solid transparent;
+            border-radius: 15px;
+        """)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setProperty("selected", False)
+        
+        # Create a shadow effect that will serve as our "border"
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(0)  # start with no blur (no glow)
+        self.shadow.setColor(Qt.GlobalColor.blue)  # choose your border/glow color
+        self.shadow.setOffset(0)
+        self.setGraphicsEffect(self.shadow)
+        
+        # Animation for the shadow's blur radius
+        self.anim = QPropertyAnimation(self.shadow, b"blurRadius")
+        self.anim.setDuration(300)
+        
+    def mousePressEvent(self, ev):
+        if ev is not None and ev.button() == Qt.MouseButton.LeftButton:
+            if self.wizard:  # Use the wizard reference to call the method
+                self.wizard.option_clicked2(self)
+        
+    def enterEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(15)  # Adjust this value to control the "thickness" of the glow
+        self.anim.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, a0):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(0)
+        self.anim.start()
+        super().leaveEvent(a0)
+    
+    def setSelected(self, selected):
+        self.setProperty("selected", selected)
+        if selected:
+            self.setStyleSheet("""
+                font-size: 17px;
+                padding: 10px;
+                margin-left: 15px;
+                margin-right: 15px;
+                border: 1px solid #0078d7;
+                border-radius: 15px;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #d4acfa, stop: 1 #f27cc3
+                    );
+                font-weight: bold;
+            """)
+        else:
+            self.setStyleSheet("""
+                font-size: 17px;
+                padding: 10px;
+                margin-left: 15px;
+                margin-right: 15px;
+                border: 1px solid transparent;
+                border-radius: 15px;
+            """)
+
+
+
+class AnimatedClickableLabel3(QLabel):
+    clicked = pyqtSignal()
+    
+    def __init__(self, text="", parent=None, wizard=None):
+        super().__init__(text, parent)
+        self.wizard = wizard  # Store the wizard reference
+        # Set an initial style for padding and rounded corners (if desired)
+        self.setStyleSheet("""
+            font-size: 17px;
+            padding: 10px;
+            margin-left: 15px;
+            margin-right: 15px;
+            border: 1px solid transparent;
+            border-radius: 15px;
+        """)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setProperty("selected", False)
+        
+        # Create a shadow effect that will serve as our "border"
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(0)  # start with no blur (no glow)
+        self.shadow.setColor(Qt.GlobalColor.blue)  # choose your border/glow color
+        self.shadow.setOffset(0)
+        self.setGraphicsEffect(self.shadow)
+        
+        # Animation for the shadow's blur radius
+        self.anim = QPropertyAnimation(self.shadow, b"blurRadius")
+        self.anim.setDuration(300)
+        
+    def mousePressEvent(self, ev):
+        if ev is not None and ev.button() == Qt.MouseButton.LeftButton:
+            if self.wizard:  # Use the wizard reference to call the method
+                self.wizard.option_clicked3(self)
+        
+    def enterEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(15)  # Adjust this value to control the "thickness" of the glow
+        self.anim.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, a0):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(0)
+        self.anim.start()
+        super().leaveEvent(a0)
+    
+    def setSelected(self, selected):
+        self.setProperty("selected", selected)
+        if selected:
+            self.setStyleSheet("""
+                font-size: 17px;
+                padding: 10px;
+                margin-left: 15px;
+                margin-right: 15px;
+                border: 1px solid #0078d7;
+                border-radius: 15px;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #d4acfa, stop: 1 #f27cc3
+                    );
+                font-weight: bold;
+            """)
+        else:
+            self.setStyleSheet("""
+                font-size: 17px;
+                padding: 10px;
+                margin-left: 15px;
+                margin-right: 15px;
+                border: 1px solid transparent;
+                border-radius: 15px;
+            """)
+            
+
+class AnimatedClickableLabel4(QLabel):
+    clicked = pyqtSignal()
+    
+    def __init__(self, text="", parent=None, wizard=None):
+        super().__init__(text, parent)
+        self.wizard = wizard  # Store the wizard reference
+        # Set an initial style for padding and rounded corners (if desired)
+        self.setStyleSheet("""
+            font-size: 17px;
+            padding: 10px;
+            margin-left: 15px;
+            margin-right: 15px;
+            border: 1px solid transparent;
+            border-radius: 15px;
+        """)
+        self.setFixedHeight(50)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setProperty("selected", False)
+        
+        # Create a shadow effect that will serve as our "border"
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(0)  # start with no blur (no glow)
+        self.shadow.setColor(Qt.GlobalColor.blue)  # choose your border/glow color
+        self.shadow.setOffset(0)
+        self.setGraphicsEffect(self.shadow)
+        
+        # Animation for the shadow's blur radius
+        self.anim = QPropertyAnimation(self.shadow, b"blurRadius")
+        self.anim.setDuration(300)
+        
+    def mousePressEvent(self, ev):
+        if ev is not None and ev.button() == Qt.MouseButton.LeftButton:
+            if self.wizard:  # Use the wizard reference to call the method
+                self.wizard.option_clicked4(self)
+        
+    def enterEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(15)  # Adjust this value to control the "thickness" of the glow
+        self.anim.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, a0):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(0)
+        self.anim.start()
+        super().leaveEvent(a0)
+    
+    def setSelected(self, selected):
+        self.setProperty("selected", selected)
+        if selected:
+            self.setStyleSheet("""
+                font-size: 17px;
+                padding: 10px;
+                margin-left: 15px;
+                margin-right: 15px;
+                border: 1px solid #0078d7;
+                border-radius: 15px;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #d4acfa, stop: 1 #f27cc3
+                    );
+                font-weight: bold;
+            """)
+        else:
+            self.setStyleSheet("""
+                font-size: 17px;
+                padding: 10px;
+                margin-left: 15px;
+                margin-right: 15px;
+                border: 1px solid transparent;
+                border-radius: 15px;
+            """)
+
+class AnimatedClickableLabel5(QLabel):
+    clicked = pyqtSignal()
+    
+    def __init__(self, text="", parent=None, wizard=None):
+        super().__init__(text, parent)
+        self.wizard = wizard  # Store the wizard reference
+        # Set an initial style for padding and rounded corners (if desired)
+        self.setStyleSheet("""
+            font-size: 17px;
+            padding: 10px;
+            margin-left: 15px;
+            margin-right: 15px;
+            border: 1px solid transparent;
+            border-radius: 15px;
+        """)
+        self.setFixedHeight(50)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setProperty("selected", False)
+        
+        # Create a shadow effect that will serve as our "border"
+        self.shadow = QGraphicsDropShadowEffect(self)
+        self.shadow.setBlurRadius(0)  # start with no blur (no glow)
+        self.shadow.setColor(Qt.GlobalColor.blue)  # choose your border/glow color
+        self.shadow.setOffset(0)
+        self.setGraphicsEffect(self.shadow)
+        
+        # Animation for the shadow's blur radius
+        self.anim = QPropertyAnimation(self.shadow, b"blurRadius")
+        self.anim.setDuration(300)
+        
+    def mousePressEvent(self, ev):
+        if ev is not None and ev.button() == Qt.MouseButton.LeftButton:
+            if self.wizard:  # Use the wizard reference to call the method
+                self.wizard.option_clicked5(self)
+        
+    def enterEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(15)  # Adjust this value to control the "thickness" of the glow
+        self.anim.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, a0):
+        self.anim.stop()
+        self.anim.setStartValue(self.shadow.blurRadius())
+        self.anim.setEndValue(0)
+        self.anim.start()
+        super().leaveEvent(a0)
+    
+    def setSelected(self, selected):
+        self.setProperty("selected", selected)
+        if selected:
+            self.setStyleSheet("""
+                font-size: 17px;
+                padding: 10px;
+                margin-left: 15px;
+                margin-right: 15px;
+                border: 1px solid #0078d7;
+                border-radius: 15px;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #d4acfa, stop: 1 #f27cc3
+                    );
+                font-weight: bold;
+            """)
+        else:
+            self.setStyleSheet("""
+                font-size: 17px;
+                padding: 10px;
+                margin-left: 15px;
+                margin-right: 15px;
+                border: 1px solid transparent;
+                border-radius: 15px;
+            """)
+
+    
+class SetupWizard(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Log Documentation Setup Wizard")
+        self.setFixedSize(550, 450)
+        self.setStyleSheet("background-color: #FFFFFF;")
+        self.selected_option = None
+        self.selected_log_mode = None
+        
+        # Initialize text box references to None
+        self.name_text_box = None
+        self.title_text_box = None
+        
+        self.text_size_box = None
+        self.line_spacing_box = None
+        self.dictionary_box = None
+        
+        self.init_ui()
+
+    def init_ui(self):
+        # Main vertical layout
+        self.stacked_widget = QStackedWidget(self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.stacked_widget)
+        
+        # Create the first page (options page).
+        self.page1 = QWidget()
+        page1_layout = QVBoxLayout(self.page1)
+        page1_layout.setSpacing(15)
+        page1_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Title label
+        title_label = QLabel("Log Documentation Setup Wizard")
+        title_label.setStyleSheet("""
+            font-size: 25px;
+            font-weight: bold;
+            background: qlineargradient(
+            x1: 0, y1: 0, x2: 1, y2: 0,
+            stop: 0 #d4acfa, stop: 1 #f27cc3
+            );
+            font-family: Segoe UI;
+        """)
+        title_label.setContentsMargins(0, 10, 0, 10)
+        title_label.setFixedHeight(80)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        page1_layout.addWidget(title_label)
+        
+        # Instruction label
+        instruction_label = QLabel("I want to document:")
+        instruction_label.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            font-family: Segoe UI;
+            margin-top: 0px;
+            margin-left: 25px;    
+        """)
+        page1_layout.addWidget(instruction_label)
+        
+        # Option layouts
+        self.option_layouts = []
+        self.options = []
+        option_texts = [
+            "Something general, it's up to me.",
+            "Bugs and errors",
+            "UI/UX Changes",
+            "Others:"
+        ]
+        for text in option_texts:
+            # Create a vertical layout for each option
+            option_layout = QVBoxLayout()
+            option_layout.setSpacing(5)
+            
+            # Replace OptionLabel with AnimatedClickableLabel
+            option_label = AnimateClickableLabel(text, self, wizard=self)
+            option_label.clicked.connect(lambda text=text: self.option_clicked(text))
+            option_layout.addWidget(option_label)
+            
+            page1_layout.addLayout(option_layout)
+            self.option_layouts.append(option_layout)
+            self.options.append(option_label)
+        
+        # Add a spacer before the buttons to push them to the bottom.
+        spacer = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        page1_layout.addItem(spacer)
+        
+        # Horizontal layout for Next / Cancel buttons.
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        self.next_button = AnimatedPushButton("Next")
+        self.next_button.setStyleSheet("""
+            margin-bottom: 15px;
+            margin-right: 5px;
+            font-size: 14px;
+            padding: 6px 12px;
+            border: 2px solid #0078d7;
+            border-radius: 8px;
+            color: black;
+        """)
+        self.next_button.setEnabled(False)  # Disable by default
+        self.next_button.clicked.connect(self.on_next_clicked)
+        btn_layout.addWidget(self.next_button)
+        
+        self.cancel_button = AnimatedPushButton("Cancel")
+        self.cancel_button.setStyleSheet("""
+            margin-bottom: 15px;
+            margin-right: 15px;
+            font-size: 14px;
+            padding: 6px 12px;
+            border: 2px solid #0078d7;
+            border-radius: 8px;
+            color: black;
+        """)
+        self.cancel_button.clicked.connect(self.reject)
+        btn_layout.addWidget(self.cancel_button)
+        
+        page1_layout.addLayout(btn_layout)
+        self.stacked_widget.addWidget(self.page1)
+        
+        # Create the second page (new frame).
+        self.page2 = QWidget()
+        page2_layout = QVBoxLayout(self.page2)
+        page2_layout.setSpacing(15)
+        page2_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Title label
+        title_label2 = QLabel("Log Documentation Setup Wizard")
+        title_label2.setStyleSheet("""
+            font-size: 25px;
+            font-weight: bold;
+            background: qlineargradient(
+            x1: 0, y1: 0, x2: 1, y2: 0,
+            stop: 0 #d4acfa, stop: 1 #f27cc3
+            );
+            font-family: Segoe UI;
+        """)
+        title_label2.setContentsMargins(0, 10, 0, 10)
+        title_label2.setFixedHeight(80)
+        title_label2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        page2_layout.addWidget(title_label2)
+        
+        # Instruction label
+        instruction_label2 = QLabel("On each lds, I want to:")
+        instruction_label2.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            font-family: Segoe UI;
+            margin-top: 0px;
+            margin-left: 25px;    
+        """)
+        page2_layout.addWidget(instruction_label2)
+        
+        # Option layouts
+        self.option_layouts2 = []
+        self.options2 = []
+        option_texts2 = [
+            "Set my name to",
+            "Set document title to",
+            "Proceed on default"
+        ]
+        for text in option_texts2:
+            # Create a vertical layout for each option
+            option_layout2 = QVBoxLayout()
+            option_layout2.setSpacing(5)
+    
+            # Replace OptionLabel with AnimatedClickableLabel2
+            option_label2 = AnimatedClickableLabel2(text, self, wizard=self)
+            option_label2.clicked.connect(lambda text=text: self.option_clicked2(text))
+            option_layout2.addWidget(option_label2)
+    
+            page2_layout.addLayout(option_layout2)
+            self.option_layouts2.append(option_layout2)
+            self.options2.append(option_label2)
+
+        # Add a spacer before the navigation buttons to push them to the bottom.
+        spacer2 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        page2_layout.addItem(spacer2)
+        
+        
+        # Navigation buttons for page2.
+        btn_layout2 = QHBoxLayout()
+        btn_layout2.addStretch()
+        self.back_button = AnimatedPushButton("Back")
+        self.back_button.setStyleSheet("""
+            margin-bottom: 15px;
+            margin-right: 5px;
+            font-size: 14px;
+            padding: 6px 12px;
+            border: 2px solid #0078d7;
+            border-radius: 8px;
+            color: black;
+        """)
+        self.back_button.clicked.connect(self.on_back_clicked)
+        btn_layout2.addWidget(self.back_button)
+
+        self.next_button2 = AnimatedPushButton("Next")
+        self.next_button2.setStyleSheet("""
+            margin-bottom: 15px;
+            margin-right: 15px;
+            font-size: 14px;
+            padding: 6px 18px;
+            border: 2px solid #0078d7;
+            border-radius: 8px;
+            color: black;
+        """)
+        self.next_button2.setEnabled(False)  # Disable by default
+        self.next_button2.clicked.connect(self.on_next_clicked2)
+        btn_layout2.addWidget(self.next_button2)
+
+        page2_layout.addLayout(btn_layout2)
+        self.stacked_widget.addWidget(self.page2)
+        
+        # Create the third page (options page).
+        self.page3 = QWidget()
+        page3_layout = QVBoxLayout(self.page3)
+        page3_layout.setSpacing(15)
+        page3_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Title label
+        title_label3 = QLabel("Log Documentation Setup Wizard")
+        title_label3.setStyleSheet("""
+            font-size: 25px;
+            font-weight: bold;
+            background: qlineargradient(
+            x1: 0, y1: 0, x2: 1, y2: 0,
+            stop: 0 #d4acfa, stop: 1 #f27cc3
+            );
+            font-family: Segoe UI;
+        """)
+        title_label3.setContentsMargins(0, 10, 0, 10)
+        title_label3.setFixedHeight(80)
+        title_label3.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        page3_layout.addWidget(title_label3)
+        
+        # Instruction label
+        instruction_label3 = QLabel("On exporting document, I want to:")
+        instruction_label3.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            font-family: Segoe UI;
+            margin-top: 0px;
+            margin-left: 25px;    
+        """)
+        page3_layout.addWidget(instruction_label3)
+        
+        # Option layouts
+        self.option_layouts3 = []
+        self.options3 = []
+        option_texts3 = [
+            "Set the text size to",
+            "Set the line spacing to",
+            "Proceed on default"
+        ]
+        for text in option_texts3:
+            # Create a vertical layout for each option
+            option_layout3 = QVBoxLayout()
+            option_layout3.setSpacing(5)
+    
+            # Replace OptionLabel with AnimatedClickableLabel3
+            option_label3 = AnimatedClickableLabel3(text, self, wizard=self)
+            option_label3.clicked.connect(lambda text=text: self.option_clicked3(text))
+            option_layout3.addWidget(option_label3)
+    
+            page3_layout.addLayout(option_layout3)
+            self.option_layouts3.append(option_layout3)
+            self.options3.append(option_label3)
+
+        # Add a spacer before the navigation buttons to push them to the bottom.
+        spacer3 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        page3_layout.addItem(spacer3)
+        
+        # Navigation buttons for page2.
+        btn_layout3 = QHBoxLayout()
+        btn_layout3.addStretch()
+        self.back_button2 = AnimatedPushButton("Back")
+        self.back_button2.setStyleSheet("""
+            margin-bottom: 15px;
+            margin-right: 5px;
+            font-size: 14px;
+            padding: 6px 12px;
+            border: 2px solid #0078d7;
+            border-radius: 8px;
+            color: black;
+        """)
+        self.back_button2.clicked.connect(self.on_back_clicked2)
+        btn_layout3.addWidget(self.back_button2)
+
+        self.next_button3 = AnimatedPushButton("Next")
+        self.next_button3.setStyleSheet("""
+            margin-bottom: 15px;
+            margin-right: 15px;
+            font-size: 14px;
+            padding: 6px 18px;
+            border: 2px solid #0078d7;
+            border-radius: 8px;
+            color: black;
+        """)
+        self.next_button3.setEnabled(False)  # Disable by default
+        self.next_button3.clicked.connect(self.on_next_clicked3)
+        btn_layout3.addWidget(self.next_button3)
+        
+        page3_layout.addLayout(btn_layout3)
+        self.stacked_widget.addWidget(self.page3)
+        
+        # Create the fourth page (new frame).
+        self.page4 = QWidget()
+        page4_layout = QVBoxLayout(self.page4)
+        page4_layout.setSpacing(15)
+        page4_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Title label
+        title_label4 = QLabel("Log Documentation Setup Wizard")
+        title_label4.setStyleSheet("""
+            font-size: 25px;
+            font-weight: bold;
+            background: qlineargradient(
+            x1: 0, y1: 0, x2: 1, y2: 0,
+            stop: 0 #d4acfa, stop: 1 #f27cc3
+            );
+            font-family: Segoe UI;
+        """)
+        title_label4.setContentsMargins(0, 10, 0, 10)
+        title_label4.setFixedHeight(80)
+        title_label4.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        page4_layout.addWidget(title_label4)
+        
+        # Instruction label
+        instruction_label4 = QLabel("On exporting document, I want to:")
+        instruction_label4.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            font-family: Segoe UI;
+            margin-top: 0px;
+            margin-left: 25px;    
+        """)
+        page4_layout.addWidget(instruction_label4)
+        
+        # Option layouts
+        self.option_layouts4 = []
+        self.options4 = []
+        option_texts4 = [
+            "Set font to:",
+            "Proceed on default"
+        ]
+        for text in option_texts4:
+            # Create a vertical layout for each option
+            option_layout4 = QVBoxLayout()
+            option_layout4.setSpacing(5)
+    
+            # Replace OptionLabel with AnimatedClickableLabel2
+            option_label4 = AnimatedClickableLabel4(text, self, wizard=self)
+            option_label4.clicked.connect(lambda text=text: self.option_clicked4(text))
+            option_layout4.addWidget(option_label4)
+    
+            page4_layout.addLayout(option_layout4)
+            self.option_layouts4.append(option_layout4)
+            self.options4.append(option_label4)
+
+        # Add a spacer before the navigation buttons to push them to the bottom.
+        spacer4 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        page4_layout.addItem(spacer4)
+        
+        # Navigation buttons for page2.
+        btn_layout4 = QHBoxLayout()
+        btn_layout4.addStretch()
+        self.back_button3 = AnimatedPushButton("Back")
+        self.back_button3.setStyleSheet("""
+            margin-bottom: 15px;
+            margin-right: 5px;
+            font-size: 14px;
+            padding: 6px 12px;
+            border: 2px solid #0078d7;
+            border-radius: 8px;
+            color: black;
+        """)
+        self.back_button3.clicked.connect(self.on_back_clicked3)
+        btn_layout4.addWidget(self.back_button3)
+
+        self.next_button4 = AnimatedPushButton("Next")
+        self.next_button4.setStyleSheet("""
+            margin-bottom: 15px;
+            margin-right: 15px;
+            font-size: 14px;
+            padding: 6px 18px;
+            border: 2px solid #0078d7;
+            border-radius: 8px;
+            color: black;
+        """)
+        self.next_button4.setEnabled(False)  # Disable by default
+        self.next_button4.clicked.connect(self.on_next_clicked4)
+        btn_layout4.addWidget(self.next_button4)
+        
+        page4_layout.addLayout(btn_layout4)
+        self.stacked_widget.addWidget(self.page4)
+        
+        
+        # Create the fifth/last page (new frame).
+        self.page5 = QWidget()
+        page5_layout = QVBoxLayout(self.page5)
+        page5_layout.setSpacing(15)
+        page5_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Title label
+        title_label5 = QLabel("Log Documentation Setup Wizard")
+        title_label5.setStyleSheet("""
+            font-size: 25px;
+            font-weight: bold;
+            background: qlineargradient(
+            x1: 0, y1: 0, x2: 1, y2: 0,
+            stop: 0 #d4acfa, stop: 1 #f27cc3
+            );
+            font-family: Segoe UI;
+        """)
+        title_label5.setContentsMargins(0, 10, 0, 10)
+        title_label5.setFixedHeight(80)
+        title_label5.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        page5_layout.addWidget(title_label5)
+        
+        # Instruction label
+        instruction_label5 = QLabel("This application contains a built-in dictionary on\neach log mode. Do you want to create your \nown?:")
+        instruction_label5.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            font-family: Segoe UI;
+            margin-top: 0px;
+            margin-left: 25px;    
+        """)
+        page5_layout.addWidget(instruction_label5)
+        
+        # Option layouts
+        self.option_layouts5 = []
+        self.options5 = []
+        option_texts5 = [
+            "Yes",
+            "No, Use the default"
+        ]
+        for text in option_texts5:
+            # Create a vertical layout for each option
+            option_layout5 = QVBoxLayout()
+            option_layout5.setSpacing(5)
+    
+            # Replace OptionLabel with AnimatedClickableLabel2
+            option_label5 = AnimatedClickableLabel5(text, self, wizard=self)
+            option_label5.clicked.connect(lambda text=text: self.option_clicked5(text))
+            option_layout5.addWidget(option_label5)
+    
+            page5_layout.addLayout(option_layout5)
+            self.option_layouts5.append(option_layout5)
+            self.options5.append(option_label5)
+
+        # Add a spacer before the navigation buttons to push them to the bottom.
+        spacer5 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        page5_layout.addItem(spacer5)
+        
+        # Navigation buttons for page2.
+        btn_layout5 = QHBoxLayout()
+        btn_layout5.addStretch()
+        self.back_button4 = AnimatedPushButton("Back")
+        self.back_button4.setStyleSheet("""
+            margin-bottom: 15px;
+            margin-right: 5px;
+            font-size: 14px;
+            padding: 6px 12px;
+            border: 2px solid #0078d7;
+            border-radius: 8px;
+            color: black;
+        """)
+        self.back_button4.clicked.connect(self.on_back_clicked4)
+        btn_layout5.addWidget(self.back_button4)
+
+        self.next_button5 = AnimatedPushButton("Finish")
+        self.next_button5.setStyleSheet("""
+            margin-bottom: 15px;
+            margin-right: 15px;
+            font-size: 14px;
+            padding: 6px 15px;
+            border: 2px solid #0078d7;
+            border-radius: 8px;
+            color: black;
+        """)
+        self.next_button5.setEnabled(False)  # Disable by default
+        self.next_button5.clicked.connect(self.on_next_clicked5)
+        btn_layout5.addWidget(self.next_button5)
+        
+        page5_layout.addLayout(btn_layout5)
+        self.stacked_widget.addWidget(self.page5)
+    
+    def option_clicked(self, clicked_option):
+        # Unselect all options and remove subtext labels.
+        for option, layout in zip(self.options, self.option_layouts):
+            option.setSelected(False)
+            if layout.count() > 1:  # Remove subtext if it exists
+                subtext_label = layout.itemAt(1).widget()
+                layout.removeWidget(subtext_label)
+                subtext_label.deleteLater()
+        
+        # Select the clicked option.
+        clicked_option.setSelected(True)
+        self.selected_option = clicked_option.text()
+        self.selected_log_mode = clicked_option.text()
+        
+        # Add the subtext label below the clicked option.
+        self.add_subtext(clicked_option)
+    
+    def add_subtext(self, clicked_option):
+        subtext_map = {
+            "Something general, it's up to me.": "You can document anything you want.",
+            "Bugs and errors": "Document issues and errors encountered.",
+            "UI/UX Changes": "Document changes made to the user interface or experience.",
+            "Others:": ""
+        }
+        subtext = subtext_map.get(clicked_option.text(), "")
+        
+        if clicked_option.text() == "Others:":
+            # Combobox as a subtext
+            subtext_label = QComboBox()
+            subtext_label.addItems([
+                "myExercise",
+                "Persona note",
+                "myWiki"
+            ])
+            subtext_label.setStyleSheet("""                                  
+                QComboBox {
+                    margin-left: 25px;
+                    margin-right: 105px;
+                    margin-bottom: 0px;
+                    font-size: 15px;
+                    font-family: 'Segoe UI';
+                    background: #f7f7fa;
+                    border: 1.5px solid #a78bfa;
+                    border-radius: 8px;
+                    padding: 4px 12px;
+                    min-width: 0px;
+                    color: #333;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                    background: #e0e7ff;
+                    width: 28px;
+                    border-top-right-radius: 8px;
+                    border-bottom-right-radius: 8px;
+                }
+                QComboBox QAbstractItemView {
+                    margin-left: 25px;
+                    font-size: 15px;
+                    background: #fff;
+                    border: 1px solid #a78bfa;
+                    selection-background-color: #e0e7ff;
+                    selection-color: #333;
+                }
+            """)
+            subtext_label.setFixedWidth(325)
+            subtext_label.setFixedHeight(30)
+            
+            def validate_combo():
+                # Enable Next if a valid selection is made (not -1)
+                self.next_button.setEnabled(subtext_label.currentIndex() != -1)
+                if subtext_label.currentIndex() != -1:
+                    self.next_button.setStyleSheet("""
+                        margin-bottom: 15px;
+                        margin-right: 5px;
+                        font-size: 14px;
+                        padding: 6px 12px;
+                        border: 2px solid #0078d7;
+                        border-radius: 8px;
+                        color: black;
+                        background: qlineargradient(
+                            x1: 0, y1: 0, x2: 1, y2: 0,
+                            stop: 0 #42f5d7, stop: 1 #14b7fc
+                        );
+                    """)
+                else:
+                    self.next_button.setStyleSheet("""
+                        margin-bottom: 15px;
+                        margin-right: 5px;
+                        font-size: 14px;
+                        padding: 6px 12px;
+                        border: 2px solid #0078d7;
+                        border-radius: 8px;
+                        color: black;
+                    """)
+            subtext_label.currentIndexChanged.connect(validate_combo)
+            validate_combo()  # Initial validation
+        
+        else:
+            subtext_label = QLabel(subtext)
+            subtext_label.setStyleSheet("""
+                font-size: 14px;
+                font-style: italic;
+                margin-left: 25px;
+                color: #555555;
+            """)
+        
+            # Enable the "Next" button.
+            self.next_button.setEnabled(True)
+            self.next_button.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 5px;
+                font-size: 14px;
+                padding: 6px 12px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #42f5d7, stop: 1 #14b7fc
+                );
+            """)
+        
+        # Apply an opacity effect for the fade-in animation.
+        opacity_effect = QGraphicsOpacityEffect(subtext_label)
+        subtext_label.setGraphicsEffect(opacity_effect)
+        opacity_effect.setOpacity(0)
+        
+        fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
+        fade_anim.setDuration(500)  # Duration in milliseconds
+        fade_anim.setStartValue(0)
+        fade_anim.setEndValue(1)
+        fade_anim.start()  # Animation will be garbage collected after finishing
+        
+        # Keep a reference to avoid premature garbage collection.
+        # Store the animation reference in a dictionary to avoid garbage collection
+        if not hasattr(self, "_animations"):
+            self._animations = {}
+        self._animations[subtext_label] = fade_anim
+        
+        
+        subtext_label.setVisible(True)
+        # Find the layout of the clicked option and add the subtext label.
+        for option, layout in zip(self.options, self.option_layouts):
+            if option == clicked_option:
+                layout.addWidget(subtext_label)
+                break
+    
+    def option_clicked2(self, clicked_option):
+        # If "Proceed on default" is clicked, clear all selections.
+        if clicked_option.text() == "Proceed on default":
+            for option, layout in zip(self.options2, self.option_layouts2):
+                option.setSelected(False)
+                if layout.count() > 1:  # Remove subtext if it exists
+                    subtext_label = layout.itemAt(1).widget()
+                    layout.removeWidget(subtext_label)
+                    subtext_label.deleteLater()
+            
+            # Clear references to text boxes
+            self.name_text_box = None
+            self.title_text_box = None       
+            # Select only "Proceed on default".
+            clicked_option.setSelected(True)
+            self.selected_option = clicked_option.text()
+            self.add_subtext2(clicked_option)
+            self.validate_both_inputs()
+            self.next_button2.setEnabled(True)
+            # Enable the "Next" button.
+            self.next_button2.setEnabled(True)
+            self.next_button2.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 18px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #42f5d7, stop: 1 #14b7fc
+                );
+            """)
+            return
+
+        # If any other option is clicked, toggle its selection.
+        if clicked_option.property("selected"):
+            # Deselect the option and remove its subtext.
+            clicked_option.setSelected(False)
+            for option, layout in zip(self.options2, self.option_layouts2):
+                if option == clicked_option and layout.count() > 1:
+                    subtext_label = layout.itemAt(1).widget()
+                    layout.removeWidget(subtext_label)
+                    subtext_label.deleteLater()
+                    # Clear the reference if this was the text size or line spacing box
+                    if option.text() == "Set my name to":
+                        self.name_text_box = None
+                    elif option.text() == "Set document title to":
+                        self.title_text_box = None
+                    break
+        else:
+            # Select the option and add its subtext.
+            clicked_option.setSelected(True)
+            self.add_subtext2(clicked_option)
+
+        # Ensure "Proceed on default" is deselected if any other option is selected.
+        for option, layout in zip(self.options2, self.option_layouts2):
+            if option.text() == "Proceed on default":
+                if option.property("selected"):
+                    # Remove subtext if "Proceed on default" is deselected.
+                    if layout.count() > 1:
+                        subtext_label = layout.itemAt(1).widget()
+                        layout.removeWidget(subtext_label)
+                        subtext_label.deleteLater()
+                option.setSelected(False)
+                break
+        self.validate_both_inputs()
+
+    def add_subtext2(self, clicked_option):
+        subtext_map = {
+            "Set my name to": "",
+            "Set document title to": "",
+            "Proceed on default": "Continue with the default settings."
+        }
+        subtext = subtext_map.get(clicked_option.text(), "")
+        # Handle "Proceed on default" differently (no text box).
+        if clicked_option.text() == "Proceed on default":
+            # Clear references to text boxes since they are being removed.
+            self.name_text_box = None
+            self.title_text_box = None
+            
+            subtext_label = QLabel(subtext)
+            subtext_label.setEnabled(True)
+            subtext_label.setStyleSheet("""
+                font-size: 14px;
+                font-style: italic;
+                margin-left: 25px;
+                color: #555555;
+            """)
+            # Enable the "Next" button.
+            self.next_button2.setEnabled(True)
+            self.next_button2.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 18px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #42f5d7, stop: 1 #14b7fc
+                );
+            """)
+        else:
+            # For other options, use a text box.
+            subtext_label = QPlainTextEdit(subtext)
+            subtext_label.setStyleSheet("""
+                font-size: 14px;
+                font-style: italic;
+                margin-left: 25px;
+                margin-right: 105px;
+                border: none;
+                color: #555555;
+            """)
+            subtext_label.setFixedHeight(25)  # Adjust height to match QLabel's appearance
+            subtext_label.setPlaceholderText("Enter your input here...")  # Add placeholder text
+            subtext_label.setFocus()
+            
+            a = clicked_option.text() == "Set my name to"
+            
+            # Store references to the text boxes for validation.
+            if clicked_option.text() == "Set my name to":
+                self.next_button2.setEnabled(False)
+                self.next_button2.setStyleSheet("""
+                    margin-bottom: 15px;
+                    margin-right: 15px;
+                    font-size: 14px;
+                    padding: 6px 18px;
+                    border: 2px solid #0078d7;
+                    border-radius: 8px;
+                    color: black;
+                """)
+                self.name_text_box = subtext_label
+                
+            elif clicked_option.text() == "Set document title to":
+                self.next_button2.setEnabled(False)
+                self.next_button2.setStyleSheet("""
+                    margin-bottom: 15px;
+                    margin-right: 15px;
+                    font-size: 14px;
+                    padding: 6px 18px;
+                    border: 2px solid #0078d7;
+                    border-radius: 8px;
+                    color: black;
+                """)
+                self.title_text_box = subtext_label
+
+            # Connect the textChanged signal to the validation method.
+            subtext_label.textChanged.connect(self.validate_both_inputs)
+                
+            
+        
+        # Apply an opacity effect for the fade-in animation.
+        opacity_effect = QGraphicsOpacityEffect(subtext_label)
+        subtext_label.setGraphicsEffect(opacity_effect)
+        opacity_effect.setOpacity(0)
+    
+        fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
+        fade_anim.setDuration(500)  # Duration in milliseconds
+        fade_anim.setStartValue(0)
+        fade_anim.setEndValue(1)
+        fade_anim.start()  # Animation will be garbage collected after finishing
+    
+        # Keep a reference to avoid premature garbage collection.
+        if not hasattr(self, "_animations"):
+            self._animations = {}
+        self._animations[subtext_label] = fade_anim
+    
+        subtext_label.setVisible(True)
+        # Find the layout of the clicked option and add the subtext label.
+        for option, layout in zip(self.options2, self.option_layouts2):
+            if option == clicked_option:
+                layout.addWidget(subtext_label)
+                break
+    
+    def option_clicked3(self, clicked_option):
+        # If "Proceed on default" is clicked, clear all selections.
+        if clicked_option.text() == "Proceed on default":
+            for option, layout in zip(self.options3, self.option_layouts3):
+                option.setSelected(False)
+                if layout.count() > 1:  # Remove subtext if it exists
+                    subtext_label = layout.itemAt(1).widget()
+                    layout.removeWidget(subtext_label)
+                    subtext_label.deleteLater()
+                    
+            # Clear references to text boxes
+            self.text_size_box = None
+            self.line_spacing_box = None        
+            # Select only "Proceed on default".
+            clicked_option.setSelected(True)
+            self.selected_option = clicked_option.text()
+            self.add_subtext3(clicked_option)
+            self.validate_both_inputs2()
+            # Enable the "Next" button.
+            self.next_button3.setEnabled(True)
+            self.next_button3.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 18px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #42f5d7, stop: 1 #14b7fc
+                );
+            """)
+            return
+
+        # If any other option is clicked, toggle its selection.
+        if clicked_option.property("selected"):
+            # Deselect the option and remove its subtext.
+            clicked_option.setSelected(False)
+            for option, layout in zip(self.options3, self.option_layouts3):
+                if option == clicked_option and layout.count() > 1:
+                    subtext_label = layout.itemAt(1).widget()
+                    layout.removeWidget(subtext_label)
+                    subtext_label.deleteLater()
+                    # Clear the reference if this was the text size or line spacing box
+                    if option.text() == "Set the text size to":
+                        self.text_size_box = None
+                    elif option.text() == "Set the line spacing to":
+                        self.line_spacing_box = None
+                    break
+            self.validate_both_inputs2()
+        else:
+            # Select the option and add its subtext.
+            clicked_option.setSelected(True)
+            self.add_subtext3(clicked_option)
+
+        # Ensure "Proceed on default" is deselected if any other option is selected.
+        for option, layout in zip(self.options3, self.option_layouts3):
+            if option.text() == "Proceed on default":
+                if option.property("selected"):
+                    # Remove subtext if "Proceed on default" is deselected.
+                    if layout.count() > 1:
+                        subtext_label = layout.itemAt(1).widget()
+                        layout.removeWidget(subtext_label)
+                        subtext_label.deleteLater()
+                option.setSelected(False)
+                break
+
+    def add_subtext3(self, clicked_option):
+        subtext_map = {
+            "Set the text size to": "",
+            "Set the line spacing to": "",
+            "Proceed on default": "Continue with the default settings."
+        }
+        subtext = subtext_map.get(clicked_option.text(), "")
+        # Handle "Proceed on default" differently (no text box).
+        if clicked_option.text() == "Proceed on default":
+            # Clear references to text boxes since they are being removed.
+            self.text_size_box = None
+            self.line_spacing_box = None
+            
+            subtext_label = QLabel(subtext)
+            subtext_label.setEnabled(True)
+            subtext_label.setStyleSheet("""
+                font-size: 14px;
+                font-style: italic;
+                margin-left: 25px;
+                color: #555555;
+            """)
+            # Enable the "Next" button.
+            self.next_button3.setEnabled(True)
+            self.next_button3.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 18px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #42f5d7, stop: 1 #14b7fc
+                );
+            """)
+        else:
+            # Use QLineEdit for numeric input
+            subtext_label = QLineEdit("")
+            subtext_label.setValidator(QIntValidator(1, 99, self))  # Only allow numbers
+            subtext_label.setStyleSheet("""
+                font-size: 14px;
+                font-style: italic;
+                margin-left: 25px;
+                margin-right: 105px;
+                border: none;
+                color: #555555;
+            """)
+            subtext_label.setFixedHeight(25)  # Adjust height to match QLabel's appearance
+            subtext_label.setPlaceholderText("Enter your input here...")  # Add placeholder text
+            subtext_label.setFocus()
+            
+            
+            # Store references to the text boxes for validation.
+            if clicked_option.text() == "Set the text size to":
+                self.next_button3.setEnabled(False)
+                self.next_button3.setStyleSheet("""
+                    margin-bottom: 15px;
+                    margin-right: 15px;
+                    font-size: 14px;
+                    padding: 6px 18px;
+                    border: 2px solid #0078d7;
+                    border-radius: 8px;
+                    color: black;
+                """)
+                self.text_size_box = subtext_label
+                
+            elif clicked_option.text() == "Set the line spacing to":
+                self.next_button3.setEnabled(False)
+                self.next_button3.setStyleSheet("""
+                    margin-bottom: 15px;
+                    margin-right: 15px;
+                    font-size: 14px;
+                    padding: 6px 18px;
+                    border: 2px solid #0078d7;
+                    border-radius: 8px;
+                    color: black;
+                """)
+                self.line_spacing_box = subtext_label
+
+            # Connect the textChanged signal to the validation method.
+            subtext_label.textChanged.connect(self.validate_both_inputs2)
+                
+            
+        
+        # Apply an opacity effect for the fade-in animation.
+        opacity_effect = QGraphicsOpacityEffect(subtext_label)
+        subtext_label.setGraphicsEffect(opacity_effect)
+        opacity_effect.setOpacity(0)
+    
+        fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
+        fade_anim.setDuration(500)  # Duration in milliseconds
+        fade_anim.setStartValue(0)
+        fade_anim.setEndValue(1)
+        fade_anim.start()  # Animation will be garbage collected after finishing
+    
+        # Keep a reference to avoid premature garbage collection.
+        if not hasattr(self, "_animations"):
+            self._animations = {}
+        self._animations[subtext_label] = fade_anim
+        
+        subtext_label.setVisible(True)
+        # Remove any existing subtext for the clicked option.
+        for option, layout in zip(self.options3, self.option_layouts3):
+            if option == clicked_option:
+                layout.addWidget(subtext_label)
+                break
+    
+    def option_clicked4(self, clicked_option):
+        # If "Proceed on default" is clicked, clear all selections and text box.
+        if clicked_option.text() == "Proceed on default":
+            for option, layout in zip(self.options4, self.option_layouts4):
+                option.setSelected(False)
+                if layout.count() > 1:
+                    subtext_label = layout.itemAt(1).widget()
+                    layout.removeWidget(subtext_label)
+                    subtext_label.deleteLater()
+            
+            clicked_option.setSelected(True)
+            self.add_subtext4(clicked_option)
+            self.selected_option = clicked_option.text()
+            self.next_button4.setEnabled(True)
+            self.next_button4.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 18px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #42f5d7, stop: 1 #14b7fc
+                );
+            """)
+            return
+
+        # If the editable option is clicked
+        if clicked_option.property("selected"):
+            # Deselect and remove subtext
+            clicked_option.setSelected(False)
+            for option, layout in zip(self.options4, self.option_layouts4):
+                if option == clicked_option and layout.count() > 1:
+                    subtext_label = layout.itemAt(1).widget()
+                    layout.removeWidget(subtext_label)
+                    subtext_label.deleteLater()
+                    break
+            self.next_button4.setEnabled(False)
+            self.next_button4.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 18px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+            """)
+        else:
+            # Select and add subtext (text box)
+            clicked_option.setSelected(True)
+            self.add_subtext4(clicked_option)
+            # Deselect "Proceed on default"
+            for option, layout in zip(self.options4, self.option_layouts4):
+                if option.text() == "Proceed on default":
+                    if option.property("selected"):
+                        if layout.count() > 1:
+                            subtext_label = layout.itemAt(1).widget()
+                            layout.removeWidget(subtext_label)
+                            subtext_label.deleteLater()
+                    option.setSelected(False)
+                    break
+
+    def add_subtext4(self, clicked_option):
+        if clicked_option.text() == "Proceed on default":
+            subtext_label = QLabel("Continue with the default settings.")
+            subtext_label.setStyleSheet("""
+                font-size: 14px;
+                font-style: italic;
+                margin-left: 25px;
+                color: #555555;
+            """)
+            # Enable the "Next" button.
+            self.next_button4.setEnabled(True)
+            self.next_button4.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 18px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #42f5d7, stop: 1 #14b7fc
+                );
+            """)
+        else:
+            # Combobox as a subtext
+            subtext_label = QComboBox()
+            subtext_label.addItems([
+                "Arial",
+                "Times New Roman",
+                "Courier New",
+                "Verdana",
+                "Tahoma",
+                "Segoe UI",
+                "Calibri",
+                "Helvetica",
+                "Georgia",
+                "Consolas"
+            ])
+            subtext_label.setStyleSheet("""                                  
+                QComboBox {
+                    margin-left: 25px;
+                    font-size: 15px;
+                    font-family: 'Segoe UI';
+                    background: #f7f7fa;
+                    border: 1.5px solid #a78bfa;
+                    border-radius: 8px;
+                    padding: 4px 12px;
+                    min-width: 200px;
+                    color: #333;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                    background: #e0e7ff;
+                    width: 28px;
+                    border-top-right-radius: 8px;
+                    border-bottom-right-radius: 8px;
+                }
+                QComboBox QAbstractItemView {
+                    margin-left: 25px;
+                    font-size: 15px;
+                    background: #fff;
+                    border: 1px solid #a78bfa;
+                    selection-background-color: #e0e7ff;
+                    selection-color: #333;
+                }
+            """)
+            subtext_label.setFixedWidth(125)
+            subtext_label.setFixedHeight(30)
+            
+            def validate_combo():
+                # Enable Next if a valid selection is made (not -1)
+                self.next_button4.setEnabled(subtext_label.currentIndex() != -1)
+                if subtext_label.currentIndex() != -1:
+                    self.next_button4.setStyleSheet("""
+                        margin-bottom: 15px;
+                        margin-right: 15px;
+                        font-size: 14px;
+                        padding: 6px 18px;
+                        border: 2px solid #0078d7;
+                        border-radius: 8px;
+                        color: black;
+                        background: qlineargradient(
+                            x1: 0, y1: 0, x2: 1, y2: 0,
+                            stop: 0 #42f5d7, stop: 1 #14b7fc
+                        );
+                    """)
+                else:
+                    self.next_button.setStyleSheet("""
+                        margin-bottom: 15px;
+                        margin-right: 15px;
+                        font-size: 14px;
+                        padding: 6px 15px;
+                        border: 2px solid #0078d7;
+                        border-radius: 8px;
+                        color: black;
+                    """)
+            subtext_label.currentIndexChanged.connect(validate_combo)
+            validate_combo()  # Initial validation
+
+        # Fade-in animation (optional, as in previous pages)
+        opacity_effect = QGraphicsOpacityEffect(subtext_label)
+        subtext_label.setGraphicsEffect(opacity_effect)
+        opacity_effect.setOpacity(0)
+        fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
+        fade_anim.setDuration(500)
+        fade_anim.setStartValue(0)
+        fade_anim.setEndValue(1)
+        fade_anim.start()
+        if not hasattr(self, "_animations"):
+            self._animations = {}
+        self._animations[subtext_label] = fade_anim
+
+        subtext_label.setVisible(True)
+        for option, layout in zip(self.options4, self.option_layouts4):
+            if option == clicked_option:
+                layout.addWidget(subtext_label)
+                break
+    
+    def option_clicked5(self, clicked_option):
+        # If "Proceed on default" is clicked, clear all selections and text box.
+        if clicked_option.text() == "No, Use the default":
+            for option, layout in zip(self.options5, self.option_layouts5):
+                option.setSelected(False)
+                if layout.count() > 1:
+                    subtext_label = layout.itemAt(1).widget()
+                    layout.removeWidget(subtext_label)
+                    subtext_label.deleteLater()
+            self.dictionary_box = None
+            clicked_option.setSelected(True)
+            self.add_subtext5(clicked_option)
+            self.validate_font_input2()
+            self.next_button5.setEnabled(True)
+            self.next_button5.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 15px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #42f5d7, stop: 1 #14b7fc
+                );
+            """)
+            return
+
+        # If the editable option is clicked
+        if clicked_option.property("selected"):
+            # Deselect and remove subtext
+            clicked_option.setSelected(False)
+            for option, layout in zip(self.options5, self.option_layouts5):
+                if option == clicked_option and layout.count() > 1:
+                    subtext_label = layout.itemAt(1).widget()
+                    layout.removeWidget(subtext_label)
+                    subtext_label.deleteLater()
+                    self.dictionary_box = None
+                    break
+            self.next_button5.setEnabled(False)
+            self.next_button5.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 15px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+            """)
+        else:
+            # Select and add subtext (text box)
+            clicked_option.setSelected(True)
+            self.add_subtext5(clicked_option)
+            # Deselect "Proceed on default"
+            for option, layout in zip(self.options5, self.option_layouts5):
+                if option.text() == "No, Use the default":
+                    if option.property("selected"):
+                        if layout.count() > 1:
+                            subtext_label = layout.itemAt(1).widget()
+                            layout.removeWidget(subtext_label)
+                            subtext_label.deleteLater()
+                    option.setSelected(False)
+                    break
+
+    def add_subtext5(self, clicked_option):
+        if clicked_option.text() == "No, Use the default":
+            self.dictionary_box = None
+            subtext_label = QLabel("Continue with the default settings.")
+            subtext_label.setStyleSheet("""
+                font-size: 14px;
+                font-style: italic;
+                margin-left: 25px;
+                color: #555555;
+            """)
+        else:
+            subtext_label = QPlainTextEdit("")
+            subtext_label.setStyleSheet("""
+                font-size: 14px;
+                font-style: italic;
+                margin-left: 25px;
+                margin-right: 105px;
+                border: none;
+                color: #555555;
+            """)
+            subtext_label.setFixedHeight(25)
+            subtext_label.setPlaceholderText("Enter dictionary name...")
+            subtext_label.setFocus()
+            self.dictionary_box = subtext_label
+            subtext_label.textChanged.connect(self.validate_font_input2)
+            self.next_button5.setEnabled(False)
+            self.next_button5.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 15px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+            """)
+
+        # Fade-in animation (optional, as in previous pages)
+        opacity_effect = QGraphicsOpacityEffect(subtext_label)
+        subtext_label.setGraphicsEffect(opacity_effect)
+        opacity_effect.setOpacity(0)
+        fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
+        fade_anim.setDuration(500)
+        fade_anim.setStartValue(0)
+        fade_anim.setEndValue(1)
+        fade_anim.start()
+        if not hasattr(self, "_animations"):
+            self._animations = {}
+        self._animations[subtext_label] = fade_anim
+
+        subtext_label.setVisible(True)
+        for option, layout in zip(self.options5, self.option_layouts5):
+            if option == clicked_option:
+                layout.addWidget(subtext_label)
+                break
+    
+    
+    def on_next_clicked(self):
+        self.stacked_widget.setCurrentWidget(self.page2)
+    
+    def on_back_clicked(self):
+        # Optionally reset or preserve state when going back.
+        self.stacked_widget.setCurrentWidget(self.page1)
+    
+    def on_back_clicked2(self):
+        # Optionally reset or preserve state when going back.
+        self.stacked_widget.setCurrentWidget(self.page2)
+        
+    def on_back_clicked3(self):
+        # Optionally reset or preserve state when going back.
+        self.stacked_widget.setCurrentWidget(self.page3)
+    
+    def on_back_clicked4(self):
+        # Optionally reset or preserve state when going back.
+        self.stacked_widget.setCurrentWidget(self.page4)
+    
+    def on_next_clicked2(self):
+        self.stacked_widget.setCurrentWidget(self.page3)
+    
+    def on_next_clicked3(self):
+        self.stacked_widget.setCurrentWidget(self.page4)
+    
+    def on_next_clicked4(self):
+        self.stacked_widget.setCurrentWidget(self.page5)
+        
+    def on_next_clicked5(self):
+        self.accept()
+    
+    def validate_both_inputs(self):
+        # Check if the text boxes exist and are filled.
+        name_filled = self.name_text_box and self.name_text_box.toPlainText().strip()
+        title_filled = self.title_text_box and self.title_text_box.toPlainText().strip()
+
+        # Enable the "Next" button if:
+        # - Only one option is selected and its text box is filled, OR
+        # - Both options are selected and both text boxes are filled.
+        if (self.name_text_box and name_filled) or (self.title_text_box and title_filled):
+            if (self.name_text_box and self.title_text_box and name_filled and title_filled) or \
+               (not self.name_text_box or not self.title_text_box):
+                self.next_button2.setEnabled(True)
+                self.next_button2.setStyleSheet("""
+                    margin-bottom: 15px;
+                    margin-right: 15px;
+                    font-size: 14px;
+                    padding: 6px 18px;
+                    border: 2px solid #0078d7;
+                    border-radius: 8px;
+                    color: black;
+                    background: qlineargradient(
+                        x1: 0, y1: 0, x2: 1, y2: 0,
+                        stop: 0 #42f5d7, stop: 1 #14b7fc
+                    );
+                """)
+                return
+
+        # Disable the "Next" button if the conditions are not met.
+        self.next_button2.setEnabled(False)
+        self.next_button2.setStyleSheet("""
+            margin-bottom: 15px;
+            margin-right: 15px;
+            font-size: 14px;
+            padding: 6px 18px;
+            border: 2px solid #0078d7;
+            border-radius: 8px;
+            color: black;
+        """)
+    
+    def validate_both_inputs2(self):
+        text_size_selected = self.text_size_box is not None
+        line_spacing_selected = self.line_spacing_box is not None
+        text_size_filled = text_size_selected and self.text_size_box and self.text_size_box.text().strip()
+        line_spacing_filled = line_spacing_selected and self.line_spacing_box and self.line_spacing_box.text().strip()
+
+        enable = False
+        if text_size_selected and line_spacing_selected:
+            enable = bool(text_size_filled and line_spacing_filled)
+        elif text_size_selected:
+            enable = bool(text_size_filled)
+        elif line_spacing_selected:
+            enable = bool(line_spacing_filled)
+        # If neither is selected, "Proceed on default" must be selected, which is handled elsewhere
+
+        if enable:
+            self.next_button3.setEnabled(True)
+            self.next_button3.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 18px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #42f5d7, stop: 1 #14b7fc
+                );
+            """)
+        else:
+            self.next_button3.setEnabled(False)
+            self.next_button3.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 18px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+            """) 
+
+    def validate_font_input2(self):
+        if self.dictionary_box and self.dictionary_box.toPlainText().strip():
+            self.next_button5.setEnabled(True)
+            self.next_button5.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 15px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #42f5d7, stop: 1 #14b7fc
+                );
+            """)
+        else:
+            self.next_button5.setEnabled(False)
+            self.next_button5.setStyleSheet("""
+                margin-bottom: 15px;
+                margin-right: 15px;
+                font-size: 14px;
+                padding: 6px 15px;
+                border: 2px solid #0078d7;
+                border-radius: 8px;
+                color: black;
+            """)
+
+
 
 
 class NavigationPane(QFrame):
@@ -82,9 +1959,9 @@ class ClickableLabelBurger(QLabel):
         self.anim.setDuration(300)
         
         
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, ev):
         self.clicked()  # Call the connected slot
-        super().mousePressEvent(event)
+        super().mousePressEvent(ev)
         
     def enterEvent(self, event):
         self.anim.stop()
@@ -93,12 +1970,12 @@ class ClickableLabelBurger(QLabel):
         self.anim.start()
         super().enterEvent(event)
         
-    def leaveEvent(self, event):
+    def leaveEvent(self, a0):
         self.anim.stop()
         self.anim.setStartValue(self.shadow.blurRadius())
         self.anim.setEndValue(0)
         self.anim.start()
-        super().leaveEvent(event)
+        super().leaveEvent(a0)
         
     def clicked(self):
         # Placeholder method; override in subclass or connect externally.
@@ -124,9 +2001,9 @@ class AnimatedClickableLabel(QLabel):
         self.anim = QPropertyAnimation(self.shadow, b"blurRadius")
         self.anim.setDuration(300)
         
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, ev):
         self.clicked.emit()
-        super().mousePressEvent(event)
+        super().mousePressEvent(ev)
         
     def enterEvent(self, event):
         self.anim.stop()
@@ -135,12 +2012,12 @@ class AnimatedClickableLabel(QLabel):
         self.anim.start()
         super().enterEvent(event)
         
-    def leaveEvent(self, event):
+    def leaveEvent(self, a0):
         self.anim.stop()
         self.anim.setStartValue(self.shadow.blurRadius())
         self.anim.setEndValue(0)
         self.anim.start()
-        super().leaveEvent(event)
+        super().leaveEvent(a0)
 
 # SetupWindow: used when creating a new project.
 class SetupWindow(QDialog):
@@ -294,14 +2171,31 @@ class WelcomeWindow(QMainWindow):
     
     
     def create_new_project(self):
-        # Open the setup dialog to get project customizations.
-        setup_dialog = SetupWindow(self)
-        if setup_dialog.exec() == QDialog.DialogCode.Accepted:
-            setup_data = setup_dialog.get_setup_data()
+        wizard = SetupWizard(self)
+        if wizard.exec() == QDialog.DialogCode.Accepted:
+            selected_mode = wizard.selected_log_mode
+            if selected_mode == "Something general, it's up to me.":
+                log_type = "General"
+            elif selected_mode == "Bugs and errors":
+                log_type = "Debugging"
+            else:
+                QMessageBox.information(self, "Not Available", "This log mode is not available yet.")
+                return
+
+            # Gather all wizard data
+            setup_data = {
+                "log_type": log_type,
+                "user_name": wizard.name_text_box.toPlainText().strip() if wizard.name_text_box else "",
+                "pdf_title": wizard.title_text_box.toPlainText().strip() if wizard.title_text_box else "Log Documentation",
+                "pdf_font_size": int(wizard.text_size_box.text()) if wizard.text_size_box and wizard.text_size_box.text().isdigit() else 12,
+                "pdf_line_spacing": float(wizard.line_spacing_box.text()) if wizard.line_spacing_box and wizard.line_spacing_box.text() else 1.5,
+                "pdf_font": wizard.page4.findChild(QComboBox).currentText() if wizard.page4.findChild(QComboBox) else "Arial",
+                "custom_dictionary": wizard.dictionary_box.toPlainText().strip() if wizard.dictionary_box else "",
+            }
             self.launch_main_app(setup_data)
 
     def open_project(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open Project", "", "LDS Files (*.lds *.ldsg *.ldsd)")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Open Project", "", "LDS Files  (*.ldsg *.ldsd)")
         if file_path:
             # Determine mode by file extension.
             if file_path.endswith("ldsg"):
@@ -332,16 +2226,32 @@ class WelcomeWindow(QMainWindow):
         QMessageBox.information(self, "Documentation", "Documentation goes here...")
 
     def launch_main_app(self, setup_data):
-        from main import LogApp  # Import your LogApp class
+        from main import LogApp
         file_path = setup_data.get("file_path", None)
         log_type = setup_data.get("log_type", "General")
-    
-        # Create a new instance of LogApp with the correct mode.
+
         self.main_window = LogApp(log_mode=log_type, file_path=file_path)
-    
-        # Optionally pass other settings like user name and PDF title
-        self.main_window.user_name = setup_data.get("user_name", "")
-        self.main_window.pdf_title = setup_data.get("pdf_title", "Log Documentation")
+
+        # Only set attributes if present in setup_data (i.e., from wizard)
+        if "user_name" in setup_data:
+            self.main_window.user_name = setup_data["user_name"]
+        if "pdf_title" in setup_data:
+            self.main_window.pdf_title = setup_data["pdf_title"]
+        if "pdf_font_size" in setup_data:
+            self.main_window.pdf_font_size = setup_data["pdf_font_size"]
+        if "pdf_line_spacing" in setup_data:
+            self.main_window.pdf_line_spacing = setup_data["pdf_line_spacing"]
+        if "pdf_font" in setup_data:
+            self.main_window.pdf_font = setup_data["pdf_font"]
+        if "custom_dictionary" in setup_data:
+            self.main_window.custom_dictionary = setup_data["custom_dictionary"]
+            # Force the main window to use the custom dictionary file
+            self.main_window.keyword_definitions_file = self.main_window.get_keyword_definitions_file()
+            self.main_window.load_keyword_definitions()
+
+        # Save config only if new project (wizard)
+        if "user_name" in setup_data:
+            self.main_window.save_user_config()
     
         self.main_window.show()
         self.close()
@@ -453,13 +2363,13 @@ class ClickableLabel(QLabel):
         self.setGraphicsEffect(shadow)
         super().enterEvent(event)
 
-    def leaveEvent(self, event):
+    def leaveEvent(self, a0):
         # Revert to the original style when not hovered.
         self.setStyleSheet(self.base_style)
         self.setGraphicsEffect(None)
-        super().leaveEvent(event) 
+        super().leaveEvent(a0) 
     
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, ev):
         # Use the stored original pixmap if available, otherwise fall back to the current pixmap
         if hasattr(self, "original_pixmap") and self.original_pixmap:
             self.viewer = ImageViewerWindow(self.original_pixmap)
@@ -467,7 +2377,7 @@ class ClickableLabel(QLabel):
         elif self.pixmap():
             self.viewer = ImageViewerWindow(self.pixmap())
             self.viewer.show()
-        super().mousePressEvent(event)
+        super().mousePressEvent(ev)
 
 
 # Subclass QScrollArea to enable panning with mouse drag.
@@ -703,11 +2613,12 @@ class DefinitionViewer(QDialog):
         self.move(window_geometry.topLeft())
 
 class DictionaryDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, config_folder=None):
         super().__init__(parent)
         self.setWindowTitle("Dictionary")
         self.setGeometry(100, 100, 700, 450)
         self.setFixedSize(700, 450)
+        self.config_folder = config_folder or get_config_dir()
 
         self.main_layout = QHBoxLayout()
         
@@ -786,6 +2697,7 @@ class DictionaryDialog(QDialog):
         # Load previously saved definitions and images.
         self.load_keyword_definitions()
         
+        
         self.center()
 
     def add_list_item(self, word):
@@ -846,7 +2758,7 @@ class DictionaryDialog(QDialog):
                     file_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
                     if file_path:
                         # Define a local folder to store keyword images.
-                        local_dir = os.path.join(os.getcwd(), "keyword_images")
+                        local_dir = os.path.join(self.config_folder, "keyword_images")
                         if not os.path.exists(local_dir):
                             os.makedirs(local_dir)
                         # Create a unique filename using the keyword and current timestamp.
@@ -972,7 +2884,7 @@ class DictionaryDialog(QDialog):
                 file_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
                 if file_path:
                     # Define a local folder to store keyword images
-                    local_dir = os.path.join(os.getcwd(), "keyword_images")
+                    local_dir = os.path.join(self.config_folder, "keyword_images")
                     if not os.path.exists(local_dir):
                         os.makedirs(local_dir)
                 
@@ -1005,22 +2917,18 @@ class DictionaryDialog(QDialog):
     
     
     def save_keyword_definitions(self):
-        """Save keyword definitions to a JSON file."""
-        definitions_file = os.path.join(os.getcwd(), "keyword_definitions.json")
+        definitions_file = os.path.join(self.config_folder, "keyword_definitions.json")
         with open(definitions_file, "w", encoding="utf-8") as file:
             json.dump(getattr(self, 'keyword_definitions', {}), file, indent=4)
-        print(f"Keyword definitions saved to {definitions_file}")
-
-        # Save image paths separately
-        images_file = os.path.join(os.getcwd(), "keyword_images.json")
+        images_file = os.path.join(self.config_folder, "keyword_images.json")
         with open(images_file, "w", encoding="utf-8") as file:
             json.dump(getattr(self, 'keyword_images', {}), file, indent=4)
-        print(f"Keyword images saved to {images_file}")
 
     def load_keyword_definitions(self):
         """Load keyword definitions and image paths from separate JSON files."""
-        definitions_file = os.path.join(os.getcwd(), "keyword_definitions.json")
-        images_file = os.path.join(os.getcwd(), "keyword_images.json")
+        config_dir = get_config_dir()
+        definitions_file = os.path.join(self.config_folder, "keyword_definitions.json")
+        images_file = os.path.join(self.config_folder, "keyword_images.json")
 
         # Load definitions
         if os.path.exists(definitions_file):
@@ -1037,6 +2945,12 @@ class DictionaryDialog(QDialog):
             print(f"Keyword images loaded from {images_file}")
         else:
             self.keyword_images = {}
+    
+    def get_config_dir():
+        config_dir = os.path.join(os.getcwd(), "config")
+        if not os.path.exists(config_dir):
+            os.makedirs(config_dir)
+        return config_dir
             
 
 class RestorePointWindow(QDialog):  # Change QWidget to QDialog
@@ -1298,11 +3212,14 @@ class LogApp(QWidget):
         print("Initializing LogApp...")
         self.log_mode = log_mode
         self.log_type = "General" if log_mode == "General" else "Debugging"
+        self.load_user_config()
         self.load_color_from_config()  # Load the saved color
         self.init_ui()
+        self.custom_dictionary = getattr(self, "custom_dictionary", "")
+        self.keyword_definitions = {}
+        self.keyword_definitions_file = self.get_keyword_definitions_file()
         self.load_keyword_definitions()  # Load keyword definitions
         self.current_file = None
-        self.user_name = ""
         
         # Add Undo/Redo Stacks
         self.undo_stack = []  # Stores previous log states
@@ -1319,10 +3236,6 @@ class LogApp(QWidget):
             "Changes ◆": 0,
         }
         
-        # Initialize PDF-related attributes
-        self.pdf_title = "Log Documentation"  # Default PDF title
-        self.pdf_font_size = 12  # Default font size
-        self.pdf_line_spacing = 10  # Default line spacing
         
         # Start the hardware monitoring thread
         self.hw_monitor = HardwareMonitor()
@@ -1807,33 +3720,42 @@ class LogApp(QWidget):
             
     def save_logs(self):
         print("Saving logs...")
-        # Check if a file is already opened
+        # If file is already created, save as usual (for autosave compatibility)
         if self.current_file:
             file_name = self.current_file
+            project_folder = os.path.dirname(file_name)
+            config_folder = os.path.join(project_folder, "config")
+            os.makedirs(config_folder, exist_ok=True)
         else:
-            # Use different default file names based on the log mode.
-            default_name = "logs.ldsg" if self.log_type == "General" else "logs.ldsd"
-            # Update the filter accordingly.
-            filter_str = "General Logs (*.ldsg)" if self.log_type == "General" else "Debugging Logs (*.ldsd)"
-            file_name, _ = QFileDialog.getSaveFileName(self, "Save Logs", default_name, filter_str)
-    
-        if file_name:
-            self.current_file = file_name  # Update current file if a new one is chosen
-            with open(file_name, "w", encoding="utf-8") as file:
-                for index in range(self.log_list.count()):
-                    item = self.log_list.item(index)
-                    label = self.log_list.itemWidget(item)
-                    if isinstance(label, QLabel):
-                        file.write(label.text() + "\n")
-                        
-            filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
-            # **Save the counters to a JSON file**
-            json_file = file_name.replace(filter_json, ".json")
-            with open(json_file, "w", encoding="utf-8") as json_out:
-                json.dump(self.log_counters, json_out, indent=4)
-        
-            print(f"Counters saved to {json_file}")                
-            print(f"Logs saved to {file_name}")
+            # Prompt for a folder to save the project
+            project_folder = QFileDialog.getExistingDirectory(self, "Select Project Folder")
+            if not project_folder:
+                return
+            config_folder = os.path.join(project_folder, "config")
+            os.makedirs(config_folder, exist_ok=True)
+            # Use default log file name based on log type
+            log_filename = "logs.ldsg" if self.log_type == "General" else "logs.ldsd"
+            file_name = os.path.join(project_folder, log_filename)
+            self.current_file = file_name  # Set for autosave
+
+        # Save the log file
+        with open(file_name, "w", encoding="utf-8") as file:
+            for index in range(self.log_list.count()):
+                item = self.log_list.item(index)
+                label = self.log_list.itemWidget(item)
+                if isinstance(label, QLabel):
+                    file.write(label.text() + "\n")
+
+        # Save config files in the config subfolder
+        with open(os.path.join(config_folder, "counters.json"), "w", encoding="utf-8") as f:
+            json.dump(self.log_counters, f, indent=4)
+        with open(os.path.join(config_folder, "restore_points.json"), "w", encoding="utf-8") as f:
+            json.dump(self.restore_points, f, indent=4)
+        with open(os.path.join(config_folder, "keyword_definitions.json"), "w", encoding="utf-8") as f:
+            json.dump(self.keyword_definitions, f, indent=4)
+
+        print(f"Logs saved to {file_name}")
+        print(f"Config saved to {config_folder}")
 
         self.setWindowTitle("Log Documentation System - FIle saved")  # Update title
         QTimer.singleShot(2000, lambda: self.setWindowTitle("Log Documentation System"))  # Reset after 2 seconds
@@ -1844,97 +3766,110 @@ class LogApp(QWidget):
         if not file_path:  # If no file path is provided, use the file dialog
             filter_str = "General Logs (*.ldsg)" if self.log_type == "General" else "Debugging Logs (*.ldsd)"
             file_path, _ = QFileDialog.getOpenFileName(self, "Open Logs", "", filter_str)
-        if file_path:
-            self.current_file = file_path
-            self.save_recent_file(file_path)
-            self.log_list.clear()  # Clear the current log list
-            
-            # Load restore points
-            self.load_restore_points()
-            filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
-            # Try loading counters from JSON
-            json_file = file_path.replace(filter_json, ".json")
-            if os.path.exists(json_file):
-                try:
-                    with open(json_file, "r", encoding="utf-8") as json_in:
-                        self.log_counters = json.load(json_in)
-                    print(f"Loaded log counters from {json_file}: {self.log_counters}")
-                except Exception as e:
-                    print(f"Error loading log counters: {e}")
-                    self.log_counters = {
-                        "Problem ★": 0,
-                        "Solution ■": 0,
-                        "Bug ▲": 0,
-                        "Changes ◆": 0,
-                    }
-            else:
-                # If no JSON file exists, reset counters and detect them manually
-                self.log_counters = {
-                    "Problem ★": 0,
-                    "Solution ■": 0,
-                    "Bug ▲": 0,
-                    "Changes ◆": 0,
-                }
-            
-            
-            try:
-                with open(file_path, "r", encoding="utf-8") as file:
-                    lines = file.readlines()  # Read all lines from the file
-                
-                # Create a progress dialog
-                progress_dialog = QProgressDialog("Loading Please Wait...", "Cancel", 0, len(lines), self)
-                progress_dialog.setWindowTitle("Loading Logs")
-                progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-                progress_dialog.setMinimumDuration(0)  # Show immediately
-                progress_dialog.setValue(0) 
-                    
-                for i, line in enumerate(lines):
-                    if progress_dialog.wasCanceled():
-                        self.log_list.clear()   # Clear all log items
-                        self.current_file = None  # Reset the current file reference
-                        QMessageBox.information(self, "Loading Cancelled", "The loading process has been cancelled.")
-                        print("Loading canceled by user.")
-                        break
-                    line = line.strip()
-                        
-                    if line:  # Ensure the line is not empty
-                        
-                        # Create a QLabel and set the saved HTML content
-                        label = QLabel()
-                        label.setText(line)
-                        label.setTextFormat(Qt.TextFormat.RichText)
-                        label.setOpenExternalLinks(False)  # Disable external links
-                        label.linkActivated.connect(self.handle_internal_link)  # Connect internal link handler
-                        label.setWordWrap(False)
-                        label.adjustSize()
-                        
-                        # Create a QListWidgetItem and set its size hint to the label's size
-                        item = QListWidgetItem()
-                        item.setSizeHint(label.sizeHint())
-                        self.log_list.addItem(item)
-                        self.log_list.setItemWidget(item, label)
-                        print(f"Loaded log: {line}")
+        if not file_path:
+            return
+        
 
-                    # Update the progress dialog
-                    progress_dialog.setValue(i + 1)
-                    QApplication.processEvents()  # Allow the UI to update
-                
-                progress_dialog.close()
-                print(f"Logs loaded successfully from {file_path}")
-                
-                # If no JSON exists, try detecting counters
-                if not os.path.exists(json_file):
-                    self.detect_log_counters()
-                
-                # Scroll to the last item in the log list
-                if self.log_list.count() > 0:
-                    last_item = self.log_list.item(self.log_list.count() - 1)
-                    self.log_list.scrollToItem(last_item)
-                    print("Scrolled to the latest log entry.")
-                
+        self.current_file = file_path
+        self.save_recent_file(file_path)
+        self.log_list.clear()
+
+        # --- NEW: Use project folder and config subfolder ---
+        project_folder = os.path.dirname(file_path)
+        config_folder = os.path.join(project_folder, "config")
+
+        # Load log counters
+        counters_path = os.path.join(config_folder, "counters.json")
+        if os.path.exists(counters_path):
+            try:
+                with open(counters_path, "r", encoding="utf-8") as f:
+                    self.log_counters = json.load(f)
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to open file: {e}")
-                print(f"Error opening file: {e}")
+                print(f"Error loading log counters: {e}")
+                self.log_counters = {"Problem ★": 0, "Solution ■": 0, "Bug ▲": 0, "Changes ◆": 0}
+        else:
+            self.log_counters = {"Problem ★": 0, "Solution ■": 0, "Bug ▲": 0, "Changes ◆": 0}
+
+        # Load restore points
+        restore_path = os.path.join(config_folder, "restore_points.json")
+        if os.path.exists(restore_path):
+            try:
+                with open(restore_path, "r", encoding="utf-8") as f:
+                    self.restore_points = json.load(f)
+            except Exception as e:
+                print(f"Error loading restore points: {e}")
+                self.restore_points = {}
+        else:
+            self.restore_points = {}
+
+        # Load keyword definitions
+        keywords_path = os.path.join(config_folder, "keyword_definitions.json")
+        if os.path.exists(keywords_path):
+            try:
+                with open(keywords_path, "r", encoding="utf-8") as f:
+                    self.keyword_definitions = json.load(f)
+            except Exception as e:
+                print(f"Error loading keyword definitions: {e}")
+                self.keyword_definitions = {}
+        else:
+            self.keyword_definitions = {}
+            
+            
+        try:
+            with open(file_path, "r", encoding="utf-8") as file:
+                lines = file.readlines()  # Read all lines from the file
+                
+            # Create a progress dialog
+            progress_dialog = QProgressDialog("Loading Please Wait...", "Cancel", 0, len(lines), self)
+            progress_dialog.setWindowTitle("Loading Logs")
+            progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+            progress_dialog.setMinimumDuration(0)  # Show immediately
+            progress_dialog.setValue(0) 
+                
+            for i, line in enumerate(lines):
+                if progress_dialog.wasCanceled():
+                    self.log_list.clear()   # Clear all log items
+                    self.current_file = None  # Reset the current file reference
+                    QMessageBox.information(self, "Loading Cancelled", "The loading process has been cancelled.")
+                    print("Loading canceled by user.")
+                    break
+                line = line.strip()
+                        
+                if line:  # Ensure the line is not empty
+                    
+                    # Create a QLabel and set the saved HTML content
+                    label = QLabel()
+                    label.setText(line)
+                    label.setTextFormat(Qt.TextFormat.RichText)
+                    label.setOpenExternalLinks(False)  # Disable external links
+                    label.linkActivated.connect(self.handle_internal_link)  # Connect internal link handler
+                    label.setWordWrap(False)
+                    label.adjustSize()
+                        
+                    # Create a QListWidgetItem and set its size hint to the label's size
+                    item = QListWidgetItem()
+                    item.setSizeHint(label.sizeHint())
+                    self.log_list.addItem(item)
+                    self.log_list.setItemWidget(item, label)
+                    print(f"Loaded log: {line}")
+
+                # Update the progress dialog
+                progress_dialog.setValue(i + 1)
+                QApplication.processEvents()  # Allow the UI to update
+                
+            progress_dialog.close()
+            print(f"Logs loaded successfully from {file_path}")
+                
+                
+            # Scroll to the last item in the log list
+            if self.log_list.count() > 0:
+                last_item = self.log_list.item(self.log_list.count() - 1)
+                self.log_list.scrollToItem(last_item)
+                print("Scrolled to the latest log entry.")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open file: {e}")
+            print(f"Error opening file: {e}")
 
     
     def eventFilter(self, source, event):
@@ -2100,6 +4035,7 @@ class LogApp(QWidget):
         font_size = self.pdf_font_size  # User-selected font size
         line_spacing = self.pdf_line_spacing  # User-defined spacing
         title_text = self.pdf_title  # Title set in customization
+        font_family = self.pdf_font if hasattr(self, "pdf_font") else "Arial"
 
         # Start building the PDF content
         html_content = f"""
@@ -2109,17 +4045,19 @@ class LogApp(QWidget):
                 <style>
                     body {{ font-size: {font_size}pt;
                             line-height: {line_spacing}em;
-                            font-family: Arial, sans-serif;
+                            font-family: '{font_family}', Arial, sans-serif;
                             }}
                     h1 {{ 
                         text-align: center; 
                         font-size: {font_size + 6}pt; 
                         font-weight: bold; 
                         margin-bottom: {line_spacing * 5}px;
+                        font-family: '{font_family}', Arial, sans-serif;
                         }}
                     .log-entry {{ 
                         margin-bottom: {line_spacing * 3}px; 
-                        white-space: pre-wrap; 
+                        white-space: pre-wrap;
+                        font-family: '{font_family}', Arial, sans-serif; 
                         /* Ensures text wrapping */ }}
                     a {{ color: blue; text-decoration: underline; }}
                 </style>
@@ -2204,7 +4142,9 @@ class LogApp(QWidget):
         settings.setValue("pdf_title", self.pdf_title)
         settings.setValue("pdf_font_size", self.pdf_font_size)
         settings.setValue("pdf_line_spacing", self.pdf_line_spacing)
-        print(f"Saved settings: Username={self.user_name}, PDF Title={self.pdf_title}, Font Size={self.pdf_font_size}, Line Spacing={self.pdf_line_spacing}")
+        settings.setValue("pdf_font", self.pdf_font)
+        settings.setValue("custom_dictionary", self.custom_dictionary)
+        print(f"Loaded settings: Username={self.user_name}, PDF Title={self.pdf_title}, Font Size={self.pdf_font_size}, Line Spacing={self.pdf_line_spacing}, Font={self.pdf_font}, CustomDict={self.custom_dictionary}")
 
     def load_user_config(self):
         settings = QSettings("MyCompany", "LogDocumentationSystem")
@@ -2212,7 +4152,9 @@ class LogApp(QWidget):
         self.pdf_title = settings.value("pdf_title", "Log Documentation")
         self.pdf_font_size = int(settings.value("pdf_font_size", 12))
         self.pdf_line_spacing = float(settings.value("pdf_line_spacing", 1.5))
-        print(f"Loaded settings: Username={self.user_name}, PDF Title={self.pdf_title}, Font Size={self.pdf_font_size}, Line Spacing={self.pdf_line_spacing}")
+        self.pdf_font = settings.value("pdf_font", "Arial")
+        self.custom_dictionary = settings.value("custom_dictionary", "")
+        print(f"Loaded settings: Username={self.user_name}, PDF Title={self.pdf_title}, Font Size={self.pdf_font_size}, Line Spacing={self.pdf_line_spacing}, Font={self.pdf_font}, CustomDict={self.custom_dictionary}")
 
     def open_pdf(self, file_path):
         try:
@@ -2252,6 +4194,7 @@ class LogApp(QWidget):
         font_size = self.pdf_font_size  # Reuse PDF settings if desired
         line_spacing = self.pdf_line_spacing
         title_text = self.pdf_title
+        font_family = self.pdf_font if hasattr(self, "pdf_font") else "Arial"
 
         # Start building the HTML content
         html_content = f"""
@@ -2619,19 +4562,22 @@ class LogApp(QWidget):
         print(f"Automatic restore point '{restore_point_name}' created.")
     
     def save_restore_points(self):
-        """Save restore points to a JSON file."""
-        filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
+        """Save restore points to a JSON file in the config folder."""
         if self.current_file:
-            json_file = self.current_file.replace(filter_json, "_restore_points.json")
+            project_folder = os.path.dirname(self.current_file)
+            config_folder = os.path.join(project_folder, "config")
+            os.makedirs(config_folder, exist_ok=True)
+            json_file = os.path.join(config_folder, "restore_points.json")
             with open(json_file, "w", encoding="utf-8") as file:
                 json.dump(self.restore_points, file, indent=4, ensure_ascii=False)
             print(f"Restore points saved to {json_file}")
         
     def load_restore_points(self):
-        """Load restore points from a JSON file."""
-        filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
+        """Load restore points from a JSON file in the config folder."""
         if self.current_file:
-            json_file = self.current_file.replace(filter_json, "_restore_points.json")
+            project_folder = os.path.dirname(self.current_file)
+            config_folder = os.path.join(project_folder, "config")
+            json_file = os.path.join(config_folder, "restore_points.json")
             if os.path.exists(json_file):
                 try:
                     with open(json_file, "r", encoding="utf-8") as file:
@@ -2639,38 +4585,37 @@ class LogApp(QWidget):
                     print(f"Restore points loaded from {json_file}")
                 except Exception as e:
                     print(f"Error loading restore points: {e}")
-                    self.restore_points = {}
+                self.restore_points = {}
             else:
                 self.restore_points = {}
     
     def open_dictionary(self):
         """Open the DictionaryDialog and update keyword definitions."""
-        self.dictionary_dialog = DictionaryDialog(self)
-        self.dictionary_dialog.dictionary = getattr(self, 'keyword_definitions', {})  # Load existing definitions
-        
-        # Populate the keyword list in the dialog
+        if self.current_file:
+            project_folder = os.path.dirname(self.current_file)
+            config_folder = os.path.join(project_folder, "config")
+        else:
+            config_folder = get_config_dir()
+        self.dictionary_dialog = DictionaryDialog(self, config_folder=config_folder)
+        self.dictionary_dialog.dictionary = getattr(self, 'keyword_definitions', {})
         for keyword in sorted(self.dictionary_dialog.dictionary.keys()):
             self.dictionary_dialog.add_list_item(keyword)
-    
         self.dictionary_dialog.show()
-
-        # Update keyword definitions when the dialog is closed
         def update_keywords():
             self.keyword_definitions = self.dictionary_dialog.dictionary
-            self.save_keyword_definitions()  # Save updated definitions to a file
-
+            self.save_keyword_definitions()
         self.dictionary_dialog.finished.connect(update_keywords)
         
     def save_keyword_definitions(self):
         """Save keyword definitions to a JSON file."""
-        file_path = os.path.join(os.getcwd(), "keyword_definitions.json")
+        file_path = self.get_keyword_definitions_file()
         with open(file_path, "w", encoding="utf-8") as file:
             json.dump(getattr(self, 'keyword_definitions', {}), file, indent=4)
         print(f"Keyword definitions saved to {file_path}")
 
     def load_keyword_definitions(self):
         """Load keyword definitions from a JSON file."""
-        file_path = os.path.join(os.getcwd(), "keyword_definitions.json")
+        file_path = self.get_keyword_definitions_file()
         if os.path.exists(file_path):
             with open(file_path, "r", encoding="utf-8") as file:
                 self.keyword_definitions = json.load(file)
@@ -2748,16 +4693,30 @@ class LogApp(QWidget):
         return doc.toPlainText()
     
     def save_log_counters(self):
-        """Save the log counters to a JSON file."""
-        filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
+        """Save the log counters to a JSON file in the config folder."""
         if self.current_file:
-            json_file = self.current_file.replace(filter_json, ".json")
+            project_folder = os.path.dirname(self.current_file)
+            config_folder = os.path.join(project_folder, "config")
+            os.makedirs(config_folder, exist_ok=True)
+            json_file = os.path.join(config_folder, "counters.json")
             try:
                 with open(json_file, "w", encoding="utf-8") as json_out:
                     json.dump(self.log_counters, json_out, indent=4)
                 print(f"Log counters saved to {json_file}")
             except Exception as e:
                 print(f"Error saving log counters: {e}")
+    
+    def get_keyword_definitions_file(self):
+        # Use custom dictionary if set, else default
+        config_dir = get_config_dir()
+        if getattr(self, "custom_dictionary", ""):
+            # Sanitize the name for file usage
+            safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', self.custom_dictionary)
+            return os.path.join(config_dir, f"{safe_name}_definitions.json")
+        else:
+            return os.path.join(config_dir, "keyword_definitions.json")
+    
+    
 
 
 if __name__ == "__main__":
