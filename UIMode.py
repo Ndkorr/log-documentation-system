@@ -379,7 +379,7 @@ class DrawingArea(QFrame):
         
         self.draw_radius = 6
         
-        # --- Zoom state ---
+        #Zoom state
         self.scale_factor = 1.0
         self.zoom_percent = 0  # Relative to 100%
         self.pan_offset = QPoint(0, 0)
@@ -401,6 +401,8 @@ class DrawingArea(QFrame):
         self.shape_layers_overlay.shape_selected.connect(self.select_shape_by_index)
         #self.shape_layers_overlay.setVisible(False)
         self.selected_shape_index = None  # Track which shape is selected
+        
+        self._edit_locked_color = None
         
     def set_shape_color(self, color):
         self.shape_color = color
@@ -600,7 +602,7 @@ class DrawingArea(QFrame):
                 tool, start, end, border_color = old_shape[:4]
                 fill_color = old_shape[4] if len(old_shape) > 4 and isinstance(old_shape[4], QColor) else None
                 rotation = old_shape[5] if len(old_shape) > 5 and isinstance(old_shape[5], (int, float)) else getattr(self, 'preview_rotation', 0)
-                
+                locked_color = self._edit_locked_color if self._edit_locked_color is not None else self.shape_color
                 
                 if self.preview_shape == "image":
                     # Preserve rotation if it existed
@@ -627,7 +629,7 @@ class DrawingArea(QFrame):
                                 self.preview_shape,
                                 self.preview_start,
                                 self.preview_end,
-                                self.shape_color,
+                                locked_color,
                                 fill_color,
                                 rotation
                         )
@@ -636,7 +638,7 @@ class DrawingArea(QFrame):
                                 self.preview_shape,
                                 self.preview_start,
                                 self.preview_end,
-                                self.shape_color,
+                                locked_color,
                                 fill_color
                             )
                     else:
@@ -645,7 +647,7 @@ class DrawingArea(QFrame):
                                 self.preview_shape,
                                 self.preview_start,
                                 self.preview_end,
-                                self.shape_color,
+                                locked_color,
                                 rotation
                             )
                         else:
@@ -653,7 +655,7 @@ class DrawingArea(QFrame):
                                 self.preview_shape,
                                 self.preview_start,
                                 self.preview_end,
-                                self.shape_color
+                                locked_color
                             )
                 
             else:
@@ -680,6 +682,7 @@ class DrawingArea(QFrame):
             self.preview_pixmap = None
             self.selected_shape_index = None
             self.preview_rotation = 0
+            self._edit_locked_color = None
             self.update()
             return
 
@@ -1305,6 +1308,32 @@ class DrawingArea(QFrame):
 
         painter.drawPixmap(0, 0, self.eraser_mask)
         painter.restore()
+        
+        # Degree indicator during free rotate
+        if getattr(self, "_free_rotating", False) and hasattr(self, "preview_rotation"):
+            painter.save()
+            # Find a good spot: near the shape center or mouse
+            if self.selected_shape_index is not None:
+                shape = self.shapes[self.selected_shape_index]
+                if shape[0] == "draw" and isinstance(self.preview_start, list) and self.preview_start:
+                    min_x = min(p.x() for p in self.preview_start)
+                    min_y = min(p.y() for p in self.preview_start)
+                    max_x = max(p.x() for p in self.preview_start)
+                    max_y = max(p.y() for p in self.preview_start)
+                    center = QPoint((min_x + max_x) // 2, (min_y + max_y) // 2)
+                else:
+                    rect = QRect(self.preview_start, self.preview_end).normalized()
+                    center = rect.center()
+                # Draw the angle text
+                angle = int(round(self.preview_rotation)) if hasattr(self, "preview_rotation") else 0
+                painter.setPen(QPen(QColor("#ff6600"), 2))
+                painter.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                text = f"{angle}°"
+                text_rect = painter.fontMetrics().boundingRect(text)
+                pos = center + QPoint(0, -40)
+                painter.drawText(pos.x() - text_rect.width() // 2, pos.y(), text)
+            painter.restore()
     
     def draw_bounding_box_and_handles(self, painter, rect):
         # Draw bounding box
@@ -1454,7 +1483,7 @@ class DrawingArea(QFrame):
         self.current_tool = None
         shape = self.shapes[idx]
         tool, start, end, data = shape[:4]
-        # --- PATCH START ---
+        
         # Extract fill_color and rotation robustly
         fill_color = None
         rotation = 0
@@ -1471,7 +1500,8 @@ class DrawingArea(QFrame):
             self.preview_bbox = QRect(QPoint(min(p.x() for p in start), min(p.y() for p in start)),
                                      QPoint(max(p.x() for p in start), max(p.y() for p in start))).normalized()
             self.preview_rotation = rotation
-            self.shape_color = data
+            self._edit_locked_color = data if isinstance(data, QColor) else QColor("#000000")
+            
         else:
             # For non-draw shapes
             if len(shape) > 4 and isinstance(shape[4], QColor):
@@ -1485,7 +1515,8 @@ class DrawingArea(QFrame):
             self.preview_end = end
             self.preview_rotation = rotation
             self.preview_pixmap = data if tool == "image" else None
-            self.shape_color = data
+            self._edit_locked_color = data if isinstance(data, QColor) else QColor("#000000")
+ 
         # --- PATCH END ---
         self.shape_selected_for_edit.emit()
         self.update()
@@ -1885,6 +1916,7 @@ class DrawingArea(QFrame):
         self.update()
                 
     def fill_at_point(self, pt):
+        
         def rotate_point(p, angle, center):
             # Rotate point p by -angle degrees around center
             angle_rad = math.radians(-angle)
@@ -2003,12 +2035,13 @@ class DrawingArea(QFrame):
                     pass
                 elif rect.contains(pt):
                     self.push_undo()
+                    # Always preserve border_color and rotation, only update fill_color
                     self.shapes[idx] = (
                         tool,
                         start,
                         end,
                         border_color,
-                        self.shape_color,
+                        self.shape_color,  # new fill color
                         rotation if rotation is not None else 0
                     )
                     self.shape_layers_overlay.update_shapes(self.shapes)
@@ -2380,6 +2413,7 @@ class UIMode(QWidget):
         self.drawing_area.shape_selected_for_edit.connect(self.deselect_tool)
         self._tool_btn_anim = None  # Initialize attribute to avoid assignment error
         self._last_category_index = 0
+        self.drawing_area.shape_selected_for_edit.connect(self.sync_color_with_selected_shape)
         #self._was_maximized = False
 
     def init_ui(self):
@@ -3143,6 +3177,27 @@ class UIMode(QWidget):
                 painter.end()
                 self.drawing_area._draw_cursor = QCursor(pixmap, size // 2, size // 2)
                 self.drawing_area.setCursor(self.drawing_area._draw_cursor)
+                
+    def sync_color_with_selected_shape(self):
+        idx = self.drawing_area.selected_shape_index
+        if idx is not None and 0 <= idx < len(self.drawing_area.shapes):
+            
+            
+            # Update quick_prop icon and tool button border
+            if hasattr(self, "quick_prop"):
+                # Redraw the color icon
+                pixmap = QPixmap(r"C:\Users\Mathew\Documents\log-documentation-system\assets\paintprop1.png").scaled(58, 58, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                colored = QPixmap(pixmap.size())
+                colored.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(colored)
+                try:
+                    painter.drawPixmap(0, 0, pixmap)
+                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                    painter.fillRect(colored.rect(), self.current_shape_color)
+                finally:
+                    painter.end()
+                self.quick_prop.setPixmap(colored)
+            self.update_tool_btn_border()
                 
 
 
