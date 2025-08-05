@@ -404,6 +404,15 @@ class DrawingArea(QFrame):
         
         self._edit_locked_color = None
         
+        self._show_rotation_indicator = False
+        self._rotation_indicator_timer = QTimer(self)
+        self._rotation_indicator_timer.setSingleShot(True)
+        self._rotation_indicator_timer.timeout.connect(self.hide_rotation_indicator)
+        
+    def hide_rotation_indicator(self):
+        self._show_rotation_indicator = False
+        self.update()
+        
     def set_shape_color(self, color):
         self.shape_color = color
         self.update()
@@ -570,6 +579,8 @@ class DrawingArea(QFrame):
                     self.selected_shape_index = None
                     self.update()
                 return
+        
+        
                 
                 
 
@@ -669,12 +680,20 @@ class DrawingArea(QFrame):
                         self.preview_pixmap
                     ))
                 else:
-                    self.shapes.append((
+                    # Use fill color and rotation if present
+                    fill_color = getattr(self, "preview_fill_color", None)
+                    rotation = getattr(self, "preview_rotation", 0)
+                    shape_tuple = [
                         self.preview_shape,
                         self.preview_start,
                         self.preview_end,
                         self.shape_color
-                    ))
+                    ]
+                    if fill_color is not None:
+                        shape_tuple.append(fill_color)
+                    if rotation:
+                        shape_tuple.append(rotation)
+                    self.shapes.append(tuple(shape_tuple))
                     
             self.preview_shape = None
             self.preview_start = None
@@ -751,6 +770,9 @@ class DrawingArea(QFrame):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        # Hide rotation indicator if user moves/resizes
+        if self._show_rotation_indicator:
+            self.hide_rotation_indicator()
         pt = self.widget_to_canvas(event.position().toPoint())
         margin = 8
         
@@ -1310,7 +1332,7 @@ class DrawingArea(QFrame):
         painter.restore()
         
         # Degree indicator during free rotate
-        if getattr(self, "_free_rotating", False) and hasattr(self, "preview_rotation"):
+        if (getattr(self, "_free_rotating", False) and hasattr(self, "preview_rotation")) or self._show_rotation_indicator:
             painter.save()
             # Find a good spot: near the shape center or mouse
             if self.selected_shape_index is not None:
@@ -1577,7 +1599,7 @@ class DrawingArea(QFrame):
         can_rotate = (
             self.selected_shape_index is not None
             and 0 <= self.selected_shape_index < len(self.shapes)
-            and self.shapes[self.selected_shape_index][0] != "image"
+            and self.shapes[self.selected_shape_index][0] not in ["image", "draw"]
         )
         rotate_action.setEnabled(can_rotate)
         if can_rotate:
@@ -1648,6 +1670,7 @@ class DrawingArea(QFrame):
                 self._orig_end = self.preview_end
                 self.preview_rotation = rotation
         self.update()
+        
         self.shape_layers_overlay.selected_idx = idx
         self.shape_layers_overlay.refresh()
         
@@ -1657,69 +1680,88 @@ class DrawingArea(QFrame):
         idx = self.selected_shape_index
         if idx is None or idx < 0 or idx >= len(self.shapes):
             return
+        shape = self.shapes[idx]
         tool, start, end, color = self.shapes[idx][:4]
+        
+        preview_start = self.preview_start if self.preview_start is not None else start
+        preview_end = self.preview_end if self.preview_end is not None else end
 
         if tool == "draw" and isinstance(start, list) and len(start) > 1:
+            # For freehand, rotate points for preview
             min_x = min(p.x() for p in start)
             min_y = min(p.y() for p in start)
             max_x = max(p.x() for p in start)
             max_y = max(p.y() for p in start)
             center = QPoint((min_x + max_x) // 2, (min_y + max_y) // 2)
-            angle = math.radians(90)
-            cos_a = math.cos(angle)
-            sin_a = math.sin(angle)
+            angle = 90
+            cos_a = math.cos(math.radians(angle))
+            sin_a = math.sin(math.radians(angle))
             rotated_points = []
             for p in start:
                 x, y = p.x() - center.x(), p.y() - center.y()
                 rx = x * cos_a - y * sin_a + center.x()
                 ry = x * sin_a + y * cos_a + center.y()
                 rotated_points.append(QPoint(int(rx), int(ry)))
-            rotation = self.shapes[idx][4] if len(self.shapes[idx]) > 4 else 0
-            if len(self.shapes[idx]) > 5:
-                self.shapes[idx] = (tool, rotated_points, None, color, self.shapes[idx][4], (rotation + 90) % 360)
-            elif len(self.shapes[idx]) > 4:
-                self.shapes[idx] = (tool, rotated_points, None, color, (rotation + 90) % 360)
-            else:
-                self.shapes[idx] = (tool, rotated_points, None, color)
-            if self.preview_shape == tool and self.selected_shape_index == idx:
-                self.preview_start = [QPoint(p) for p in rotated_points]
-            self.shape_layers_overlay.update_shapes(self.shapes)
-            self.shape_layers_overlay.selected_idx = idx
-            self.shape_layers_overlay.refresh()
-            self.update()
-            return
+            # Set preview
+            self.preview_shape = tool
+            self.preview_start = [QPoint(p) for p in rotated_points]
+            self.preview_end = None
+            self.preview_rotation = 0
+            self._pending_rotation_commit = 90
+        else:
+            # For regular shapes, just update preview_rotation
+            rect = QRect(preview_start, preview_end).normalized()
+            center = rect.center()
+            # Extract current rotation
+            rotation = 0
+            if len(shape) > 5 and isinstance(shape[5], (int, float)):
+                rotation = shape[5]
+            elif len(shape) > 4 and isinstance(shape[4], (int, float)):
+                rotation = shape[4]
+            self.preview_shape = tool
+            self.preview_start = preview_start
+            self.preview_end = preview_end
+            self.preview_rotation = (rotation + 90) % 360
+            self._pending_rotation_commit = 90
+        
+        
+            # Swap width/height for 90-degree rotation
+            new_rect = QRect(center.x() - rect.height() // 2, center.y() - rect.width() // 2, rect.height(), rect.width())
+            old_shape = self.shapes[idx]
+            tool, _, _, color = old_shape[:4]
 
-        rect = QRect(start, end).normalized()
-        center = rect.center()
-        dx = rect.width() // 2
-        dy = rect.height() // 2
-        new_rect = QRect(center.x() - dy, center.y() - dx, rect.height(), rect.width())
-        old_shape = self.shapes[idx]
-        tool, start, end, color = old_shape[:4]
+            # Always extract fill_color and rotation if present
+            fill_color = None
+            rotation = 0
+            if len(old_shape) >= 5 and isinstance(old_shape[4], QColor):
+                fill_color = old_shape[4]
+                if len(old_shape) == 6 and isinstance(old_shape[5], (int, float)):
+                    rotation = old_shape[5]
+            elif len(old_shape) >= 5 and isinstance(old_shape[4], (int, float)):
+                rotation = old_shape[4]
+                if len(old_shape) == 6 and isinstance(old_shape[5], QColor):
+                    fill_color = old_shape[5]
 
-        # Always extract fill_color and rotation if present
-        fill_color = None
-        rotation = 0
-        if len(old_shape) >= 5 and isinstance(old_shape[4], QColor):
-            fill_color = old_shape[4]
-            if len(old_shape) == 6 and isinstance(old_shape[5], (int, float)):
-                rotation = old_shape[5]
-        elif len(old_shape) >= 5 and isinstance(old_shape[4], (int, float)):
-            rotation = old_shape[4]
-            if len(old_shape) == 6 and isinstance(old_shape[5], QColor):
-                fill_color = old_shape[5]
-
-        new_shape = [tool, new_rect.topLeft(), new_rect.bottomRight(), color]
-        if fill_color is not None:
-            new_shape.append(fill_color)
-        new_shape.append((rotation + 90) % 360)
-        self.shapes[idx] = tuple(new_shape)
+            new_shape = [tool, new_rect.topLeft(), new_rect.bottomRight(), color]
+            if fill_color is not None:
+                new_shape.append(fill_color)
+            new_shape.append((rotation + 90) % 360)
+            self.shapes[idx] = tuple(new_shape)
 
         self.shape_layers_overlay.update_shapes(self.shapes)
         self.shape_layers_overlay.selected_idx = idx
         self.shape_layers_overlay.refresh()
+        self._show_rotation_indicator = True
+        self._rotation_indicator_timer.start(1800)
         self.update()
 
+        # Hide the indicator and commit the rotation after the timer
+        def commit_rotation():
+            self._show_rotation_indicator = False
+            self.update()
+        self._rotation_indicator_timer.timeout.disconnect()
+        self._rotation_indicator_timer.timeout.connect(commit_rotation)
+        
     def paste_shape_from_clipboard(self, adjust_mode=False):
         clipboard = QApplication.clipboard()
         text = clipboard.text()
@@ -1728,6 +1770,8 @@ class DrawingArea(QFrame):
             shape_dict = json.loads(text)
             tool = shape_dict.get("tool")
             color = QColor(shape_dict.get("color", "#000000"))
+            fill_color = QColor(shape_dict["fill_color"]) if "fill_color" in shape_dict else None
+            rotation = shape_dict.get("rotation", 0)
             offset = QPoint(20, 20)
             if tool == "draw" and "points" in shape_dict:
                 points = [QPoint(x, y) for x, y in shape_dict["points"]]
@@ -1756,6 +1800,9 @@ class DrawingArea(QFrame):
                 self.preview_end = end
                 self.shape_color = color
                 self.selected_shape_index = None
+            
+                self.preview_fill_color = fill_color
+                self.preview_rotation = rotation
                 self.update()
                 return
             else:
@@ -1811,22 +1858,29 @@ class DrawingArea(QFrame):
         if self.selected_shape_index is not None and 0 <= self.selected_shape_index < len(self.shapes):
             shape = self.shapes[self.selected_shape_index]
             tool, start, end, data = shape[:4]
-            if tool == "image":
-                return  # Skip images here
+            shape_dict = {
+                "tool": tool,
+                "color": data.name() if isinstance(data, QColor) else "#000000"
+            }
+            # Handle freehand
             if tool == "draw" and isinstance(start, list):
-                # Copy freehand drawing as a list of points
-                shape_dict = {
-                    "tool": tool,
-                    "points": [(p.x(), p.y()) for p in start],
-                    "color": data.name() if isinstance(data, QColor) else "#000000"
-                }
+                shape_dict["points"] = [(p.x(), p.y()) for p in start]
             else:
-                shape_dict = {
-                    "tool": tool,
-                    "start": (start.x(), start.y()),
-                    "end": (end.x(), end.y()),
-                    "color": data.name() if isinstance(data, QColor) else "#000000"
-                }
+                shape_dict["start"] = (start.x(), start.y())
+                shape_dict["end"] = (end.x(), end.y())
+            # Optional: fill color and rotation
+            fill_color = None
+            rotation = None
+            # Find fill color and rotation in shape tuple
+            for v in shape[4:]:
+                if isinstance(v, QColor):
+                    fill_color = v
+                elif isinstance(v, (int, float)):
+                    rotation = v
+            if fill_color is not None:
+                shape_dict["fill_color"] = fill_color.name()
+            if rotation is not None:
+                shape_dict["rotation"] = rotation
             clipboard = QApplication.clipboard()
             clipboard.setText(json.dumps(shape_dict))
     
@@ -2007,8 +2061,26 @@ class DrawingArea(QFrame):
             tool, start, end, *rest = shape
             # Always unpack as border_color, fill_color, rotation
             border_color = rest[0] if len(rest) > 0 else QColor("#000000")
-            fill_color = rest[1] if len(rest) > 1 else None
-            rotation = rest[2] if len(rest) > 2 and isinstance(rest[2], (int, float)) else None
+            
+            fill_color = None
+            rotation = 0
+
+            # Determine fill_color and rotation position
+            if len(rest) == 2:
+                # Could be (border, fill) or (border, rotation)
+                if isinstance(rest[1], QColor):
+                    fill_color = rest[1]
+                elif isinstance(rest[1], (int, float)):
+                    rotation = rest[1]
+            elif len(rest) == 3:
+                # (border, fill, rotation)
+                fill_color = rest[1]
+                rotation = rest[2]
+            elif len(rest) == 1:
+                if isinstance(rest[0], QColor):
+                    fill_color = rest[0]
+                elif isinstance(rest[0], (int, float)):
+                    rotation = rest[0]
 
             if tool == "draw":
                 points = start
@@ -2022,30 +2094,21 @@ class DrawingArea(QFrame):
                 rect = QRect(start, end).normalized()
                 if is_on_border(tool, start, end, pt, tolerance=8, rotation=rotation):
                     self.push_undo()
-                    # Always preserve rotation, always use 6-tuple (tool, start, end, border_color, fill_color, rotation)
-                    self.shapes[idx] = (
-                        tool,
-                        start,
-                        end,
-                        self.shape_color,
-                        fill_color,
-                        rotation if rotation is not None else 0
-                    )
+                    # Update border color, preserve fill and rotation
+                    new_shape = [tool, start, end, self.shape_color]
+                    if fill_color is not None:
+                        new_shape.append(fill_color)
+                    new_shape.append(rotation)
+                    self.shapes[idx] = tuple(new_shape)
                     self.shape_layers_overlay.update_shapes(self.shapes)
-                    pass
                 elif rect.contains(pt):
                     self.push_undo()
-                    # Always preserve border_color and rotation, only update fill_color
-                    self.shapes[idx] = (
-                        tool,
-                        start,
-                        end,
-                        border_color,
-                        self.shape_color,  # new fill color
-                        rotation if rotation is not None else 0
-                    )
+                    # Update fill color, preserve border and rotation
+                    new_shape = [tool, start, end, border_color, self.shape_color]
+                    new_shape.append(rotation)
+                    self.shapes[idx] = tuple(new_shape)
                     self.shape_layers_overlay.update_shapes(self.shapes)
-                    pass
+                    
     
     def crop_to_rect(self, crop_rect):
         self.push_undo()
