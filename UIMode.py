@@ -409,12 +409,26 @@ class DrawingArea(QFrame):
         self._rotation_indicator_timer.setSingleShot(True)
         self._rotation_indicator_timer.timeout.connect(self.hide_rotation_indicator)
         
+        self.cropping = False
+        self.crop_preview_mode = False
+        self.crop_start = None
+        self.crop_end = None
+        self._crop_dragging_handle = None
+        
     def hide_rotation_indicator(self):
         self._show_rotation_indicator = False
         self.update()
         
     def set_shape_color(self, color):
         self.shape_color = color
+    
+        # Also update preview color if we're in the middle of placing a shape
+        #self.preview_color = color
+        
+        # If editing a shape, update its color immediately
+        self._edit_locked_color = color
+            
+        
         self.update()
     
     def get_canvas_center(self):
@@ -504,6 +518,24 @@ class DrawingArea(QFrame):
         margin = 8
         
         
+        # Add handling for crop preview adjustment
+        if self.crop_preview_mode and self.crop_start is not None and self.crop_end is not None:
+            crop_rect = QRect(self.crop_start, self.crop_end).normalized()
+            # Check handles for resizing crop area
+            for idx, handle in enumerate(self.handle_points(crop_rect)):
+                if (handle - pt).manhattanLength() < self.HANDLE_SIZE:
+                    self._crop_dragging_handle = idx
+                    self.set_resize_cursor(idx)
+                    return
+                
+            # Check for moving crop area
+            if crop_rect.contains(pt):
+                self._dragging_box = True
+                self._drag_offset = pt - crop_rect.topLeft()
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                return
+        
+        
         if self._free_rotating and self.selected_shape_index is not None:
             idx = self.selected_shape_index
             shape = self.shapes[idx]
@@ -585,18 +617,12 @@ class DrawingArea(QFrame):
                 
 
         # --- EDITING EXISTING SHAPE OR IMAGE ---
-        if self.preview_shape and not isinstance(self.preview_start, list) and not isinstance(self.preview_end, list):
+        if self.preview_shape and self.preview_start is not None and self.preview_end is not None:
             rect = QRect(self.preview_start, self.preview_end).normalized()
             box_rect = rect.adjusted(-margin, -margin, margin, margin)
             # Check handles for resizing
             for idx, handle in enumerate(self.handle_points(box_rect)):
-                handle_rect = QRect(
-                    handle.x() - self.HANDLE_SIZE // 2,
-                    handle.y() - self.HANDLE_SIZE // 2,
-                    self.HANDLE_SIZE,
-                    self.HANDLE_SIZE
-                )
-                if handle_rect.contains(pt):
+                if (handle - pt).manhattanLength() < self.HANDLE_SIZE:
                     self._dragging_handle = idx
                     self.set_resize_cursor(idx)
                     return
@@ -680,18 +706,19 @@ class DrawingArea(QFrame):
                         self.preview_pixmap
                     ))
                 else:
-                    # Use fill color and rotation if present
+                    # Use fill color and rotation if present.
+                    border_color = getattr(self, "preview_color", self.shape_color)
                     fill_color = getattr(self, "preview_fill_color", None)
                     rotation = getattr(self, "preview_rotation", 0)
                     shape_tuple = [
                         self.preview_shape,
                         self.preview_start,
                         self.preview_end,
-                        self.shape_color
+                        border_color
                     ]
                     if fill_color is not None:
                         shape_tuple.append(fill_color)
-                    if rotation:
+                    if rotation != 0:
                         shape_tuple.append(rotation)
                     self.shapes.append(tuple(shape_tuple))
                     
@@ -699,8 +726,11 @@ class DrawingArea(QFrame):
             self.preview_start = None
             self.preview_end = None
             self.preview_pixmap = None
-            self.selected_shape_index = None
+            #self.preview_color = None
+            self.preview_fill_color = None
             self.preview_rotation = 0
+            self.selected_shape_index = None
+            
             self._edit_locked_color = None
             self.update()
             return
@@ -725,9 +755,10 @@ class DrawingArea(QFrame):
             return
         
         if self.current_tool == "crop" and event.button() == Qt.MouseButton.LeftButton:
-            self.cropping = True
-            self.crop_start = pt
-            self.crop_end = pt
+            if not self.crop_preview_mode:
+                self.cropping = True
+                self.crop_start = pt
+                self.crop_end = pt
             self.update()
             return
         
@@ -762,7 +793,23 @@ class DrawingArea(QFrame):
                         self.preview_end = None
                         self.preview_pixmap = None
                     else:
-                        self.shapes.append((self.preview_shape, self.preview_start, self.preview_end, self.shape_color))
+                        # Use preview color if available (from paste), otherwise use current shape color
+                        border_color = getattr(self, "preview_color", self.shape_color)
+                        fill_color = getattr(self, "preview_fill_color", None)
+                        rotation = getattr(self, "preview_rotation", 0)
+
+                        shape_tuple = [self.preview_shape, self.preview_start, self.preview_end, border_color]
+                        if fill_color is not None:
+                            shape_tuple.append(fill_color)
+                        if rotation != 0:
+                            shape_tuple.append(rotation)
+                        self.shapes.append(tuple(shape_tuple))
+                        
+                        
+                        # Clear preview attributes after placing
+                        self.preview_color = None
+                        self.preview_fill_color = None
+                        self.preview_rotation = 0
                         self.preview_shape = None
                         self.preview_start = None
                         self.preview_end = None
@@ -770,6 +817,64 @@ class DrawingArea(QFrame):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        pt = self.widget_to_canvas(event.position().toPoint())
+        
+        if self.crop_preview_mode and self._crop_dragging_handle is not None:
+            self.set_resize_cursor(self._crop_dragging_handle)
+            rect = QRect(self.crop_start, self.crop_end).normalized()
+            x1, y1, x2, y2 = rect.left(), rect.top(), rect.right(), rect.bottom()
+    
+            # Update according to handle index
+            if self._crop_dragging_handle == 0:  # Top-left
+                self.crop_start = pt
+                self.crop_end = QPoint(x2, y2)
+            elif self._crop_dragging_handle == 1:  # Top-middle
+                self.crop_start = QPoint(x1, pt.y())
+                self.crop_end = QPoint(x2, y2)
+            elif self._crop_dragging_handle == 2:  # Top-right
+                self.crop_start = QPoint(x1, pt.y())
+                self.crop_end = QPoint(pt.x(), y2)
+            elif self._crop_dragging_handle == 3:  # Right-middle
+                self.crop_start = QPoint(x1, y1)
+                self.crop_end = QPoint(pt.x(), y2)
+            elif self._crop_dragging_handle == 4:  # Bottom-right
+                self.crop_start = QPoint(x1, y1)
+                self.crop_end = pt
+            elif self._crop_dragging_handle == 5:  # Bottom-middle
+                self.crop_start = QPoint(x1, y1)
+                self.crop_end = QPoint(x2, pt.y())
+            elif self._crop_dragging_handle == 6:  # Bottom-left
+                self.crop_start = QPoint(pt.x(), y1)
+                self.crop_end = QPoint(x2, pt.y())
+            elif self._crop_dragging_handle == 7:  # Left-middle
+                self.crop_start = QPoint(pt.x(), y1)
+                self.crop_end = QPoint(x2, y2)
+    
+            self.update()
+            return
+        elif self.crop_preview_mode and self._dragging_box:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            delta = pt - self._drag_offset
+            if not hasattr(self, '_original_crop_rect'):
+                # Store original rectangle dimensions on first move
+                self._original_crop_rect = QRect(self.crop_start, self.crop_end).normalized()
+                self._start_drag_point = pt
+    
+            # Calculate how far we've moved from the start position
+            total_delta = pt - self._start_drag_point
+    
+            # Move the original rectangle by that amount
+            new_rect = QRect(
+                self._original_crop_rect.topLeft() + total_delta,
+                self._original_crop_rect.bottomRight() + total_delta
+            )
+    
+            # Update crop coordinates while preserving exact dimensions
+            self.crop_start = new_rect.topLeft()
+            self.crop_end = new_rect.bottomRight()
+            self.update()
+            return
+        
         # Hide rotation indicator if user moves/resizes
         if self._show_rotation_indicator:
             self.hide_rotation_indicator()
@@ -977,7 +1082,7 @@ class DrawingArea(QFrame):
             self.update()
             return
         
-        if self.current_tool == "crop" and getattr(self, "cropping", False):
+        if self.current_tool == "crop" and self.cropping:
             self.crop_end = pt
             self.update()
             return
@@ -1052,22 +1157,32 @@ class DrawingArea(QFrame):
                 # Commit new/pasted freehand shape
                 if self.preview_start and len(self.preview_start) > 1:
                     self.push_undo()
-                    self.shapes.append((
+                    border_color = getattr(self, "preview_color", self.shape_color)
+                    draw_radius = getattr(self, "preview_draw_radius", self.draw_radius)
+                    rotation = getattr(self, "preview_rotation", 0)
+        
+                    shape_tuple = [
                         "draw",
                         [QPoint(p) for p in self.preview_start],
                         None,
-                        self.shape_color,
-                        self.draw_radius
-                    ))
-                self.preview_shape = None
-                self.preview_start = None
-                self.preview_end = None
-                self.selected_shape_index = None
-                
+                        border_color,
+                        draw_radius
+                    ]
+                    if rotation != 0:
+                        shape_tuple.append(rotation)
+                    self.shapes.append(tuple(shape_tuple))
+            
+        
             self._dragging_handle = None
             self._dragging_box = False
             self._orig_bbox = None
             self._orig_points = None
+            
+            # Clean up temporary tracking variables
+            if hasattr(self, '_original_crop_rect'):
+                delattr(self, '_original_crop_rect')
+            if hasattr(self, '_start_drag_point'):
+                delattr(self, '_start_drag_point')
             
             if self.selected_shape_index is not None:
                 # After editing an existing shape, use Arrow cursor for further editing
@@ -1108,12 +1223,32 @@ class DrawingArea(QFrame):
             self.update()
             return
         
-        if self.current_tool == "crop" and getattr(self, "cropping", False):
+        if self.current_tool == "crop" and self.cropping:
             self.cropping = False
-            crop_rect = QRect(self.crop_start, self.crop_end).normalized()
-            self.crop_to_rect(crop_rect)
-            self.crop_start = None
-            self.crop_end = None
+            self.crop_preview_mode = True
+            self._crop_dragging_handle = None
+            self._dragging_box = False
+            self.update()
+            return
+        
+        if self._crop_dragging_handle is not None:
+            self._crop_dragging_handle = None
+            if hasattr(self, '_original_crop_rect'):
+                delattr(self, '_original_crop_rect')
+            if hasattr(self, '_start_drag_point'):
+                delattr(self, '_start_drag_point')
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.update()
+            return
+    
+        # Clean up crop box dragging
+        if self.crop_preview_mode and self._dragging_box:
+            self._dragging_box = False
+            if hasattr(self, '_original_crop_rect'):
+                delattr(self, '_original_crop_rect')
+            if hasattr(self, '_start_drag_point'):
+                delattr(self, '_start_drag_point')
+            self.setCursor(Qt.CursorShape.ArrowCursor)
             self.update()
             return
         
@@ -1242,6 +1377,26 @@ class DrawingArea(QFrame):
             if hasattr(self, "freehand_points") and len(self.freehand_points) > 1:
                 painter.setPen(QPen(self.shape_color, self.draw_radius, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
                 painter.drawPolyline(*self.freehand_points)
+                
+        # Draw crop selection
+        if (self.current_tool == "crop" and self.crop_start is not None and 
+            self.crop_end is not None and (self.cropping or self.crop_preview_mode)):
+            crop_rect = QRect(self.crop_start, self.crop_end).normalized()
+        
+            # Draw dashed selection rectangle
+            crop_pen = QPen(QColor("#000"), 1, Qt.PenStyle.DashLine)
+            painter.setPen(crop_pen)
+            painter.drawRect(crop_rect)
+        
+            # Draw handles if in preview mode
+            if self.crop_preview_mode:
+                for pt in self.handle_points(crop_rect):
+                    painter.setBrush(QColor("white"))
+                    painter.setPen(QPen(QColor("#000"), 1))
+                    painter.drawRect(pt.x() - self.HANDLE_SIZE//2, 
+                                    pt.y() - self.HANDLE_SIZE//2, 
+                                    self.HANDLE_SIZE, 
+                                    self.HANDLE_SIZE)
         
         # Draw preview shape or image
         elif self.preview_shape and self.preview_start is not None:
@@ -1366,6 +1521,23 @@ class DrawingArea(QFrame):
             painter.setBrush(QColor("white"))
             painter.setPen(QPen(QColor("#0078d7"), 2))
             painter.drawRect(pt.x() - self.HANDLE_SIZE//2, pt.y() - self.HANDLE_SIZE//2, self.HANDLE_SIZE, self.HANDLE_SIZE)
+    
+    # Add method to confirm crop
+    def confirm_crop(self):
+        if self.crop_preview_mode and self.crop_start is not None and self.crop_end is not None:
+            crop_rect = QRect(self.crop_start, self.crop_end).normalized()
+            self.crop_to_rect(crop_rect)
+            self.cancel_crop()
+
+    # Add method to cancel crop
+    def cancel_crop(self):
+        self.crop_preview_mode = False
+        self.cropping = False
+        self.crop_start = None
+        self.crop_end = None
+        self._crop_dragging_handle = None
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.update()
             
     def handle_points(self, rect):
         x1, y1, x2, y2 = rect.left(), rect.top(), rect.right(), rect.bottom()
@@ -1456,7 +1628,7 @@ class DrawingArea(QFrame):
             mime = clipboard.mimeData()
             text = clipboard.text()
             if mime.hasImage():
-                self.paste_image_from_clipboard(adjust_mode=True)
+                self.paste_image_from_clipboard()
             elif self._is_shape_json(text):
                 self.paste_shape_from_clipboard()
             return
@@ -1472,6 +1644,16 @@ class DrawingArea(QFrame):
         if event.key() == Qt.Key.Key_Delete:
             self.delete_selected_shape()
             return
+        
+        if event.key() == Qt.Key.Key_Escape:
+            if self.crop_preview_mode:
+                self.cancel_crop()
+                return
+        
+        if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+            if self.crop_preview_mode:
+                self.confirm_crop()
+                return
 
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_Z:
@@ -1761,6 +1943,7 @@ class DrawingArea(QFrame):
             self.update()
         self._rotation_indicator_timer.timeout.disconnect()
         self._rotation_indicator_timer.timeout.connect(commit_rotation)
+
         
     def paste_shape_from_clipboard(self, adjust_mode=False):
         clipboard = QApplication.clipboard()
@@ -1769,17 +1952,29 @@ class DrawingArea(QFrame):
         try:
             shape_dict = json.loads(text)
             tool = shape_dict.get("tool")
+        
+            # Use the copied shape's original color
             color = QColor(shape_dict.get("color", "#000000"))
-            fill_color = QColor(shape_dict["fill_color"]) if "fill_color" in shape_dict else None
+            
+
+            # Get fill color and rotation from copied shape
+            fill_color = None
+            if "fill_color" in shape_dict:
+                fill_color = QColor(shape_dict["fill_color"])
+        
             rotation = shape_dict.get("rotation", 0)
             offset = QPoint(20, 20)
+        
             if tool == "draw" and "points" in shape_dict:
                 points = [QPoint(x, y) for x, y in shape_dict["points"]]
                 points = [p + offset for p in points]
                 self.preview_shape = tool
                 self.preview_start = points
                 self.preview_end = None
-                self.shape_color = color
+                # Store the copied properties for when we place the shape
+                self.preview_color = color
+                self.preview_fill_color = fill_color
+                self.preview_rotation = rotation
                 self.selected_shape_index = None
                 self.set_tool("draw")
                 if points and len(points) > 1:
@@ -1798,40 +1993,36 @@ class DrawingArea(QFrame):
                 self.preview_shape = tool
                 self.preview_start = start
                 self.preview_end = end
-                self.shape_color = color
-                self.selected_shape_index = None
-            
+                # Store the copied properties for when we place the shape
+                self.preview_color = color
                 self.preview_fill_color = fill_color
                 self.preview_rotation = rotation
+                self.selected_shape_index = None
                 self.update()
                 return
             else:
                 return  # Not a recognized shape
         except Exception:
             pass  # Not a shape, ignore
-        
-    def paste_image_from_clipboard(self, adjust_mode=False):
+    
+    def paste_image_from_clipboard(self):
+        """Paste image from clipboard without adjust_mode parameter"""
         clipboard = QApplication.clipboard()
-        pixmap = clipboard.pixmap()
-        self.push_undo()
-        if not pixmap or pixmap.isNull():
-            return
-        # Default placement: center of canvas, 200x200 or image size if smaller
-        canvas_center = QPoint(self.a4_size.width() // 2, self.a4_size.height() // 2)
-        img_w = min(200, pixmap.width())
-        img_h = min(200, pixmap.height())
-        start = canvas_center - QPoint(img_w // 2, img_h // 2)
-        end = canvas_center + QPoint(img_w // 2, img_h // 2)
-        if adjust_mode:
-            self.preview_shape = "image"
-            self.preview_start = start
-            self.preview_end = end
-            self.preview_pixmap = pixmap
-            self.selected_shape_index = None
-            self.update()
-        else:
-            self.shapes.append(("image", start, end, pixmap))
-            self.update()
+        mime = clipboard.mimeData()
+        if mime.hasImage():
+            pixmap = clipboard.pixmap()
+            if not pixmap.isNull():
+                self.push_undo()
+                # Set up preview for placing the image
+                self.preview_shape = "image"
+                self.preview_pixmap = pixmap
+                # Default size for pasted image
+                size = QSize(200, 150)
+                center = QPoint(400, 300)  # Default center position
+                self.preview_start = QPoint(center.x() - size.width()//2, center.y() - size.height()//2)
+                self.preview_end = QPoint(center.x() + size.width()//2, center.y() + size.height()//2)
+                self.selected_shape_index = None
+                self.update()
 
     def copy_selected_image_to_clipboard(self):
         if self.selected_shape_index is not None:
@@ -1858,29 +2049,38 @@ class DrawingArea(QFrame):
         if self.selected_shape_index is not None and 0 <= self.selected_shape_index < len(self.shapes):
             shape = self.shapes[self.selected_shape_index]
             tool, start, end, data = shape[:4]
+
             shape_dict = {
                 "tool": tool,
-                "color": data.name() if isinstance(data, QColor) else "#000000"
+                "color": data.name() if isinstance(data, QColor) else "#000000"  # Use the shape's actual color
             }
+        
             # Handle freehand
             if tool == "draw" and isinstance(start, list):
                 shape_dict["points"] = [(p.x(), p.y()) for p in start]
             else:
                 shape_dict["start"] = (start.x(), start.y())
                 shape_dict["end"] = (end.x(), end.y())
-            # Optional: fill color and rotation
+        
+            # Extract ALL properties from the shape tuple
             fill_color = None
             rotation = None
-            # Find fill color and rotation in shape tuple
+        
+            # Parse the rest of the shape tuple to find fill_color and rotation
             for v in shape[4:]:
                 if isinstance(v, QColor):
                     fill_color = v
                 elif isinstance(v, (int, float)):
                     rotation = v
+        
+            # Store fill color if it exists
             if fill_color is not None:
                 shape_dict["fill_color"] = fill_color.name()
+        
+            # Store rotation if it exists
             if rotation is not None:
                 shape_dict["rotation"] = rotation
+            
             clipboard = QApplication.clipboard()
             clipboard.setText(json.dumps(shape_dict))
     
@@ -1913,12 +2113,15 @@ class DrawingArea(QFrame):
                 points_copy = [QPoint(p) for p in start] if isinstance(start, list) else []
                 # Copy rotation if present
                 if len(shape) > 4:
-                    new_shapes.append((tool, points_copy, None, QColor(data), shape[4]))
+                    color = QColor(data) if isinstance(data, (QColor, str)) else QColor("#000000")
+                    new_shapes.append((tool, points_copy, None, color, shape[4]))
                 else:
-                    new_shapes.append((tool, points_copy, None, QColor(data)))
+                    color = QColor(data) if isinstance(data, (QColor, str)) else QColor("#000000")
+                    new_shapes.append((tool, points_copy, None, color))
             else:
                 # QColor: can be copied
-                new_shapes.append((tool, QPoint(start), QPoint(end), QColor(data)))
+                color = QColor(data) if isinstance(data, (QColor, str)) else QColor("#000000")
+                new_shapes.append((tool, QPoint(start), QPoint(end), color))
                 
         eraser_mask_copy = self.eraser_mask.copy()
         eraser_strokes_copy = [list(stroke) for stroke in self.eraser_strokes]
@@ -2112,27 +2315,151 @@ class DrawingArea(QFrame):
     
     def crop_to_rect(self, crop_rect):
         self.push_undo()
-        # Remove shapes outside crop_rect and adjust those inside
-        new_shapes = []
+    
+        # Create a composite pixmap of the cropped area
+        cropped_pixmap = QPixmap(crop_rect.size())
+        cropped_pixmap.fill(Qt.GlobalColor.white)  # White background like the canvas
+    
+        painter = QPainter(cropped_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    
+        # Translate painter to draw shapes in the correct position relative to crop area
+        painter.translate(-crop_rect.topLeft())
+    
+        # Draw all shapes that intersect with the crop area
         for shape in self.shapes:
-            tool, start, end, data = shape[:4]
-            if tool == "draw":
-                points = [p for p in start if crop_rect.contains(p)]
-                if points:
-                    new_shapes.append((tool, points, None, data))
-            else:
+            tool, start, end, *rest = shape
+        
+            if tool == "draw" and isinstance(start, list):
+                # Check if any points are in the crop area
+                clipped_points = [p for p in start if crop_rect.contains(p)]
+                if clipped_points:
+                    color = rest[0] if rest else QColor("#000000")
+                    draw_width = rest[1] if len(rest) > 1 and isinstance(rest[1], (int, float)) else self.draw_radius
+                    painter.setPen(QPen(color, draw_width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+                    painter.drawPolyline(*start)  # Draw full polyline for better appearance
+                
+            elif tool == "image" and len(rest) > 0 and isinstance(rest[0], QPixmap):
                 rect = QRect(start, end).normalized()
                 if crop_rect.intersects(rect):
-                    new_start = QPoint(
-                        max(rect.left(), crop_rect.left()),
-                        max(rect.top(), crop_rect.top())
-                    )
-                    new_end = QPoint(
-                        min(rect.right(), crop_rect.right()),
-                        min(rect.bottom(), crop_rect.bottom())
-                    )
-                    new_shapes.append((tool, new_start, new_end, data))
-        self.shapes = new_shapes
+                    rotation = rest[1] if len(rest) > 1 and isinstance(rest[1], (int, float)) else 0
+                    painter.save()
+                    if rotation:
+                        painter.translate(rect.center())
+                        painter.rotate(rotation)
+                        painter.translate(-rect.center())
+                    painter.drawPixmap(rect, rest[0])
+                    painter.restore()
+                
+            else:
+                # Handle geometric shapes
+                rect = QRect(start, end).normalized()
+                if crop_rect.intersects(rect):
+                    color = rest[0] if rest else QColor("#000000")
+                    fill_color = None
+                    rotation = 0
+                    
+                    # Extract properties
+                    for prop in rest[1:]:
+                        if isinstance(prop, QColor):
+                            fill_color = prop
+                        elif isinstance(prop, (int, float)):
+                            rotation = prop
+                
+                    painter.save()
+                    if rotation:
+                        painter.translate(rect.center())
+                        painter.rotate(rotation)
+                        painter.translate(-rect.center())
+                
+                    # Draw fill first if present
+                    if fill_color:
+                        painter.setBrush(QBrush(fill_color))
+                        painter.setPen(Qt.PenStyle.NoPen)
+                        self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight())
+                
+                    # Draw border
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.setPen(QPen(color, 3))
+                    self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight())
+                    painter.restore()
+    
+        # Draw eraser strokes that intersect with the crop area
+        painter.setPen(QPen(QColor("white"), 22, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        for stroke in self.eraser_strokes:
+            if len(stroke) > 1:
+                # Check if stroke intersects crop area
+                stroke_intersects = any(crop_rect.contains(p) for p in stroke)
+                if stroke_intersects:
+                    painter.drawPolyline(*stroke)
+    
+        painter.end()
+    
+        # Instead of clearing everything, keep shapes/strokes that are OUTSIDE the crop area
+        shapes_to_keep = []
+        for shape in self.shapes:
+            tool, start, end, *rest = shape
+        
+            if tool == "draw" and isinstance(start, list):
+                # Keep if no points are in the crop area
+                if not any(crop_rect.contains(p) for p in start):
+                    shapes_to_keep.append(shape)
+            elif tool == "image" and len(rest) > 0:
+                rect = QRect(start, end).normalized()
+                # Keep if doesn't intersect crop area
+                if not crop_rect.intersects(rect):
+                    shapes_to_keep.append(shape)
+            else:
+                rect = QRect(start, end).normalized()
+                # Keep if doesn't intersect crop area
+                if not crop_rect.intersects(rect):
+                    shapes_to_keep.append(shape)
+    
+        # Keep eraser strokes that don't intersect with crop area
+        eraser_strokes_to_keep = []
+        for stroke in self.eraser_strokes:
+            if len(stroke) > 1:
+                # Keep if stroke doesn't intersect crop area
+                if not any(crop_rect.contains(p) for p in stroke):
+                    eraser_strokes_to_keep.append(stroke)
+    
+        # Update shapes and eraser strokes to only keep those outside crop area
+        self.shapes = shapes_to_keep
+        self.eraser_strokes = eraser_strokes_to_keep
+    
+        # Clear only the eraser mask area that was cropped
+        new_eraser_mask = QPixmap(self.a4_size)
+        new_eraser_mask.fill(Qt.GlobalColor.transparent)
+    
+        # Redraw eraser mask for remaining strokes
+        if self.eraser_strokes:
+            mask_painter = QPainter(new_eraser_mask)
+            mask_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            mask_painter.setPen(Qt.PenStyle.NoPen)
+            mask_painter.setBrush(QColor("white"))
+            for stroke in self.eraser_strokes:
+                if len(stroke) > 1:
+                    for pt in stroke:
+                        mask_painter.drawEllipse(pt, self.eraser_radius, self.eraser_radius)
+            mask_painter.end()
+    
+        self.eraser_mask = new_eraser_mask
+    
+        # Create the moveable selection as an image
+        self.preview_shape = "image"
+        self.preview_pixmap = cropped_pixmap
+        self.preview_start = crop_rect.topLeft()
+        self.preview_end = crop_rect.bottomRight()
+        self.selected_shape_index = None
+    
+        # Clear crop state
+        self.crop_preview_mode = False
+        self.cropping = False
+        self.crop_start = None
+        self.crop_end = None
+        self._crop_dragging_handle = None
+    
+        self.update()
         
         
     def rotate_points(self, points, angle_degrees, center):
@@ -2147,6 +2474,119 @@ class DrawingArea(QFrame):
             ry = x * sin_a + y * cos_a + cy
             rotated.append(QPoint(int(rx), int(ry)))
         return rotated
+    
+    
+    def clip_polyline_to_rect(self, points, clip_rect):
+        """Clip a polyline to a rectangle - simplified version"""
+        if not points:
+            return []
+    
+        clipped_points = []
+
+        for point in points:
+            if clip_rect.contains(point):
+                clipped_points.append(point)
+            else:
+                # For points outside, we could implement line-rectangle intersection
+                # For now, just skip points outside the rectangle
+                pass
+    
+        return clipped_points if len(clipped_points) > 1 else []
+
+    def clip_line_to_rect(self, p1, p2, rect):
+        """Clip a line segment to a rectangle using Cohen-Sutherland algorithm"""
+        def compute_outcode(x, y):
+            code = 0
+            if x < rect.left():
+                code |= 1  # LEFT
+            elif x > rect.right():
+                code |= 2  # RIGHT
+            if y < rect.top():
+                code |= 4  # TOP
+            elif y > rect.bottom():
+                code |= 8  # BOTTOM
+            return code
+    
+        x1, y1 = p1.x(), p1.y()
+        x2, y2 = p2.x(), p2.y()
+    
+        outcode1 = compute_outcode(x1, y1)
+        outcode2 = compute_outcode(x2, y2)
+    
+        while True:
+            if not (outcode1 | outcode2):  # Both inside
+                return [QPoint(int(x1), int(y1)), QPoint(int(x2), int(y2))]
+            elif outcode1 & outcode2:  # Both outside same region
+                return None
+            else:
+                # Calculate intersection
+                outcode = outcode1 if outcode1 else outcode2
+            
+                if outcode & 8:  # BOTTOM
+                    x = x1 + (x2 - x1) * (rect.bottom() - y1) / (y2 - y1)
+                    y = rect.bottom()
+                elif outcode & 4:  # TOP
+                    x = x1 + (x2 - x1) * (rect.top() - y1) / (y2 - y1)
+                    y = rect.top()
+                elif outcode & 2:  # RIGHT
+                    y = y1 + (y2 - y1) * (rect.right() - x1) / (x2 - x1)
+                    x = rect.right()
+                elif outcode & 1:  # LEFT
+                    y = y1 + (y2 - y1) * (rect.left() - x1) / (x2 - x1)
+                    x = rect.left()
+            
+                if outcode == outcode1:
+                    x1, y1 = x, y
+                    outcode1 = compute_outcode(x1, y1)
+                else:
+                    x2, y2 = x, y
+                    outcode2 = compute_outcode(x2, y2)
+
+    def clip_shape_to_rect(self, tool, shape_rect, clip_rect, rest):
+        """Clip geometric shapes to rectangle"""
+        if not clip_rect.intersects(shape_rect):
+            return None
+
+        # Extract properties
+        color = rest[0] if rest else QColor("#000000")
+        fill_color = None
+        rotation = 0
+
+        for prop in rest[1:]:
+            if isinstance(prop, QColor):
+                fill_color = prop
+            elif isinstance(prop, (int, float)):
+                rotation = prop
+
+        # Create intersection for all geometric shapes
+        intersect = shape_rect.intersected(clip_rect)
+        if intersect.isEmpty():
+            return None
+
+        adjusted_rect = QRect(
+            intersect.left() - offset.x(),
+            intersect.top() - offset.y(),
+            intersect.width(),
+            intersect.height()
+        )
+
+        # For geometric shapes, convert to rectangle if clipped
+        if tool in ["circle", "triangle", "cross"]:
+            # Convert complex shapes to rectangles when clipped
+            tool = "rect"
+
+        shape_data = [tool, adjusted_rect.topLeft(), adjusted_rect.bottomRight(), color]
+        if fill_color:
+            shape_data.append(fill_color)
+        if rotation:
+            shape_data.append(rotation)
+
+        return tuple(shape_data)
+
+    def points_close(self, p1, p2, tolerance=5):
+        """Check if two points are close to each other"""
+        return (p1 - p2).manhattanLength() < tolerance
+    
         
 class ShapeLayersOverlay(QWidget):
     shape_selected = pyqtSignal(int)
@@ -2551,6 +2991,10 @@ class UIMode(QWidget):
         update_quick_prop_icon()
         
         def pick_color():
+            if self.drawing_area.selected_shape_index is not None:
+                self.custom_tooltip.show_tooltip("Cannot change color while editing a shape", 2500)
+                return
+        
             color = QColorDialog.getColor(self.current_shape_color, self, "Pick Shape Color")
             if color.isValid():
                 self.current_shape_color = color
