@@ -284,6 +284,8 @@ class ClickableLabel(QLabel):
 
 
 class ToolButton(QPushButton):
+    doubleClicked = pyqtSignal()
+    
     def __init__(self, text, parent=None):
         super().__init__(parent)
         self.setText(text)
@@ -298,6 +300,10 @@ class ToolButton(QPushButton):
             color: black;
         """)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+    
+    def mouseDoubleClickEvent(self, event):
+        self.doubleClicked.emit()
+        super().mouseDoubleClickEvent(event)
         
 
 
@@ -415,17 +421,50 @@ class DrawingArea(QFrame):
         self.crop_end = None
         self._crop_dragging_handle = None
         
+        self.tool_last_sizes = {
+            'draw': 6,
+            'eraser': 12,
+            'shapes': 2,  # Default border width for shapes
+            'line': 2     # Default line width
+        }
+        
+        # Initialize tool sizes from last used sizes
+        self.tool_sizes = self.tool_last_sizes.copy()
+    
+    def set_tool_size(self, tool_name, size):
+        """Store tool size and update cursor if needed"""
+        self.tool_sizes[tool_name] = size
+        
+        # Update cursor immediately if this is the current tool
+        if self.current_tool == tool_name:
+            if tool_name == 'eraser':
+                pixmap = QPixmap(r"C:\Users\Mathew\Documents\log-documentation-system\assets\tool-colors-eraser.png")
+                if not pixmap.isNull():
+                    cursor_size = size * 2
+                    cursor_pix = pixmap.scaled(cursor_size, cursor_size)
+                    self.setCursor(QCursor(cursor_pix, cursor_size // 2, cursor_size // 2))
+            elif tool_name == 'draw':
+                cursor_size = max(size * 2, 8)
+                pixmap = QPixmap(cursor_size, cursor_size)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(pixmap)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                pen_width = max(size, 2)
+                pen = QPen(self.shape_color, pen_width)
+                painter.setPen(pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                margin = pen_width // 2 + 1
+                painter.drawEllipse(margin, margin, cursor_size - 2 * margin, cursor_size - 2 * margin)
+                painter.end()
+                self._draw_cursor = QCursor(pixmap, cursor_size // 2, cursor_size // 2)
+                self.setCursor(self._draw_cursor)
+        
     def hide_rotation_indicator(self):
         self._show_rotation_indicator = False
         self.update()
         
     def set_shape_color(self, color):
         self.shape_color = color
-    
-        # Also update preview color if we're in the middle of placing a shape
-        #self.preview_color = color
-        
-        # If editing a shape, update its color immediately
         self._edit_locked_color = color
             
         
@@ -480,12 +519,14 @@ class DrawingArea(QFrame):
             return
         
         if tool == "eraser":
+            # Use the last stored size for eraser
+            size = self.tool_last_sizes.get('eraser', 12)
             # Load eraser icon and set as cursor
             pixmap = QPixmap(r"C:\Users\Mathew\Documents\log-documentation-system\assets\tool-colors-eraser.png")
             if not pixmap.isNull():
-                # Optionally scale the pixmap for cursor size
-                cursor_pix = pixmap.scaled(32, 32)
-                self.setCursor(QCursor(cursor_pix, 1, 31))  # (pixmap, hotspot_x, hotspot_y)
+                cursor_size = size * 2  # Use the last stored size
+                cursor_pix = pixmap.scaled(cursor_size, cursor_size)
+                self.setCursor(QCursor(cursor_pix, cursor_size // 2, cursor_size // 2))
             else:
                 self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
                 
@@ -1551,6 +1592,8 @@ class DrawingArea(QFrame):
     
 
     def draw_shape(self, painter, tool, start, end):
+        line_width = self.tool_sizes.get('shapes' if tool not in ['line'] else 'line', 2)
+        painter.setPen(QPen(painter.pen().color(), line_width))
         if tool == "draw":
             # Polyline drawing
             if isinstance(start, list) and len(start) > 1:
@@ -2918,6 +2961,8 @@ class UIMode(QWidget):
         self._last_category_index = 0
         self.drawing_area.shape_selected_for_edit.connect(self.sync_color_with_selected_shape)
         #self._was_maximized = False
+        
+        
 
     def init_ui(self):
         main_layout = QHBoxLayout(self)
@@ -3323,6 +3368,7 @@ class UIMode(QWidget):
             btn.setCheckable(True)
             btn.clicked.connect(lambda checked, t=tool["name"]: self.select_tool(t))
             btn.clicked.connect(lambda checked, t=tool["name"]: self.show_tool_tooltip(pretty_names.get(t, t.title())))
+            btn.doubleClicked.connect(lambda t=tool["name"]: self.handle_tool_double_click(t))
             new_layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignHCenter)
             category_tool_buttons[tool["name"]] = btn
         new_layout.addStretch()
@@ -3705,6 +3751,72 @@ class UIMode(QWidget):
                     painter.end()
                 self.quick_prop.setPixmap(colored)
             self.update_tool_btn_border()
+            
+    
+    def show_tool_size_dialog(self, tool_name, current_size, min_size=1, max_size=64):
+        dialog = GenericSizeDialog(
+            self, 
+            current_size,
+            min_size,
+            max_size,
+            f"Adjust {tool_name.title()} Size"
+        )
+
+        # Center dialog on screen
+        screen_geometry = QApplication.primaryScreen().geometry()
+        dialog_geometry = dialog.geometry()
+        center_point = screen_geometry.center()
+        dialog.move(
+            center_point.x() - dialog_geometry.width()//2,
+            center_point.y() - dialog_geometry.height()//2
+        )
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_size = dialog.getValue()
+            if tool_name == "draw":
+                self.drawing_area.draw_radius = new_size  # Set draw radius
+                self.drawing_area.tool_last_sizes['draw'] = new_size  # Store last used size
+                # Update cursor immediately
+                size = max(new_size * 2, 8)
+                pixmap = QPixmap(size, size)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(pixmap)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                pen_width = max(new_size, 2)
+                pen = QPen(self.current_shape_color, pen_width)
+                painter.setPen(pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                margin = pen_width // 2 + 1
+                painter.drawEllipse(margin, margin, size - 2 * margin, size - 2 * margin)
+                painter.end()
+                self.drawing_area._draw_cursor = QCursor(pixmap, size // 2, size // 2)
+                if self.drawing_area.current_tool == "draw":
+                    self.drawing_area.setCursor(self.drawing_area._draw_cursor)
+            elif tool_name == "eraser":
+                self.drawing_area.eraser_radius = new_size  # Set eraser radius
+                self.drawing_area.tool_last_sizes['eraser'] = new_size  # Store last used size
+                # Update cursor immediately
+                if self.drawing_area.current_tool == "eraser":
+                    pixmap = QPixmap(r"C:\Users\Mathew\Documents\log-documentation-system\assets\tool-colors-eraser.png")
+                    if not pixmap.isNull():
+                        size = new_size * 2
+                        cursor_pix = pixmap.scaled(size, size)
+                        self.drawing_area.setCursor(QCursor(cursor_pix, size // 2, size // 2))
+                        
+            elif tool_name in ['shapes', 'line']:
+                self.drawing_area.tool_sizes[tool_name] = new_size  # Set current size
+                self.drawing_area.tool_last_sizes[tool_name] = new_size  # Store last used size
+
+    def handle_tool_double_click(self, tool_name):
+        if tool_name == 'eraser':
+            current_size = self.drawing_area.tool_last_sizes.get('eraser', 12)
+            self.show_tool_size_dialog(tool_name, current_size, 4, 64)
+        elif tool_name == 'draw':
+            current_size = self.drawing_area.tool_last_sizes.get('draw', 6)
+            self.show_tool_size_dialog(tool_name, current_size, 1, 32)
+        elif tool_name in ['shapes', 'line']:
+            current_size = self.drawing_area.tool_last_sizes.get(tool_name, 2)
+            self.show_tool_size_dialog(tool_name, current_size, 1, 20)
                 
 
 
@@ -3864,6 +3976,68 @@ class CustomSlider(QWidget):
         painter.setPen(QColor("#222"))
         painter.drawText(QRectF(filled_x-handle_radius, y-handle_radius, handle_radius*2, handle_radius*2),
                          Qt.AlignmentFlag.AlignCenter, str(self.value))
+        
+        
+
+class GenericSizeDialog(QDialog):
+    def __init__(self, parent, current_value, min_value=1, max_value=64, title="Adjust Draw Size"):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setModal(True)
+        self.setFixedSize(300, 150)
+        
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # Container widget with white background
+        container = QWidget()
+        container.setStyleSheet("""
+            background: white;
+            border: 2px solid #222;
+            border-radius: 12px;
+        """)
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(20, 20, 20, 20)
+        container_layout.setSpacing(10)
+        
+        # Title
+        title_label = QLabel(title)
+        title_label.setStyleSheet("font-size: 14pt; color: #222; background: transparent; border: none;")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        container_layout.addWidget(title_label)
+        
+        # Slider
+        self.slider = CustomSlider(min_value, max_value, current_value)
+        self.slider.setFixedWidth(200)
+        container_layout.addWidget(self.slider, alignment=Qt.AlignmentFlag.AlignHCenter)
+        
+        # OK Button
+        ok_btn = QPushButton("OK")
+        ok_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #222;
+                font-size: 12pt;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                color: #666;
+                border: 2px solid #222;
+                padding: 3px 13px;
+            }
+        """)
+        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ok_btn.clicked.connect(self.accept)
+        container_layout.addWidget(ok_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        layout.addWidget(container)
+
+    def getValue(self):
+        return self.slider.getValue()
 
 
 
