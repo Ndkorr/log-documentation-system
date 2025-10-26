@@ -19,7 +19,7 @@ from PyQt6.QtCore import pyqtProperty
 
 from PyQt6.QtGui import (
     QIcon, QPainter, QPen, QColor, QMouseEvent,
-    QCursor, QFont, QColor, QPixmap, QClipboard, QAction, QBrush
+    QCursor, QFont, QColor, QPixmap, QClipboard, QAction, QBrush, QImage
     )
 import sys
 import math
@@ -384,6 +384,9 @@ class DrawingArea(QFrame):
         self.eraser_radius = 12
         
         self.draw_radius = 6
+        
+        # cache for in-progress image erasing to avoid repeated conversions
+        self._image_erase_cache = {}
         
         #Zoom state
         self.scale_factor = 1.0
@@ -1298,6 +1301,8 @@ class DrawingArea(QFrame):
                 self.eraser_strokes.append(list(self._current_eraser_points))
             self._erasing = False
             self._current_eraser_points = []
+            # clear any per-image erase cache (we updated pixmaps while erasing)
+            self._image_erase_cache.clear()
             self.update()
             return
         
@@ -1347,16 +1352,6 @@ class DrawingArea(QFrame):
         # Draw shapes, but skip the one being edited (if any)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         
-        
-        painter.setPen(QPen(QColor("white"), 22, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        for stroke in self.eraser_strokes:
-            if len(stroke) > 1:
-                painter.drawPolyline(*stroke)
-        
-        # Draw current eraser stroke
-        if self._erasing and len(self._current_eraser_points) > 1:
-            painter.drawPolyline(*self._current_eraser_points)
-        
                 
         # Draw all shapes (including images)
         for idx, shape in enumerate(self.shapes):
@@ -1379,6 +1374,7 @@ class DrawingArea(QFrame):
             
             if tool == "image" and isinstance(data, QPixmap):
                 rect = QRect(start, end).normalized()
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
                 if rotation and rect is not None:
                     painter.translate(rect.center())
                     painter.rotate(rotation)
@@ -1524,7 +1520,7 @@ class DrawingArea(QFrame):
                     self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight())
             painter.restore()
 
-        painter.drawPixmap(0, 0, self.eraser_mask)
+        
         painter.restore()
         
         # Degree indicator during free rotate
@@ -2205,14 +2201,268 @@ class DrawingArea(QFrame):
             self.update()
             
     def erase_at_point(self, pt):
-        
-        # Remove the topmost shape under the point
-        painter = QPainter(self.eraser_mask)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("white"))
-        painter.drawEllipse(pt, self.eraser_radius, self.eraser_radius)
-        painter.end()
+    
+        radius = self.eraser_radius
+
+        def circle_intersects_rect(center, r, rect):
+            cx, cy = center.x(), center.y()
+            left, top, right, bottom = rect.left(), rect.top(), rect.right(), rect.bottom()
+            closest_x = max(left, min(cx, right))
+            closest_y = max(top, min(cy, bottom))
+            dx = cx - closest_x
+            dy = cy - closest_y
+            return (dx*dx + dy*dy) <= (r*r)
+
+        def dist2(a, b):
+            dx = a.x() - b.x()
+            dy = a.y() - b.y()
+            return dx*dx + dy*dy
+
+        erased_any = False
+        r2 = radius * radius
+
+        # Iterate reversed so topmost shapes are processed first
+        for idx in reversed(range(len(self.shapes))):
+            shape = self.shapes[idx]
+            tool = shape[0]
+
+            # FREEHAND polyline: same splitting logic (preserve behavior)
+            if tool == "draw" and isinstance(shape[1], list):
+                pts = shape[1]
+                if not pts:
+                    continue
+                segments = []
+                current_segment = []
+                for p in pts:
+                    if dist2(p, pt) > r2:
+                        current_segment.append(QPoint(p))
+                    else:
+                        if len(current_segment) >= 2:
+                            segments.append(current_segment)
+                        current_segment = []
+                if len(current_segment) >= 2:
+                    segments.append(current_segment)
+
+                if not segments:
+                    del self.shapes[idx]
+                    erased_any = True
+                else:
+                    metadata = list(shape[3:]) if len(shape) > 3 else []
+                    if len(segments) == 1:
+                        new_shape = ("draw", [QPoint(p) for p in segments[0]], None) + tuple(metadata)
+                        self.shapes[idx] = new_shape
+                        erased_any = True
+                    else:
+                        del self.shapes[idx]
+                        for seg in reversed(segments):
+                            new_shape = ("draw", [QPoint(p) for p in seg], None) + tuple(metadata)
+                            self.shapes.insert(idx, new_shape)
+                        erased_any = True
+
+            # IMAGE: erase into the image (rotation + rect scaling aware)
+            elif tool == "image" and isinstance(shape[3], QPixmap):
+                start, end = shape[1], shape[2]
+                rect = QRect(start, end).normalized()
+
+                # extract rotation if present (image tuple may be ("image", start, end, pixmap, rotation))
+                rotation = 0
+                if len(shape) > 4 and isinstance(shape[4], (int, float)):
+                    rotation = shape[4]
+
+                # Use cached QImage while erasing to avoid repeated convertToFormat cost
+                img = self._image_erase_cache.get(idx)
+                if img is None:
+                    img = shape[3].toImage().convertToFormat(QImage.Format.Format_ARGB32)
+                    self._image_erase_cache[idx] = img
+
+                # compute scale from displayed rect -> image pixels
+                disp_w = max(1, rect.width())
+                disp_h = max(1, rect.height())
+                img_w = max(1, img.width())
+                img_h = max(1, img.height())
+                sx = img_w / disp_w
+                sy = img_h / disp_h
+                # average scale for radius
+                scale_avg = (sx + sy) / 2.0
+                radius_px = max(1, int(round(radius * scale_avg)))
+
+                # If rotated, map the canvas point back into image-local coords by inverse rotation
+                if rotation:
+                    center = rect.center()
+                    angle = math.radians(-rotation)  # inverse rotation
+                    cos_a = math.cos(angle)
+                    sin_a = math.sin(angle)
+                    dx = pt.x() - center.x()
+                    dy = pt.y() - center.y()
+                    ux = dx * cos_a - dy * sin_a + center.x()
+                    uy = dx * sin_a + dy * cos_a + center.y()
+                    intersects = circle_intersects_rect(QPoint(int(ux), int(uy)), radius, rect)
+                    local_fx = (ux - rect.left()) * sx
+                    local_fy = (uy - rect.top()) * sy
+                else:
+                    intersects = circle_intersects_rect(pt, radius, rect)
+                    local_fx = (pt.x() - rect.left()) * sx
+                    local_fy = (pt.y() - rect.top()) * sy
+
+                if intersects:
+                    # clamp to image bounds
+                    lx = max(0, min(int(round(local_fx)), img_w - 1))
+                    ly = max(0, min(int(round(local_fy)), img_h - 1))
+
+                    # Apply eraser (clear) into the image
+                    img_painter = QPainter(img)
+                    img_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    img_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+                    img_painter.setPen(Qt.PenStyle.NoPen)
+                    img_painter.setBrush(QColor(0, 0, 0, 0))
+                    img_painter.drawEllipse(QPoint(lx, ly), radius_px, radius_px)
+                    img_painter.end()
+
+                    # Keep the edited QImage in the cache (future erases use it)
+                    self._image_erase_cache[idx] = img
+
+                    # Replace the pixmap in the shape with the updated image (preserve rotation if present)
+                    new_pix = QPixmap.fromImage(img)
+                    new_shape = list(shape)
+                    new_shape[3] = new_pix
+                    # ensure rotation stays in tuple (if originally present)
+                    if rotation and (len(shape) <= 4 or not isinstance(shape[4], (int, float))):
+                        # append rotation if it wasn't already part of tuple
+                        new_shape.append(rotation)
+                    self.shapes[idx] = tuple(new_shape)
+                    erased_any = True
+
+            # GEOMETRIC shapes: remove if eraser intersects bounding rect
+            else:
+                start = shape[1]
+                end = shape[2]
+                rect = QRect(start, end).normalized()
+                # Skip if eraser doesn't touch the bounding rect
+                if not circle_intersects_rect(pt, radius, rect):
+                    continue
+
+                # Extract properties: border color, optional fill and rotation
+                rest = list(shape[3:]) if len(shape) > 3 else []
+                border_color = QColor("#000000")
+                fill_color = None
+                rotation = 0
+                # Robust parsing: collect QColor entries (first = border, second = fill if present)
+                qcolors = [v for v in rest if isinstance(v, QColor)]
+                nums = [v for v in rest if isinstance(v, (int, float))]
+                if qcolors:
+                    border_color = qcolors[0]
+                    if len(qcolors) > 1:
+                        fill_color = qcolors[1]
+                # rotation is taken from any numeric value (prefer the last numeric entry)
+                if nums:
+                    rotation = nums[-1]
+
+                # --- HIGH-QUALITY RASTERIZATION (supersampled) ---
+                disp_w = max(1, rect.width())
+                disp_h = max(1, rect.height())
+                # supersample factor (2x by default) for smoother result; increase to 3 for even higher quality
+                ss = 2
+                
+                # Border width in display coords (use shapes or default)
+                border_width_disp = self.tool_sizes.get('shapes', 3)
+
+                # Scaled pen width in image pixels
+                pen_w_px = max(1, int(round(border_width_disp * ss)))
+
+                # Padding (in image pixels) to avoid clipping of stroke/antialiasing
+                aa_margin = 3 * ss  # extra antialias margin
+                pad = (pen_w_px // 2) + aa_margin
+
+                img_w = max(1, int(disp_w * ss) + 2 * pad)
+                img_h = max(1, int(disp_h * ss) + 2 * pad)
+
+                # Use premultiplied format for nicer alpha compositing
+                img = QImage(img_w, img_h, QImage.Format.Format_ARGB32_Premultiplied)
+                img.fill(0)  # fully transparent
+
+                painter_img = QPainter(img)
+                painter_img.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter_img.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+                # Translate by pad (in device coords) then scale so we can draw using display coords.
+                # We translate by pad/ss in "display" coords because we'll scale by ss next.
+                painter_img.translate(pad / ss, pad / ss)
+                painter_img.scale(ss, ss)
+
+                # apply rotation (around the displayed rect center) so the baked image visually matches the canvas
+                if rotation:
+                    center_disp = QPointF(disp_w / 2.0, disp_h / 2.0)
+                    painter_img.translate(center_disp)
+                    painter_img.rotate(rotation)
+                    painter_img.translate(-center_disp)
+
+                local_rect = QRect(0, 0, disp_w, disp_h)
+
+                # Draw fill only if the original shape actually had a fill_color
+                if fill_color is not None:
+                    painter_img.setBrush(QBrush(fill_color))
+                    painter_img.setPen(Qt.PenStyle.NoPen)
+                    self.draw_shape(painter_img, tool, local_rect.topLeft(), local_rect.bottomRight())
+                else:
+                    painter_img.setBrush(Qt.BrushStyle.NoBrush)
+
+                # Draw border (scale pen width by supersample factor so stroke thickness is preserved)
+                pen = QPen(border_color, border_width_disp * 1.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+                # Because we already scaled the painter, set pen width in display units (painter.scale handles pixel density)
+                pen.setWidthF(border_width_disp)
+                painter_img.setPen(pen)
+                self.draw_shape(painter_img, tool, local_rect.topLeft(), local_rect.bottomRight())
+                painter_img.end()
+
+                # Cache the QImage for in-progress erasing so repeated erase calls paint into the same high-res image
+                self._image_erase_cache[idx] = img
+
+                # Map canvas eraser point into high-res image pixels (account for pad)
+                sx = ss
+                sy = ss
+                scale_avg = (sx + sy) / 2.0
+                radius_px = max(1, int(round(radius * scale_avg)))
+
+                if rotation:
+                    center = rect.center()
+                    angle = math.radians(-rotation)  # inverse rotation mapping
+                    cos_a = math.cos(angle)
+                    sin_a = math.sin(angle)
+                    dx = pt.x() - center.x()
+                    dy = pt.y() - center.y()
+                    ux = dx * cos_a - dy * sin_a + center.x()
+                    uy = dx * sin_a + dy * cos_a + center.y()
+                    local_fx = (ux - rect.left()) * sx + pad
+                    local_fy = (uy - rect.top()) * sy + pad
+                    intersects = circle_intersects_rect(QPoint(int(ux), int(uy)), radius, rect)
+                else:
+                    local_fx = (pt.x() - rect.left()) * sx + pad
+                    local_fy = (pt.y() - rect.top()) * sy + pad
+                    intersects = circle_intersects_rect(pt, radius, rect)
+
+                if intersects:
+                    lx = max(0, min(int(round(local_fx)), img_w - 1))
+                    ly = max(0, min(int(round(local_fy)), img_h - 1))
+
+                    # Apply eraser (clear) into the high-res image
+                    img_painter = QPainter(img)
+                    img_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    img_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+                    img_painter.setPen(Qt.PenStyle.NoPen)
+                    img_painter.setBrush(QColor(0, 0, 0, 0))
+                    img_painter.drawEllipse(QPoint(lx, ly), radius_px, radius_px)
+                    img_painter.end()
+
+                    # Replace the vector shape by an image shape (preserve rotation flag so future draws/erases remain correct)
+                    new_pix = QPixmap.fromImage(img)
+                    new_shape = ("image", start, end, new_pix, rotation)
+                    self.shapes[idx] = new_shape
+                    erased_any = True
+
+        if erased_any:
+            # update layer overlay / UI state
+            self.shape_layers_overlay.update_shapes(self.shapes)
+
         self.update()
                 
     def fill_at_point(self, pt):
