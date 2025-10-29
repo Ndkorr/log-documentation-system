@@ -2361,7 +2361,7 @@ class DrawingArea(QFrame):
                 disp_w = max(1, rect.width())
                 disp_h = max(1, rect.height())
                 # supersample factor (2x by default) for smoother result; increase to 3 for even higher quality
-                ss = 2
+                ss = 1
                 
                 # Border width in display coords (use shapes or default)
                 border_width_disp = self.tool_sizes.get('shapes', 3)
@@ -2370,8 +2370,9 @@ class DrawingArea(QFrame):
                 pen_w_px = max(1, int(round(border_width_disp * ss)))
 
                 # Padding (in image pixels) to avoid clipping of stroke/antialiasing
-                aa_margin = 3 * ss  # extra antialias margin
-                pad = (pen_w_px // 2) + aa_margin
+                aa_margin = 1 * ss   # extra antialias margin
+                raw_pad = (pen_w_px // 2) + aa_margin
+                pad = ((raw_pad + ss - 1) // ss) * ss  # round up to nearest multiple of ss
 
                 img_w = max(1, int(disp_w * ss) + 2 * pad)
                 img_h = max(1, int(disp_h * ss) + 2 * pad)
@@ -2453,9 +2454,32 @@ class DrawingArea(QFrame):
                     img_painter.drawEllipse(QPoint(lx, ly), radius_px, radius_px)
                     img_painter.end()
 
+                    # Keep the full high-res image (includes pad on all sides)
+                    highres_img = img  # full image (disp_w*ss + 2*pad)
+                    self._image_erase_cache[idx] = highres_img
+
+                    # Create pixmap from the high-res image and mark devicePixelRatio so Qt scales correctly
+                    new_pix = QPixmap.fromImage(highres_img)
+                    try:
+                        new_pix.setDevicePixelRatio(float(ss))
+                    except Exception:
+                        pass
+
+                    # pad is an integer multiple of ss, so display padding is exact integer
+                    pad_disp = pad // ss
+                    if pad_disp < 0:
+                        pad_disp = 0
+
+                    # Expand the original shape rect by the exact pad_disp so the pixmap logical size
+                    # and the shape rect align 1:1 (avoids sub-pixel shift / top-left offset).
+                    new_start = QPoint(max(0, start.x() - pad_disp), max(0, start.y() - pad_disp))
+                    new_end = QPoint(
+                        min(self.a4_size.width(), end.x() + pad_disp),
+                        min(self.a4_size.height(), end.y() + pad_disp)
+                    )
+
                     # Replace the vector shape by an image shape (preserve rotation flag so future draws/erases remain correct)
-                    new_pix = QPixmap.fromImage(img)
-                    new_shape = ("image", start, end, new_pix, rotation)
+                    new_shape = ("image", new_start, new_end, new_pix, rotation)
                     self.shapes[idx] = new_shape
                     erased_any = True
 
@@ -2478,17 +2502,20 @@ class DrawingArea(QFrame):
             return QPoint(int(rx), int(ry))
         
         def is_on_border(tool, start, end, pt, tolerance=8, rotation=0):
+            # If start/end are not QPoint, it's not a geometric shape border
+            if not isinstance(start, QPoint) or not isinstance(end, QPoint):
+                return False
             rect = QRect(start, end).normalized()
-            if rotation is not None and rotation != 0:
+            # If rotated, test against inverse-rotated point
+            test_pt = pt
+            if rotation:
                 center = rect.center()
-                pt = rotate_point(pt, rotation, center)
-                
-                
+                test_pt = rotate_point(pt, rotation, center)
             if tool == "rect" or tool == "roundrect":
-                left = abs(pt.x() - rect.left()) < tolerance and rect.top() <= pt.y() <= rect.bottom()
-                right = abs(pt.x() - rect.right()) < tolerance and rect.top() <= pt.y() <= rect.bottom()
-                top = abs(pt.y() - rect.top()) < tolerance and rect.left() <= pt.x() <= rect.right()
-                bottom = abs(pt.y() - rect.bottom()) < tolerance and rect.left() <= pt.x() <= rect.right()
+                left = abs(test_pt.x() - rect.left()) < tolerance and rect.top() <= test_pt.y() <= rect.bottom()
+                right = abs(test_pt.x() - rect.right()) < tolerance and rect.top() <= test_pt.y() <= rect.bottom()
+                top = abs(test_pt.y() - rect.top()) < tolerance and rect.left() <= test_pt.x() <= rect.right()
+                bottom = abs(test_pt.y() - rect.bottom()) < tolerance and rect.left() <= test_pt.x() <= rect.right()
                 return left or right or top or bottom
             elif tool == "circle":
                 center = rect.center()
@@ -2496,8 +2523,8 @@ class DrawingArea(QFrame):
                 ry = rect.height() / 2
                 if rx == 0 or ry == 0:
                     return False
-                dx = (pt.x() - center.x()) / rx
-                dy = (pt.y() - center.y()) / ry
+                dx = (test_pt.x() - center.x()) / rx
+                dy = (test_pt.y() - center.y()) / ry
                 dist = math.hypot(dx, dy)
                 return abs(dist - 1) < (tolerance / max(rx, ry))
             elif tool == "triangle":
@@ -2509,7 +2536,7 @@ class DrawingArea(QFrame):
                     QPoint(x2, y2)
                 ]
                 def point_near_line(p1, p2):
-                    px, py = pt.x(), pt.y()
+                    px, py = test_pt.x(), test_pt.y()
                     x0, y0 = p1.x(), p1.y()
                     x1_, y1_ = p2.x(), p2.y()
                     dx, dy = x1_ - x0, y1_ - y0
@@ -2529,11 +2556,11 @@ class DrawingArea(QFrame):
                 x1_, y1_ = end.x(), end.y()
                 dx, dy = x1_ - x0, y1_ - y0
                 if dx == dy == 0:
-                    return math.hypot(pt.x() - x0, pt.y() - y0) < tolerance
-                t = max(0, min(1, ((pt.x() - x0) * dx + (pt.y() - y0) * dy) / (dx * dx + dy * dy)))
+                    return math.hypot(test_pt.x() - x0, test_pt.y() - y0) < tolerance
+                t = max(0, min(1, ((test_pt.x() - x0) * dx + (test_pt.y() - y0) * dy) / (dx * dx + dy * dy)))
                 proj_x = x0 + t * dx
                 proj_y = y0 + t * dy
-                return math.hypot(pt.x() - proj_x, pt.y() - proj_y) < tolerance
+                return math.hypot(test_pt.x() - proj_x, test_pt.y() - proj_y) < tolerance
             elif tool == "cross":
                 rect = QRect(start, end).normalized()
                 def near_line(p1, p2):
@@ -2541,69 +2568,89 @@ class DrawingArea(QFrame):
                     x1_, y1_ = p2.x(), p2.y()
                     dx, dy = x1_ - x0, y1_ - y0
                     if dx == dy == 0:
-                        return math.hypot(pt.x() - x0, pt.y() - y0) < tolerance
-                    t = max(0, min(1, ((pt.x() - x0) * dx + (pt.y() - y0) * dy) / (dx * dx + dy * dy)))
+                        return math.hypot(test_pt.x() - x0, test_pt.y() - y0) < tolerance
+                    t = max(0, min(1, ((test_pt.x() - x0) * dx + (test_pt.y() - y0) * dy) / (dx * dx + dy * dy)))
                     proj_x = x0 + t * dx
                     proj_y = y0 + t * dy
-                    return math.hypot(pt.x() - proj_x, pt.y() - proj_y) < tolerance
+                    return math.hypot(test_pt.x() - proj_x, test_pt.y() - proj_y) < tolerance
                 return (
                     near_line(rect.topLeft(), rect.bottomRight()) or
                     near_line(rect.bottomLeft(), rect.topRight())
                 )
             return False
 
+        # Iterate top-down
         for idx in reversed(range(len(self.shapes))):
             shape = self.shapes[idx]
-            tool, start, end, *rest = shape
-            # Always unpack as border_color, fill_color, rotation
-            border_color = rest[0] if len(rest) > 0 else QColor("#000000")
-            
+            tool = shape[0]
+            start, end = shape[1], shape[2]
+
+            # Parse existing properties robustly: border_color, optional fill_color, optional rotation
+            rest = list(shape[3:]) if len(shape) > 3 else []
+            border_color = QColor("#000000")
             fill_color = None
             rotation = 0
+            # collect QColor and numeric props
+            qcols = [v for v in rest if isinstance(v, QColor)]
+            nums = [v for v in rest if isinstance(v, (int, float))]
+            if qcols:
+                border_color = qcols[0]
+                if len(qcols) > 1:
+                    fill_color = qcols[1]
+            if nums:
+                rotation = nums[-1]
 
-            # Determine fill_color and rotation position
-            if len(rest) == 2:
-                # Could be (border, fill) or (border, rotation)
-                if isinstance(rest[1], QColor):
-                    fill_color = rest[1]
-                elif isinstance(rest[1], (int, float)):
-                    rotation = rest[1]
-            elif len(rest) == 3:
-                # (border, fill, rotation)
-                fill_color = rest[1]
-                rotation = rest[2]
-            elif len(rest) == 1:
-                if isinstance(rest[0], QColor):
-                    fill_color = rest[0]
-                elif isinstance(rest[0], (int, float)):
-                    rotation = rest[0]
-
-            if tool == "draw":
+            # FREEHAND (draw) shapes: change stroke color only when clicked near the stroke
+            if tool == "draw" and isinstance(start, list):
                 points = start
-                for p in points:
-                    if (p - pt).manhattanLength() < 10:
-                        self.shapes[idx] = (tool, points, None, self.shape_color, fill_color, rotation)
-                        self.shape_layers_overlay.update_shapes(self.shapes)
-                pass
+                touched = any((p - pt).manhattanLength() < 10 for p in points)
+                if touched:
+                    self.push_undo()
+                    # preserve draw radius and rotation if present
+                    draw_radius = None
+                    draw_rotation = 0
+                    if len(shape) > 4 and isinstance(shape[4], (int, float)):
+                        draw_radius = shape[4]
+                    if len(shape) > 5 and isinstance(shape[5], (int, float)):
+                        draw_rotation = shape[5]
+                    # Build tuple: ("draw", points, None, border_color, draw_radius?, rotation?)
+                    new_shape = ["draw", [QPoint(p) for p in points], None, self.shape_color]
+                    if draw_radius is not None:
+                        new_shape.append(draw_radius)
+                    if draw_rotation:
+                        new_shape.append(draw_rotation)
+                    self.shapes[idx] = tuple(new_shape)
+                    self.shape_layers_overlay.update_shapes(self.shapes)
+                continue
 
-            else:
+            # For non-draw shapes ensure start/end are QPoint before creating rect/hit-tests
+            rect_ok = isinstance(start, QPoint) and isinstance(end, QPoint)
+            # If click is on border -> update border only
+            if rect_ok and is_on_border(tool, start, end, pt, tolerance=8, rotation=rotation):
+                self.push_undo()
+                new_shape = [tool, start, end, self.shape_color]
+                # preserve existing fill if any
+                if fill_color is not None:
+                    new_shape.append(fill_color)
+                # preserve rotation if non-zero
+                if rotation:
+                    new_shape.append(rotation)
+                self.shapes[idx] = tuple(new_shape)
+                self.shape_layers_overlay.update_shapes(self.shapes)
+                continue
+
+            # If click is inside the shape rect -> update fill only
+            if rect_ok:
                 rect = QRect(start, end).normalized()
-                if is_on_border(tool, start, end, pt, tolerance=8, rotation=rotation):
+                if rect.contains(pt):
                     self.push_undo()
-                    # Update border color, preserve fill and rotation
-                    new_shape = [tool, start, end, self.shape_color]
-                    if fill_color is not None:
-                        new_shape.append(fill_color)
-                    new_shape.append(rotation)
-                    self.shapes[idx] = tuple(new_shape)
-                    self.shape_layers_overlay.update_shapes(self.shapes)
-                elif rect.contains(pt):
-                    self.push_undo()
-                    # Update fill color, preserve border and rotation
+                    # preserve existing border_color
                     new_shape = [tool, start, end, border_color, self.shape_color]
-                    new_shape.append(rotation)
+                    if rotation:
+                        new_shape.append(rotation)
                     self.shapes[idx] = tuple(new_shape)
                     self.shape_layers_overlay.update_shapes(self.shapes)
+                    continue
                     
     
     def crop_to_rect(self, crop_rect):
