@@ -2311,7 +2311,11 @@ class FilterDialog(QDialog):
         type_layout = QHBoxLayout()
         type_label = QLabel("Select Log Type:")
         type_layout.addWidget(type_label)
+<<<<<<< HEAD
+        self.type_combo = QComboBox(self) 
+=======
         self.type_combo = QComboBox(self)
+>>>>>>> 1ff3872a2ef1a50d1f9e78d823fa28d57c4110a6
         self.type_combo.addItem("All")
         self.type_combo.addItems(["Just Details", "Problem ★" , "Solution ■", "Bug ▲", "Changes ◆"])  # Updated options
         type_layout.addWidget(self.type_combo)
