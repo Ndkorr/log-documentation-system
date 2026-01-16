@@ -38,12 +38,43 @@ import shutil
 import time
 
 
-def get_config_dir():
-    config_dir = os.path.join(os.getcwd(), "config")
-    if not os.path.exists(config_dir):
-        os.makedirs(config_dir)
-    return config_dir
+def get_config_dir(base_path=None):
+    if base_path:
+        config_dir = os.path.join(base_path, "config")
+        if not os.path.exists(config_dir):
+            os.makedirs(config_dir)
+        return config_dir
+    else:
+        # Only return, do not create in root
+        return os.path.join(os.getcwd(), "config")
 
+
+class FileNameDialog(QDialog):
+    def __init__(self, extension, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Log File Name")
+        self.setFixedSize(350, 120)
+        layout = QVBoxLayout(self)
+        label = QLabel(f"Enter log file name (*.{extension}):")
+        layout.addWidget(label)
+        hbox = QHBoxLayout()
+        self.name_edit = QLineEdit()
+        hbox.addWidget(self.name_edit)
+        self.ext_label = QLabel(f".{extension}")
+        self.ext_label.setStyleSheet("color: gray;")
+        hbox.addWidget(self.ext_label)
+        layout.addLayout(hbox)
+        btn_box = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_box.addWidget(ok_btn)
+        btn_box.addWidget(cancel_btn)
+        layout.addLayout(btn_box)
+
+    def get_filename(self):
+        return self.name_edit.text().strip()
 
 
 class AnimatedPushButton(QPushButton):
@@ -82,7 +113,7 @@ class AnimatedPushButton(QPushButton):
         self.anim.setEndValue(0)
         self.anim.start()
         super().leaveEvent(a0)
-            
+
 
 class AnimateClickableLabel(QLabel):
     clicked = pyqtSignal()
@@ -234,7 +265,6 @@ class AnimatedClickableLabel2(QLabel):
             """)
 
 
-
 class AnimatedClickableLabel3(QLabel):
     clicked = pyqtSignal()
     
@@ -308,7 +338,7 @@ class AnimatedClickableLabel3(QLabel):
                 border: 1px solid transparent;
                 border-radius: 15px;
             """)
-            
+
 
 class AnimatedClickableLabel4(QLabel):
     clicked = pyqtSignal()
@@ -460,7 +490,7 @@ class AnimatedClickableLabel5(QLabel):
                 border-radius: 15px;
             """)
 
-    
+
 class SetupWizard(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1894,8 +1924,6 @@ class SetupWizard(QDialog):
             """)
 
 
-
-
 class NavigationPane(QFrame):
     fileDoubleClicked = pyqtSignal(str)
     
@@ -1980,7 +2008,7 @@ class ClickableLabelBurger(QLabel):
     def clicked(self):
         # Placeholder method; override in subclass or connect externally.
         pass
-        
+
 
 # Minimal clickable label for text-only clickable elements.
 class AnimatedClickableLabel(QLabel):
@@ -2335,7 +2363,6 @@ class FilterDialog(QDialog):
         return start_date, end_date, log_type
 
 
-
 class ClickableLabel(QLabel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)        
@@ -2550,7 +2577,7 @@ class ClickableDefinitionLabel(QLabel):
         viewer = DefinitionViewer(self.full_definition, self)
         viewer.exec()
         super().mousePressEvent(event)
-        
+
 
 class DefinitionViewer(QDialog):
     def __init__(self, full_text, parent=None):
@@ -2945,13 +2972,7 @@ class DictionaryDialog(QDialog):
             print(f"Keyword images loaded from {images_file}")
         else:
             self.keyword_images = {}
-    
-    def get_config_dir():
-        config_dir = os.path.join(os.getcwd(), "config")
-        if not os.path.exists(config_dir):
-            os.makedirs(config_dir)
-        return config_dir
-            
+
 
 class RestorePointWindow(QDialog):  # Change QWidget to QDialog
     def __init__(self, restore_points, parent=None):
@@ -3120,7 +3141,7 @@ class RestorePointWindow(QDialog):  # Change QWidget to QDialog
         window_geometry = self.frameGeometry()
         window_geometry.moveCenter(screen_geometry.center())
         self.move(window_geometry.topLeft())
-    
+
 
 class LogTextEdit(QTextEdit):
     logSubmitted = pyqtSignal()
@@ -3171,7 +3192,7 @@ class LogTextEdit(QTextEdit):
         
         else:
             super().keyPressEvent(event)  # Process other keys normally
-            
+
 class HardwareMonitor(QThread):
     data_ready = pyqtSignal(str, str, str)  # Signal to send memory & temperature data
 
@@ -3207,10 +3228,22 @@ class HardwareMonitor(QThread):
 
 
 class LogApp(QWidget):
-    def __init__(self, log_mode="General", file_path=None):
-        super().__init__()
+    def __init__(self, setup_data=None, log_mode="General", file_path=None, parent=None):
+        super().__init__(parent)
+        self.current_file = file_path
+        # Use setup_data to initialize user/project config
+        if setup_data:
+            self.user_name = setup_data.get("user_name", "")
+            self.pdf_title = setup_data.get("pdf_title", "Log Documentation")
+            self.pdf_font_size = setup_data.get("pdf_font_size", 12)
+            self.pdf_line_spacing = setup_data.get("pdf_line_spacing", 1.5)
+            self.pdf_font = setup_data.get("pdf_font", "Arial")
+            self.custom_dictionary = setup_data.get("custom_dictionary", "")
+        else:
+            # fallback to loading config from file or defaults
+            self.load_user_config()
         print("Initializing LogApp...")
-        self.log_mode = log_mode
+        self.log_mode = setup_data.get("log_type", "General") if setup_data else "General"
         self.log_type = "General" if log_mode == "General" else "Debugging"
         self.load_user_config()
         self.load_color_from_config()  # Load the saved color
@@ -3219,15 +3252,17 @@ class LogApp(QWidget):
         self.keyword_definitions = {}
         self.keyword_definitions_file = self.get_keyword_definitions_file()
         self.load_keyword_definitions()  # Load keyword definitions
-        self.current_file = None
         
+
+        self.unsaved_changes = False
+
         # Add Undo/Redo Stacks
         self.undo_stack = []  # Stores previous log states
         self.redo_stack = []  # Stores undone states
-        
+
         # **Store entire log restore points**
         self.restore_points = {}  # {version_name: log_snapshot}
-        
+
         # Initialize counters for different log types
         self.log_counters = {
             "Problem ★": 0,
@@ -3235,14 +3270,13 @@ class LogApp(QWidget):
             "Bug ▲": 0,
             "Changes ◆": 0,
         }
-        
-        
+
         # Start the hardware monitoring thread
         self.hw_monitor = HardwareMonitor()
         self.hw_monitor.data_ready.connect(self.update_system_info)
         self.hw_monitor.start()
         print("LogApp initialized.")
-        
+
         # If a file_path is provided, load the logs immediately.
         if file_path:
             self.open_logs(file_path)
@@ -3255,29 +3289,29 @@ class LogApp(QWidget):
         self.recent_menu = QMenu("Recent", self)
         menu_bar.addMenu(self.recent_menu)
         self.update_recent_files_menu()
-        
+
         # Help Menu
         help_menu = QMenu("Help", self)
         menu_bar.addMenu(help_menu)
         help_action = QAction("How to Use", self)
         help_action.triggered.connect(self.show_help)
         help_menu.addAction(help_action)
-        
+
         # Dictionary Menu
         dictionary_action = QAction("Dictionary", self)
         dictionary_action.triggered.connect(self.open_dictionary)
         help_menu.addAction(dictionary_action)
-        
+
         # Add Filter Logs action under Help.
         filter_action = QAction("Filter Logs", self)
         filter_action.triggered.connect(self.open_filter_dialog)
         help_menu.addAction(filter_action)
-        
+
         # Optionally, add a Clear Filter action.
         clear_filter_action = QAction("Clear Filters", self)
         clear_filter_action.triggered.connect(self.clear_filters)
         help_menu.addAction(clear_filter_action)
-        
+
         # **Version Control Menu (Fixed Naming)**
         version_menu = QMenu("Version Control", self)
         menu_bar.addMenu(version_menu)
@@ -3285,14 +3319,14 @@ class LogApp(QWidget):
         # Restore Menu
         save_version_action = QAction("Create Restore Point", self)
         save_version_action.triggered.connect(self.create_restore_point)
-        
+
         # **View Log Versions Action (Fix Name & Connect Correctly)**
         view_versions_action = QAction("View Log Versions", self)
         view_versions_action.triggered.connect(self.view_restore_points)
-    
+
         version_menu.addAction(view_versions_action)
         version_menu.addAction(save_version_action)
-    
+
     def update_recent_files_menu(self):
         self.recent_menu.clear()
         settings = QSettings("MyCompany", "LogDocumentationSystem")
@@ -3310,31 +3344,28 @@ class LogApp(QWidget):
             action = QAction(file_path, self)
             action.triggered.connect(lambda checked, path=file_path: self.open_logs(path))
             self.recent_menu.addAction(action)
-            
-            
+
     def load_recent_files(self):
         settings = QSettings("MyCompany", "LogDocumentationSystem")
         self.recent_files = settings.value("recent_files", [])
-        
+
         # Ensure it is a list (QSettings may return None or a string instead)
         if not isinstance(self.recent_files, list):
             self.recent_files = []
-    
+
     def save_recent_file(self, file_path):
         if file_path not in self.recent_files:
             self.recent_files.insert(0, file_path)
             self.recent_files = self.recent_files[:5]  # Limit to last 5 files
-            
+
         settings = QSettings("MyCompany", "LogDocumentationSystem")
         settings.setValue("recent_files", self.recent_files)
-        
+
         self.update_recent_files_menu()  # Update the menu dynamically
-    
-    
+
     def show_help(self):
         QMessageBox.information(self, "How to Use", "1. Open or create a log file.\n2. Add logs using the text input.\n3. Save logs to keep them.\n4. Use 'Recent' to quickly access previous logs.")
 
-    
     def init_ui(self):
         print("Setting up UI...")
         self.setWindowTitle("Log Documentation System")
@@ -3343,17 +3374,17 @@ class LogApp(QWidget):
         self.center()
 
         layout = QVBoxLayout(self)
-        
+
         self.create_menu_bar(layout)  # Create the menu bar and add it to layout
         self.setLayout(layout)
-        
+
         self.log_input = LogTextEdit(self)
         self.log_input.setPlaceholderText("Enter your log entry here...")
         self.log_input.installEventFilter(self)  # Install the event filter
         layout.addWidget(self.log_input)
-        
+
         combo_layout = QHBoxLayout()
-        
+
         log_type_label = QLabel(f"Log Type: {self.log_type}", self)
         if self.log_type == "General":
             log_type_label.setStyleSheet("""
@@ -3373,38 +3404,38 @@ class LogApp(QWidget):
             );
             font-weight: bold;
             """)
-        
+
         combo_layout.addWidget(log_type_label)
-        
+
         self.category_selector = QComboBox(self)
         if self.log_type == "General":
             self.category_selector.addItems(["Just Details", "Problem ★", "Bug ▲", "Changes ◆"])
         else:
             self.category_selector.addItems(["Just Details", "Bug ▲"])    
-        
+
         combo_layout.addWidget(self.category_selector)
-        
+
         layout.addLayout(combo_layout)
-        
+
         button_layout = QHBoxLayout()
-        
+
         self.add_log_button = QPushButton("Add Log", self)
         self.add_log_button.clicked.connect(self.add_log)
         button_layout.addWidget(self.add_log_button)
-        
+
         self.clear_logs_button = QPushButton("Clear Logs", self)
         self.clear_logs_button.clicked.connect(self.clear_logs)
         button_layout.addWidget(self.clear_logs_button)
 
         layout.addLayout(button_layout)
-        
+
         self.log_list = QListWidget(self)
         self.log_list.itemDoubleClicked.connect(self.edit_log)
-        
+
         # Set context menu policy to enable right-click menu
         self.log_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.log_list.customContextMenuRequested.connect(self.show_context_menu)
-        
+
         # Enable drag-and-drop functionality
         self.setAcceptDrops(True)
         filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
@@ -3414,27 +3445,27 @@ class LogApp(QWidget):
         self.drop_area.setAcceptDrops(True)  # Enable drag-and-drop for this widget
         self.drop_area.hide()  # Hide the drop area by default
         layout.addWidget(self.drop_area)
-        
+
         layout.addWidget(self.log_list)
-        
+
         button_layout = QHBoxLayout()
-        
+
         self.save_button = QPushButton("Save Logs", self)
         self.save_button.clicked.connect(self.save_logs)
         button_layout.addWidget(self.save_button)
-        
+
         self.open_button = QPushButton("Open Logs", self)
         self.open_button.clicked.connect(self.open_logs)
         button_layout.addWidget(self.open_button)
-        
+
         self.customize_button = QPushButton("Customize", self)
         self.customize_button.clicked.connect(self.set_user_name)
         button_layout.addWidget(self.customize_button)
-        
+
         # Modify export button
         self.export_button = QPushButton("Export to", self)
         export_menu = QMenu(self.export_button)
-        
+
         # Add "Export to PDF" option
         export_pdf_action = QAction("Export to PDF", self)
         export_pdf_action.triggered.connect(self.export_to_pdf)
@@ -3448,28 +3479,28 @@ class LogApp(QWidget):
         # Attach the menu to the button
         self.export_button.setMenu(export_menu)
         button_layout.addWidget(self.export_button)
-        
+
         layout.addLayout(button_layout)
-        
+
         self.setLayout(layout)
         print("UI setup complete.")
 
         # Hotkey for Saving Logs
         self.save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
         self.save_shortcut.activated.connect(self.save_logs)
-        
+
         # Hotkey for Opening Logs
         self.open_shortcut = QShortcut(QKeySequence("Ctrl+O"), self)
         self.open_shortcut.activated.connect(self.open_logs)
-        
+
         # Hotkey for Clearing Logs
         self.clear_shortcut = QShortcut(QKeySequence("Ctrl+E"), self)
         self.clear_shortcut.activated.connect(self.clear_logs)
-        
+
         # Hotkey for Exporting to PDF
         self.export_pdf_shortcut = QShortcut(QKeySequence("Ctrl+P"), self)
         self.export_pdf_shortcut.activated.connect(self.export_to_pdf)
-        
+
         # Hotkey for Undo
         undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
         undo_shortcut.activated.connect(self.undo)
@@ -3477,12 +3508,12 @@ class LogApp(QWidget):
         # Hotkey for Redo
         redo_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self)
         redo_shortcut.activated.connect(self.redo)
-        
+
         # Auto Save Functionality
         self.auto_save_timer = QTimer(self)
         self.auto_save_timer.timeout.connect(self.auto_save_logs)
         self.auto_save_timer.start(60 * 1000)  # 60 sec in milliseconds
-    
+
     def center(self):
         screen_geometry = QApplication.primaryScreen().availableGeometry()
         window_geometry = self.frameGeometry()
@@ -3495,7 +3526,7 @@ class LogApp(QWidget):
         self.log_type = text
 
     def set_user_name(self):
-        dialog = QWidget()
+        dialog = QDialog(self)
         dialog.setWindowTitle("Customize")
         dialog.setGeometry(100, 100, 400, 300)
         dialog.setFixedSize(400, 300)  # Make dialog not resizable
@@ -3506,13 +3537,13 @@ class LogApp(QWidget):
         dialog_geometry = dialog.frameGeometry()
         dialog_geometry.moveCenter(screen_geometry.center())
         dialog.move(dialog_geometry.topLeft())
-        
+
         # Name input
         name_label = QLabel("Enter your name:")
         dialog_layout.addWidget(name_label)
         name_input = QLineEdit(self.user_name)
         dialog_layout.addWidget(name_input)
-        
+
         # PDF Title input
         title_label = QLabel("Enter PDF Title:")
         dialog_layout.addWidget(title_label)
@@ -3543,12 +3574,12 @@ class LogApp(QWidget):
 
         # Color selection logic
         def choose_color():
-            color = QColorDialog.getColor()
+            color = QColorDialog.getColor(getattr(self, 'text_color', QColor("green")), dialog)
             if color.isValid():
                 self.text_color = color
                 color_button.setStyleSheet(f"background-color: {color.name()};")
                 self.save_color_to_config()
-                
+
         color_button.clicked.connect(choose_color)
 
         # Save logic
@@ -3556,54 +3587,65 @@ class LogApp(QWidget):
             name = name_input.text().strip()
             if name:
                 self.user_name = name
-                print(f"User name set to: {self.user_name}")
-                
-                self.pdf_title = title_input.text().strip() or "Log Documentation"  # Default title
-                self.pdf_font_size = int(font_size_input.text().strip()) if font_size_input.text().strip().isdigit() else 12  # Default font size
-                self.pdf_line_spacing = float(spacing_input.text().strip()) if spacing_input.text().strip().replace(".", "", 1).isdigit() else 1.5  # Default line spacing
-
-                self.save_user_config()
-                print(f"User name: {self.user_name}, PDF Title: {self.pdf_title}, Font Size: {self.pdf_font_size}, Line Spacing: {self.pdf_line_spacing}")
+                self.pdf_title = title_input.text().strip() or "Log Documentation"
+                self.pdf_font_size = int(font_size_input.text().strip()) if font_size_input.text().strip().isdigit() else 12
+                self.pdf_line_spacing = float(spacing_input.text().strip()) if spacing_input.text().strip().replace(".", "", 1).isdigit() else 1.5
+                # Save to project config if a project is open
+                if self.current_file:
+                    project_folder = os.path.dirname(self.current_file or "")
+                    config_folder = os.path.join(project_folder, "config")
+                    os.makedirs(config_folder, exist_ok=True)
+                    config_path = os.path.join(config_folder, "user_config.json")
+                    # Load existing config if present
+                    config = {}
+                    if os.path.exists(config_path):
+                        with open(config_path, "r", encoding="utf-8") as f:
+                            config = json.load(f)
+                    config.update({
+                        "user_name": self.user_name,
+                        "pdf_title": self.pdf_title,
+                        "pdf_font_size": self.pdf_font_size,
+                        "pdf_line_spacing": self.pdf_line_spacing,
+                        "text_color": self.text_color.name() if hasattr(self, 'text_color') else "#008000"
+                    })
+                    with open(config_path, "w", encoding="utf-8") as f:
+                        json.dump(config, f, indent=4)
+                else:
+                    # Fallback to global config if no project open
+                    self.save_user_config()
+                dialog.accept()
             else:
                 QMessageBox.warning(dialog, "Caution", "No Name Inserted.")
-                self.pdf_title = title_input.text().strip() or "Log Documentation"  # Default title
-                self.pdf_font_size = int(font_size_input.text().strip()) if font_size_input.text().strip().isdigit() else 12  # Default font size
-                self.pdf_line_spacing = float(spacing_input.text().strip()) if spacing_input.text().strip().replace(".", "", 1).isdigit() else 1.5  # Default line spacing
-
-                self.save_user_config()
-                print(f"PDF Title: {self.pdf_title}, Font Size: {self.pdf_font_size}, Line Spacing: {self.pdf_line_spacing}")
-                
-            dialog.close()
 
         save_button.clicked.connect(save_customization)
-
         dialog.setLayout(dialog_layout)
-        dialog.show()
-    
+        dialog.exec()
+
     def get_system_info(self):
         return self.memory_usage
-    
+
     def update_system_info(self, memory_usage, cpu_usage, gpu_usage=None):
         self.memory_usage = memory_usage
         self.cpu_usage = cpu_usage
         self.gpu_usage = gpu_usage
-        
+
     def add_log(self):
+        self.unsaved_changes = True
         log_text = self.log_input.toPlainText().strip()
         if log_text:
-            
+
             # Save current state before modification
             self.undo_stack.append(self.get_log_state())  
             self.redo_stack.clear()  # Clear redo stack when adding a new log
-            
+
             print("Adding log entry...")
             timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%SH]")
             additional_info = ""
-        
+
             category = self.category_selector.currentText()
             indicators = {"Problem ★": "★", "Solution ■": "■", "Bug ▲": "▲", "Changes ◆": "◆", "Just Details": ""}
             category_icon = indicators.get(category, "")
-            
+
             # Set default colors for categories
             category_colors = {
                 "Problem ★": "red",
@@ -3612,15 +3654,15 @@ class LogApp(QWidget):
                 "Changes ◆": "blue",
             }
             icon_color = category_colors.get(category, "green")  # Fallback to green if category not found
-            
+
             # Auto-increment counter for the selected category
             if category in self.log_counters:
                 self.log_counters[category] += 1
                 log_number = f" #{self.log_counters[category]}"
-        
+
             else:
                 log_number = ""  # If not tracked, don't append a number
-            
+
             if self.log_type == "Debugging":
                 memory_usage = self.get_system_info()
                 cpu_usage = self.cpu_usage
@@ -3628,19 +3670,19 @@ class LogApp(QWidget):
                 additional_info = f" - {memory_usage}, {cpu_usage}, {gpu_usage}"
             elif self.log_type == "General" and self.user_name:
                 additional_info = f" - User: {self.user_name}"
-            
+
             # Use the customized text color for the main log entry text
             main_text_color = self.text_color.name() if hasattr(self, 'text_color') else "black"  # Default to black
 
             # Format the log text using format_text
             formatted_log_text = self.format_text(log_text)
-            
+
             # Create the log entry with HTML formatting
             log_entry = (
                 f'<span style="color:{icon_color};">{category_icon}</span> '
                 f'<span style="color:{main_text_color};">{timestamp} [{self.log_type}] {formatted_log_text}{additional_info}{log_number}</span>'
             )
-            
+
             # Create a QLabel to render the rich text
             label = QLabel()
             label.setText(log_entry)
@@ -3654,25 +3696,25 @@ class LogApp(QWidget):
             item = QListWidgetItem()
             self.log_list.addItem(item)
             self.log_list.setItemWidget(item, label)
-            
+
             # Scroll to the newly added item
             self.log_list.scrollToItem(item)
-            
+
             # Ensure the list can scroll horizontally
             self.log_list.setWrapping(False)
             self.log_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             self.log_list.setHorizontalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
-            
+
             # Automatically create a restore point every 10 logs
             if self.log_list.count() % 5 == 0:
                 self.auto_create_restore_point()
-            
+
             self.log_input.clear()
             print("Log entry added successfully.")
-            
+
             # Save updated counters to JSON
             self.save_log_counters()
-            
+
         else:
             QMessageBox.warning(self, "Invalid Input", "Log entry cannot be empty.")
             print("Failed to add log: Empty input.")
@@ -3683,13 +3725,13 @@ class LogApp(QWidget):
         doc = QTextDocument()
         doc.setHtml(html_text)
         return doc.toPlainText()
-    
+
     def edit_log(self, item):
         label = self.log_list.itemWidget(item)
         if isinstance(label, QLabel):
             # Get the plain text version of the current log entry
             current_text = self.strip_html(label.text())
-    
+
             # Open a dialog pre-filled with the current log text
             plain_text, ok = QInputDialog.getText(self, "Edit Log", "Modify your log entry:", text="")
             if ok and plain_text.strip():
@@ -3717,8 +3759,8 @@ class LogApp(QWidget):
             elif not plain_text.strip():
                 QMessageBox.warning(self, "Invalid Input", "Log entry cannot be empty.")
 
-            
     def save_logs(self):
+        self.unsaved_changes = False
         print("Saving logs...")
         # If file is already created, save as usual (for autosave compatibility)
         if self.current_file:
@@ -3727,16 +3769,21 @@ class LogApp(QWidget):
             config_folder = os.path.join(project_folder, "config")
             os.makedirs(config_folder, exist_ok=True)
         else:
-            # Prompt for a folder to save the project
             project_folder = QFileDialog.getExistingDirectory(self, "Select Project Folder")
             if not project_folder:
                 return
             config_folder = os.path.join(project_folder, "config")
             os.makedirs(config_folder, exist_ok=True)
-            # Use default log file name based on log type
-            log_filename = "logs.ldsg" if self.log_type == "General" else "logs.ldsd"
-            file_name = os.path.join(project_folder, log_filename)
-            self.current_file = file_name  # Set for autosave
+            ext = "ldsg" if self.log_type == "General" else "ldsd"
+            # Use the custom dialog
+            dlg = FileNameDialog(ext, self)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+            file_base = dlg.get_filename()
+            if not file_base:
+                return
+            file_name = os.path.join(project_folder, f"{file_base}.{ext}")
+            self.current_file = file_name
 
         # Save the log file
         with open(file_name, "w", encoding="utf-8") as file:
@@ -3757,9 +3804,8 @@ class LogApp(QWidget):
         print(f"Logs saved to {file_name}")
         print(f"Config saved to {config_folder}")
 
-        self.setWindowTitle("Log Documentation System - FIle saved")  # Update title
-        QTimer.singleShot(2000, lambda: self.setWindowTitle("Log Documentation System"))  # Reset after 2 seconds
-
+        self.setWindowTitle("Log Documentation System - File saved")  # Update title
+        QTimer.singleShot(2000, lambda: self.setWindowTitle("Log Documentation System"))   # Reset after 2 seconds
 
     def open_logs(self, file_path=None):
         print("Opening logs...")
@@ -3768,7 +3814,6 @@ class LogApp(QWidget):
             file_path, _ = QFileDialog.getOpenFileName(self, "Open Logs", "", filter_str)
         if not file_path:
             return
-        
 
         self.current_file = file_path
         self.save_recent_file(file_path)
@@ -3813,19 +3858,18 @@ class LogApp(QWidget):
                 self.keyword_definitions = {}
         else:
             self.keyword_definitions = {}
-            
-            
+
         try:
             with open(file_path, "r", encoding="utf-8") as file:
                 lines = file.readlines()  # Read all lines from the file
-                
+
             # Create a progress dialog
             progress_dialog = QProgressDialog("Loading Please Wait...", "Cancel", 0, len(lines), self)
             progress_dialog.setWindowTitle("Loading Logs")
             progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
             progress_dialog.setMinimumDuration(0)  # Show immediately
             progress_dialog.setValue(0) 
-                
+
             for i, line in enumerate(lines):
                 if progress_dialog.wasCanceled():
                     self.log_list.clear()   # Clear all log items
@@ -3834,9 +3878,9 @@ class LogApp(QWidget):
                     print("Loading canceled by user.")
                     break
                 line = line.strip()
-                        
+
                 if line:  # Ensure the line is not empty
-                    
+
                     # Create a QLabel and set the saved HTML content
                     label = QLabel()
                     label.setText(line)
@@ -3845,7 +3889,7 @@ class LogApp(QWidget):
                     label.linkActivated.connect(self.handle_internal_link)  # Connect internal link handler
                     label.setWordWrap(False)
                     label.adjustSize()
-                        
+
                     # Create a QListWidgetItem and set its size hint to the label's size
                     item = QListWidgetItem()
                     item.setSizeHint(label.sizeHint())
@@ -3856,22 +3900,20 @@ class LogApp(QWidget):
                 # Update the progress dialog
                 progress_dialog.setValue(i + 1)
                 QApplication.processEvents()  # Allow the UI to update
-                
+
             progress_dialog.close()
             print(f"Logs loaded successfully from {file_path}")
-                
-                
+
             # Scroll to the last item in the log list
             if self.log_list.count() > 0:
                 last_item = self.log_list.item(self.log_list.count() - 1)
                 self.log_list.scrollToItem(last_item)
                 print("Scrolled to the latest log entry.")
-                
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open file: {e}")
             print(f"Error opening file: {e}")
 
-    
     def eventFilter(self, source, event):
         if source == self.log_input and event.type() == QEvent.Type.KeyPress:
             # Debug: print key code and modifiers
@@ -3881,7 +3923,7 @@ class LogApp(QWidget):
                 self.add_log()
                 return True  # Consume the event
         return super().eventFilter(source, event)
-    
+
     def show_context_menu(self, pos: QPoint):
         item = self.log_list.itemAt(pos)
         if item:
@@ -3889,41 +3931,41 @@ class LogApp(QWidget):
             # Get the selected log text
             label = self.log_list.itemWidget(item)
             log_text = self.strip_html(label.text()) if isinstance(label, QLabel) else ""
-            
+
             # Check if the log is a Bug or Problem
             is_resolvable = "▲" in log_text
-            
+
             delete_action = menu.addAction("Delete")
             edit_action = menu.addAction("Edit")
-            
+
             # Add "Fix" option only for Bugs
             fix_action = None
             if is_resolvable:
                 fix_action = menu.addAction("Fix")
-            
+
             # Add "Solution" option only for Problems
             solution_action = None
             if "★" in log_text:
                 solution_action = menu.addAction("Add Solution")
-            
+
             action = menu.exec(self.log_list.viewport().mapToGlobal(pos))
-            
+
             if action is None:
                 return  # Exit function without doing anything
-            
+
             if action == delete_action:
                 row = self.log_list.row(item)
                 self.log_list.takeItem(row)
                 print("Log entry deleted.")
-                
+
             elif action == edit_action:
                 self.edit_log(item)
                 print("Log entry edited.")
-                
+
             elif action == fix_action:
                 self.resolve_log(item)
                 print("Log entry resolved.")
-                
+
             elif action == solution_action:
                 self.add_solution(item)
                 print("Solution added for the problem.")
@@ -3933,12 +3975,12 @@ class LogApp(QWidget):
         label = self.log_list.itemWidget(item)
         if isinstance(label, QLabel):
             problem_text = self.strip_html(label.text())
-            
+
             # Check if the problem is already resolved
             if "Resolved" in problem_text:
                 QMessageBox.information(self, "Already Resolved", "This problem is already marked as resolved.")
                 return
-            
+
             match = re.search(r"★.*?#(\d+)", problem_text)
             if match:
                 problem_number = match.group(1)
@@ -3971,23 +4013,49 @@ class LogApp(QWidget):
                     print(f"Solution #{problem_number} added successfully and Problem #{problem_number} marked as Resolved.")
                 else:
                     QMessageBox.warning(self, "Invalid Input", "Solution entry cannot be empty.")
-    
+
     def save_color_to_config(self):
-        config = {"text_color": self.text_color.name() if hasattr(self, 'text_color') else "#008000"}  # Default to green
-        with open("config.json", "w") as config_file:
-            json.dump(config, config_file)
-        print("Color saved to config.json")
-    
+        color_value = self.text_color.name() if hasattr(self, 'text_color') else "#008000"
+        if self.current_file:
+            project_folder = os.path.dirname(self.current_file)
+            config_folder = os.path.join(project_folder, "config")
+            os.makedirs(config_folder, exist_ok=True)
+            config_path = os.path.join(config_folder, "user_config.json")
+            # Load existing config if present
+            config = {}
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            config["text_color"] = color_value
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4)
+            print(f"Color saved to {config_path}")
+        else:
+            # Fallback to global config if no project open
+            settings = QSettings("MyCompany", "LogDocumentationSystem")
+            settings.setValue("text_color", color_value)
+            print("Color saved to global settings")
+
     def load_color_from_config(self):
-        try:
-            with open("config.json", "r") as config_file:
-                config = json.load(config_file)
-                self.text_color = QColor(config.get("text_color", "#008000"))  # Default to green
-                print(f"Color loaded: {self.text_color.name()}")
-        except FileNotFoundError:
-            self.text_color = QColor("green")  # Default to green if config file doesn't exist
-            print("No config file found. Using default color.")
-            
+        if self.current_file:
+            project_folder = os.path.dirname(self.current_file)
+            config_folder = os.path.join(project_folder, "config")
+            config_path = os.path.join(config_folder, "user_config.json")
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                    self.text_color = QColor(config.get("text_color", "#008000"))
+                    print(f"Color loaded from {config_path}: {self.text_color.name()}")
+            except Exception:
+                self.text_color = QColor("#008000")
+                print("No project color config found. Using default color.")
+        else:
+            # Fallback to global config if no project open
+            settings = QSettings("MyCompany", "LogDocumentationSystem")
+            color = settings.value("text_color", "#008000")
+            self.text_color = QColor(color)
+            print("Color loaded from global settings")
+    
     def dragEnterEvent(self, event):
         print("dragEnterEvent triggered")
         filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
@@ -4014,8 +4082,12 @@ class LogApp(QWidget):
                 self.open_logs(file_path)
                 break
         else:
-            QMessageBox.warning(self, "Invalid File", "Please select a valid" + f"{filter_json}" + "file.")
-    
+            QMessageBox.warning(
+                self,
+                "Invalid File",
+                "Please select a valid" + f"{filter_json}" + "file.",
+            )
+
         self.drop_area.hide()
         self.log_list.show()
         event.acceptProposedAction()
@@ -4026,11 +4098,10 @@ class LogApp(QWidget):
         self.log_list.show()
         event.accept()
 
-        
     def export_to_pdf(self):
         # Create a QTextDocument to hold the aggregated logs.
         doc = QTextDocument()
-        
+
         # Get user-defined values
         font_size = self.pdf_font_size  # User-selected font size
         line_spacing = self.pdf_line_spacing  # User-defined spacing
@@ -4065,7 +4136,7 @@ class LogApp(QWidget):
             <body>
                 <h1>{self.pdf_title}</h1>
         """
-        
+
         # Loop through each item in the log list.
         for index in range(self.log_list.count()):
             item = self.log_list.item(index)
@@ -4074,43 +4145,43 @@ class LogApp(QWidget):
                 # Append the label's HTML text. You can add additional formatting here if needed.
                 text = label.text()
                 html_content += f"<p class='log-entry'>{text}</p>"
-        
+
         # Append keyword definitions at the end of the PDF
         html_content += "<hr><h2>Definitions</h2><ul>"
         for keyword, definition in getattr(self, 'keyword_definitions', {}).items():
             html_content += f"<li><b>{keyword}:</b> {definition}</li>"
         html_content += "</ul></body></html>"
-    
+
         doc.setHtml(html_content)
-    
+
         # Create a printer object and configure it for PDF output.
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         file_path, _ = QFileDialog.getSaveFileName(self, "Export PDF", "", "PDF Files (*.pdf)")
         if file_path:
             printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
             printer.setOutputFileName(file_path)
-        
+
             # Optionally, you can show a print dialog to let the user adjust settings.
             # print_dialog = QPrintDialog(printer, self)
             # if print_dialog.exec() != QPrintDialog.DialogCode.Accepted:
             #     return
-        
+
             # Print the document to PDF.
             doc.print(printer)
-            
+
             # Confirmation Dialog
             msg = QMessageBox(self)
             msg.setIcon(QMessageBox.Icon.Information)
             msg.setWindowTitle("PDF Exported")
             msg.setText(f"PDF has been saved successfully!\n\nLocation:\n{file_path}")
             msg.setStandardButtons(QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Ok)
-        
+
             # Handle user response (Open PDF if clicked)
             response = msg.exec()
             if response == QMessageBox.StandardButton.Open:
                 self.open_pdf(file_path)
                 print(f"PDF exported successfully to {file_path}")
-    
+
     def clear_logs(self):
         # Confirm the action with the user (optional)
         reply = QMessageBox.question(self, "Clear Logs", 
@@ -4120,7 +4191,7 @@ class LogApp(QWidget):
             self.log_list.clear()   # Clear all log items
             self.current_file = None  # Reset the current file reference
             print("Logs cleared and current file dropped.")
-    
+
     def auto_save_logs(self):
         if self.current_file:
             print("Auto-saving logs...")
@@ -4137,16 +4208,53 @@ class LogApp(QWidget):
             print("Auto-save skipped: No file selected")
 
     def save_user_config(self):
-        settings = QSettings("MyCompany", "LogDocumentationSystem")
-        settings.setValue("username", self.user_name)
-        settings.setValue("pdf_title", self.pdf_title)
-        settings.setValue("pdf_font_size", self.pdf_font_size)
-        settings.setValue("pdf_line_spacing", self.pdf_line_spacing)
-        settings.setValue("pdf_font", self.pdf_font)
-        settings.setValue("custom_dictionary", self.custom_dictionary)
-        print(f"Loaded settings: Username={self.user_name}, PDF Title={self.pdf_title}, Font Size={self.pdf_font_size}, Line Spacing={self.pdf_line_spacing}, Font={self.pdf_font}, CustomDict={self.custom_dictionary}")
+        if self.current_file:
+            project_folder = os.path.dirname(self.current_file)
+            config_folder = os.path.join(project_folder, "config")
+            os.makedirs(config_folder, exist_ok=True)
+            config_path = os.path.join(config_folder, "user_config.json")
+            config = {
+                "user_name": self.user_name,
+                "pdf_title": self.pdf_title,
+                "pdf_font_size": self.pdf_font_size,
+                "pdf_line_spacing": self.pdf_line_spacing,
+                "pdf_font": self.pdf_font,
+                "custom_dictionary": self.custom_dictionary,
+                "text_color": self.text_color.name() if hasattr(self, 'text_color') else "#008000"
+            }
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4)
+            print(f"User config saved to {config_path}")
+        else:
+            # Fallback to global config if no project open
+            settings = QSettings("MyCompany", "LogDocumentationSystem")
+            settings.setValue("username", self.user_name)
+            settings.setValue("pdf_title", self.pdf_title)
+            settings.setValue("pdf_font_size", self.pdf_font_size)
+            settings.setValue("pdf_line_spacing", self.pdf_line_spacing)
+            settings.setValue("pdf_font", self.pdf_font)
+            settings.setValue("custom_dictionary", self.custom_dictionary)
+            settings.setValue("text_color", self.text_color.name() if hasattr(self, 'text_color') else "#008000")
+            print("User config saved to global settings")
 
     def load_user_config(self):
+        # Try to load from project config first
+        if hasattr(self, "current_file") and self.current_file:
+            project_folder = os.path.dirname(self.current_file)
+            config_folder = os.path.join(project_folder, "config")
+            config_path = os.path.join(config_folder, "user_config.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.user_name = data.get("user_name", "")
+                    self.pdf_title = data.get("pdf_title", "Log Documentation")
+                    self.pdf_font_size = int(data.get("pdf_font_size", 12))
+                    self.pdf_line_spacing = float(data.get("pdf_line_spacing", 1.5))
+                    self.pdf_font = data.get("pdf_font", "Arial")
+                    self.custom_dictionary = data.get("custom_dictionary", "")
+                    self.text_color = QColor(data.get("text_color", "#008000"))
+                return
+        # Fallback to global config
         settings = QSettings("MyCompany", "LogDocumentationSystem")
         self.user_name = settings.value("username", "")
         self.pdf_title = settings.value("pdf_title", "Log Documentation")
@@ -4154,7 +4262,7 @@ class LogApp(QWidget):
         self.pdf_line_spacing = float(settings.value("pdf_line_spacing", 1.5))
         self.pdf_font = settings.value("pdf_font", "Arial")
         self.custom_dictionary = settings.value("custom_dictionary", "")
-        print(f"Loaded settings: Username={self.user_name}, PDF Title={self.pdf_title}, Font Size={self.pdf_font_size}, Line Spacing={self.pdf_line_spacing}, Font={self.pdf_font}, CustomDict={self.custom_dictionary}")
+        self.text_color = QColor(settings.value("text_color", "#008000"))
 
     def open_pdf(self, file_path):
         try:
@@ -4164,31 +4272,30 @@ class LogApp(QWidget):
                 subprocess.call(["xdg-open", file_path])
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open PDF:\n{str(e)}")
-    
+
     def format_text(self, text):
         """Convert Markdown-like syntax into HTML for QLabel."""
         text = re.sub(r"\*([^*]+)\*", r"<i>\1</i>", text)  # *italic* → <i>italic</i>
         text = re.sub(r"_([^_]+)_", r"<u>\1</u>", text)    # _underline_ → <u>underline</u>
         text = re.sub(r"\[([^\]]+)\]\((#.*?)\)", r'<a href="\2">\1</a>', text)  # Internal links only
-        
+
         # Use user-defined keywords from the dictionary
         for keyword, definition in getattr(self, 'keyword_definitions', {}).items():
             text = re.sub(rf"\b{keyword}\b", f'<a href="#{keyword}">{keyword}</a>', text)
 
         return text
-    
+
     def handle_internal_link(self, link):
         """Handle internal navigation within the document."""
         print(f"Navigating to: {link}")
-        
+
         keyword = link.lstrip("#")  # Remove '#' from link
         if keyword in getattr(self, 'keyword_definitions', {}):
             definition = self.keyword_definitions[keyword]
             QMessageBox.information(self, f"Definition: {keyword}", definition)
         else:
             QMessageBox.warning(self, "Keyword Not Found", f"No definition found for '{keyword}'.")
-        
-    
+
     def export_to_html(self):
         # Get user-defined values
         font_size = self.pdf_font_size  # Reuse PDF settings if desired
@@ -4265,7 +4372,7 @@ class LogApp(QWidget):
                 if response == QMessageBox.StandardButton.Open:
                     self.open_pdf(file_path)
                     print(f"PDF exported successfully to {file_path}")
-            
+
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export HTML:\n{e}")
 
@@ -4294,16 +4401,15 @@ class LogApp(QWidget):
                     category = match.group(1)
                     number = int(match.group(2))
                     detected_counters[category] = max(detected_counters[category], number)
-                    
+
         # Update class counters AFTER the loop to avoid resetting mid-detection
         self.log_counters = detected_counters
         print("Detected log counters:", self.log_counters)
-        
-    
+
     def resolve_log(self, item):
         """Mark a Bug as Fixed."""
         label = self.log_list.itemWidget(item)
-    
+
         if isinstance(label, QLabel):
             current_text = label.text()  # Get **existing HTML** (to keep links)
 
@@ -4335,7 +4441,7 @@ class LogApp(QWidget):
             print("Undo performed.")
         else:
             print("Nothing to undo.")
-    
+
     def redo(self):
         if self.redo_stack:
             self.undo_stack.append(self.get_log_state())  # Save current state before redoing
@@ -4344,7 +4450,7 @@ class LogApp(QWidget):
             print("Redo performed.")
         else:
             print("Nothing to redo.")
-            
+
     def restore_log_state(self, state):
         """Restores the log list to a previous state."""
         self.log_list.clear()  # Clear current logs
@@ -4359,22 +4465,22 @@ class LogApp(QWidget):
             item = QListWidgetItem()
             self.log_list.addItem(item)
             self.log_list.setItemWidget(item, label)
-        
+
     def create_restore_point(self):
         """Save the current logs as a restore point with a timestamped name."""
         version_name, ok = QInputDialog.getText(self, "Create Restore Point", "Enter a version name:")
-    
+
         if not ok or not version_name.strip():
             return  # User canceled
 
         # Generate 6 random alphanumeric characters
         random_prefix = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
-        
+
         # Get the current date in YYYY-MM-DD format
         current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%SH")
-        
+
         version_name = f"[{current_date}]  -  {version_name.strip()}  |  {random_prefix}"
-        
+
         # Capture all logs in a list
         log_snapshot = [self.log_list.itemWidget(self.log_list.item(i)).text() for i in range(self.log_list.count())]
 
@@ -4519,19 +4625,18 @@ class LogApp(QWidget):
             "Tufted Puffin", "Umbrella Cockatoo", "Venezuelan Poodle Moth", "Western Green Mamba", "Xantus's Hummingbird",
             "Yellow Mongoose", "Zebra Duiker"
         ]
-        
-        
+
         # Randomly select one name from each category
         random_place = random.choice(places)
         random_food = random.choice(foods)
         random_animal = random.choice(animals)
 
         random_choice = [random_animal, random_food, random_place, person]
-        #random_choices = random.choice(random_choice)
-        
+        # random_choices = random.choice(random_choice)
+
         # Store selected name on a set
         selected_names = set()
-        
+
         # Create a function to remove picked names on a set
         def pick_unique_name():
             while True:
@@ -4543,13 +4648,13 @@ class LogApp(QWidget):
                     selected_names.add(random_choices)  # Mark as used
                     random_choice.remove(random_choices)  # Remove from list
                     return random_choices
-        
+
         # Generate 6 random alphanumeric characters
         random_prefix = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
-        
+
         # Get the current date in YYYY-MM-DD format
         current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%SH")
-        
+
         # Combine the selected names to form a unique restore point name
         restore_point_name = f"[{current_date}]  -  {pick_unique_name()}  |  {random_prefix}"
 
@@ -4560,7 +4665,7 @@ class LogApp(QWidget):
         self.restore_points[restore_point_name] = log_snapshot
         self.save_restore_points()  # Save restore points to JSON
         print(f"Automatic restore point '{restore_point_name}' created.")
-    
+
     def save_restore_points(self):
         """Save restore points to a JSON file in the config folder."""
         if self.current_file:
@@ -4571,7 +4676,7 @@ class LogApp(QWidget):
             with open(json_file, "w", encoding="utf-8") as file:
                 json.dump(self.restore_points, file, indent=4, ensure_ascii=False)
             print(f"Restore points saved to {json_file}")
-        
+
     def load_restore_points(self):
         """Load restore points from a JSON file in the config folder."""
         if self.current_file:
@@ -4588,12 +4693,12 @@ class LogApp(QWidget):
                 self.restore_points = {}
             else:
                 self.restore_points = {}
-    
+
     def open_dictionary(self):
         """Open the DictionaryDialog and update keyword definitions."""
         if self.current_file:
             project_folder = os.path.dirname(self.current_file)
-            config_folder = os.path.join(project_folder, "config")
+            config_folder = get_config_dir(project_folder)
         else:
             config_folder = get_config_dir()
         self.dictionary_dialog = DictionaryDialog(self, config_folder=config_folder)
@@ -4605,7 +4710,7 @@ class LogApp(QWidget):
             self.keyword_definitions = self.dictionary_dialog.dictionary
             self.save_keyword_definitions()
         self.dictionary_dialog.finished.connect(update_keywords)
-        
+
     def save_keyword_definitions(self):
         """Save keyword definitions to a JSON file."""
         file_path = self.get_keyword_definitions_file()
@@ -4622,20 +4727,19 @@ class LogApp(QWidget):
             print(f"Keyword definitions loaded from {file_path}")
         else:
             self.keyword_definitions = {}
-    
+
     def open_filter_dialog(self):
         """Open the filter dialog and apply filtering if the user accepts."""
         dialog = FilterDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             start_date, end_date, log_type = dialog.get_filters()
             self.filter_logs(start_date, end_date, log_type)
-                   
 
     def filter_logs(self, start_date, end_date, log_type):
         # Convert dates.
         start_date = QDate.fromString(start_date, "yyyy-MM-dd")
         end_date = QDate.fromString(end_date, "yyyy-MM-dd")
-    
+
         # Define a mapping from descriptive log type to its icon.
         log_type_icons = {
             "Problem ★": "★",
@@ -4645,7 +4749,7 @@ class LogApp(QWidget):
         }
         # Extract the icon that should be present.
         expected_icon = log_type_icons.get(log_type, "")
-    
+
         for i in range(self.log_list.count()):
             item = self.log_list.item(i)
             label = self.log_list.itemWidget(item)
@@ -4655,43 +4759,43 @@ class LogApp(QWidget):
                 if date_match:
                     log_date = QDate.fromString(date_match.group(1), "yyyy-MM-dd")
                 else:
-                    #item.setHidden(True)
+                    # item.setHidden(True)
                     continue
-            
+
                 date_ok = start_date <= log_date <= end_date
 
                 if log_type == "All":
                     # Check if expected icon is in the plain text.
                     type_ok = True
-                    
+
                 elif log_type == "Just Details":
                     # "Just Details" should not contain any of the icons.
                     type_ok = not any(icon in plain_text for icon in ["★", "■", "▲", "◆"])
-                    
+
                 else:
                     expected_icon = log_type_icons.get(log_type, "")
                     type_ok = expected_icon in plain_text
 
                 if item is not None:
                     item.setHidden(not (date_ok and type_ok))
-                    
+
     def clear_filters(self):
         """Reset filtering to show all logs."""
         for i in range(self.log_list.count()):
             item = self.log_list.item(i)
             item.setHidden(False)
-            
+
             # Scroll to the last item in the log list
             if self.log_list.count() > 0:
                 last_item = self.log_list.item(self.log_list.count() - 1)
                 self.log_list.scrollToItem(last_item)
                 print("Scrolled to the latest log entry.")
-    
+
     def strip_html(self, html_text):
         doc = QTextDocument()
         doc.setHtml(html_text)
         return doc.toPlainText()
-    
+
     def save_log_counters(self):
         """Save the log counters to a JSON file in the config folder."""
         if self.current_file:
@@ -4705,10 +4809,14 @@ class LogApp(QWidget):
                 print(f"Log counters saved to {json_file}")
             except Exception as e:
                 print(f"Error saving log counters: {e}")
-    
+
     def get_keyword_definitions_file(self):
         # Use custom dictionary if set, else default
-        config_dir = get_config_dir()
+        if getattr(self, "current_file", None):
+            project_folder = os.path.dirname(self.current_file or "")
+            config_dir = get_config_dir(project_folder)
+        else:
+            config_dir = get_config_dir()
         if getattr(self, "custom_dictionary", ""):
             # Sanitize the name for file usage
             safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', self.custom_dictionary)
@@ -4716,12 +4824,24 @@ class LogApp(QWidget):
         else:
             return os.path.join(config_dir, "keyword_definitions.json")
     
-    
+    def closeEvent(self, event):
+        if self.unsaved_changes:
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                "You have unsaved changes. Do you want to save before exiting?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.save_logs()
+                event.accept()
+            elif reply == QMessageBox.StandardButton.No:
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
 
 
 if __name__ == "__main__":
-    print("Starting application...")
-    app = QApplication(sys.argv)
-    window = WelcomeWindow()
-    window.show()
-    sys.exit(app.exec())
+    pass

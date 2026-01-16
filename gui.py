@@ -45,7 +45,7 @@ class AnimatedPushButton(QPushButton):
         self.anim.setEndValue(0)
         self.anim.start()
         super().leaveEvent(a0)
-            
+
 
 class AnimatedClickableLabel(QLabel):
     clicked = pyqtSignal()
@@ -197,7 +197,6 @@ class AnimatedClickableLabel2(QLabel):
             """)
 
 
-
 class AnimatedClickableLabel3(QLabel):
     clicked = pyqtSignal()
     
@@ -271,7 +270,7 @@ class AnimatedClickableLabel3(QLabel):
                 border: 1px solid transparent;
                 border-radius: 15px;
             """)
-            
+
 
 class AnimatedClickableLabel4(QLabel):
     clicked = pyqtSignal()
@@ -423,7 +422,7 @@ class AnimatedClickableLabel5(QLabel):
                 border-radius: 15px;
             """)
 
-    
+
 class SetupWizard(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -431,15 +430,15 @@ class SetupWizard(QDialog):
         self.setFixedSize(550, 450)
         self.setStyleSheet("background-color: #FFFFFF;")
         self.selected_option = None
-        
+
         # Initialize text box references to None
         self.name_text_box = None
         self.title_text_box = None
-        
+
         self.text_size_box = None
         self.line_spacing_box = None
         self.dictionary_box = None
-        
+
         self.init_ui()
 
     def init_ui(self):
@@ -448,13 +447,13 @@ class SetupWizard(QDialog):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.stacked_widget)
-        
+
         # Create the first page (options page).
         self.page1 = QWidget()
         page1_layout = QVBoxLayout(self.page1)
         page1_layout.setSpacing(15)
         page1_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # Title label
         title_label = QLabel("Log Documentation Setup Wizard")
         title_label.setStyleSheet("""
@@ -470,7 +469,7 @@ class SetupWizard(QDialog):
         title_label.setFixedHeight(80)
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         page1_layout.addWidget(title_label)
-        
+
         # Instruction label
         instruction_label = QLabel("I want to document:")
         instruction_label.setStyleSheet("""
@@ -481,7 +480,7 @@ class SetupWizard(QDialog):
             margin-left: 25px;    
         """)
         page1_layout.addWidget(instruction_label)
-        
+
         # Option layouts
         self.option_layouts = []
         self.options = []
@@ -495,24 +494,24 @@ class SetupWizard(QDialog):
             # Create a vertical layout for each option
             option_layout = QVBoxLayout()
             option_layout.setSpacing(5)
-            
+
             # Replace OptionLabel with AnimatedClickableLabel
             option_label = AnimatedClickableLabel(text, self, wizard=self)
             option_label.clicked.connect(lambda text=text: self.option_clicked(text))
             option_layout.addWidget(option_label)
-            
+
             page1_layout.addLayout(option_layout)
             self.option_layouts.append(option_layout)
             self.options.append(option_label)
-        
+
         # Add a spacer before the buttons to push them to the bottom.
         spacer = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         page1_layout.addItem(spacer)
-        
+
         # Horizontal layout for Next / Cancel buttons.
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        
+
         self.next_button = AnimatedPushButton("Next")
         self.next_button.setStyleSheet("""
             margin-bottom: 15px;
@@ -526,7 +525,7 @@ class SetupWizard(QDialog):
         self.next_button.setEnabled(False)  # Disable by default
         self.next_button.clicked.connect(self.on_next_clicked)
         btn_layout.addWidget(self.next_button)
-        
+
         self.cancel_button = AnimatedPushButton("Cancel")
         self.cancel_button.setStyleSheet("""
             margin-bottom: 15px;
@@ -539,16 +538,16 @@ class SetupWizard(QDialog):
         """)
         self.cancel_button.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_button)
-        
+
         page1_layout.addLayout(btn_layout)
         self.stacked_widget.addWidget(self.page1)
-        
+
         # Create the second page (new frame).
         self.page2 = QWidget()
         page2_layout = QVBoxLayout(self.page2)
         page2_layout.setSpacing(15)
         page2_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # Title label
         title_label2 = QLabel("Log Documentation Setup Wizard")
         title_label2.setStyleSheet("""
@@ -564,7 +563,7 @@ class SetupWizard(QDialog):
         title_label2.setFixedHeight(80)
         title_label2.setAlignment(Qt.AlignmentFlag.AlignCenter)
         page2_layout.addWidget(title_label2)
-        
+
         # Instruction label
         instruction_label2 = QLabel("On each lds, I want to:")
         instruction_label2.setStyleSheet("""
@@ -575,7 +574,7 @@ class SetupWizard(QDialog):
             margin-left: 25px;    
         """)
         page2_layout.addWidget(instruction_label2)
-        
+
         # Option layouts
         self.option_layouts2 = []
         self.options2 = []
@@ -588,12 +587,12 @@ class SetupWizard(QDialog):
             # Create a vertical layout for each option
             option_layout2 = QVBoxLayout()
             option_layout2.setSpacing(5)
-    
+
             # Replace OptionLabel with AnimatedClickableLabel2
             option_label2 = AnimatedClickableLabel2(text, self, wizard=self)
             option_label2.clicked.connect(lambda text=text: self.option_clicked2(text))
             option_layout2.addWidget(option_label2)
-    
+
             page2_layout.addLayout(option_layout2)
             self.option_layouts2.append(option_layout2)
             self.options2.append(option_label2)
@@ -601,8 +600,7 @@ class SetupWizard(QDialog):
         # Add a spacer before the navigation buttons to push them to the bottom.
         spacer2 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         page2_layout.addItem(spacer2)
-        
-        
+
         # Navigation buttons for page2.
         btn_layout2 = QHBoxLayout()
         btn_layout2.addStretch()
@@ -635,13 +633,13 @@ class SetupWizard(QDialog):
 
         page2_layout.addLayout(btn_layout2)
         self.stacked_widget.addWidget(self.page2)
-        
+
         # Create the third page (options page).
         self.page3 = QWidget()
         page3_layout = QVBoxLayout(self.page3)
         page3_layout.setSpacing(15)
         page3_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # Title label
         title_label3 = QLabel("Log Documentation Setup Wizard")
         title_label3.setStyleSheet("""
@@ -657,7 +655,7 @@ class SetupWizard(QDialog):
         title_label3.setFixedHeight(80)
         title_label3.setAlignment(Qt.AlignmentFlag.AlignCenter)
         page3_layout.addWidget(title_label3)
-        
+
         # Instruction label
         instruction_label3 = QLabel("On exporting document, I want to:")
         instruction_label3.setStyleSheet("""
@@ -668,7 +666,7 @@ class SetupWizard(QDialog):
             margin-left: 25px;    
         """)
         page3_layout.addWidget(instruction_label3)
-        
+
         # Option layouts
         self.option_layouts3 = []
         self.options3 = []
@@ -681,12 +679,12 @@ class SetupWizard(QDialog):
             # Create a vertical layout for each option
             option_layout3 = QVBoxLayout()
             option_layout3.setSpacing(5)
-    
+
             # Replace OptionLabel with AnimatedClickableLabel3
             option_label3 = AnimatedClickableLabel3(text, self, wizard=self)
             option_label3.clicked.connect(lambda text=text: self.option_clicked3(text))
             option_layout3.addWidget(option_label3)
-    
+
             page3_layout.addLayout(option_layout3)
             self.option_layouts3.append(option_layout3)
             self.options3.append(option_label3)
@@ -694,7 +692,7 @@ class SetupWizard(QDialog):
         # Add a spacer before the navigation buttons to push them to the bottom.
         spacer3 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         page3_layout.addItem(spacer3)
-        
+
         # Navigation buttons for page2.
         btn_layout3 = QHBoxLayout()
         btn_layout3.addStretch()
@@ -724,16 +722,16 @@ class SetupWizard(QDialog):
         self.next_button3.setEnabled(False)  # Disable by default
         self.next_button3.clicked.connect(self.on_next_clicked3)
         btn_layout3.addWidget(self.next_button3)
-        
+
         page3_layout.addLayout(btn_layout3)
         self.stacked_widget.addWidget(self.page3)
-        
+
         # Create the fourth page (new frame).
         self.page4 = QWidget()
         page4_layout = QVBoxLayout(self.page4)
         page4_layout.setSpacing(15)
         page4_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # Title label
         title_label4 = QLabel("Log Documentation Setup Wizard")
         title_label4.setStyleSheet("""
@@ -749,7 +747,7 @@ class SetupWizard(QDialog):
         title_label4.setFixedHeight(80)
         title_label4.setAlignment(Qt.AlignmentFlag.AlignCenter)
         page4_layout.addWidget(title_label4)
-        
+
         # Instruction label
         instruction_label4 = QLabel("On exporting document, I want to:")
         instruction_label4.setStyleSheet("""
@@ -760,7 +758,7 @@ class SetupWizard(QDialog):
             margin-left: 25px;    
         """)
         page4_layout.addWidget(instruction_label4)
-        
+
         # Option layouts
         self.option_layouts4 = []
         self.options4 = []
@@ -772,12 +770,12 @@ class SetupWizard(QDialog):
             # Create a vertical layout for each option
             option_layout4 = QVBoxLayout()
             option_layout4.setSpacing(5)
-    
+
             # Replace OptionLabel with AnimatedClickableLabel2
             option_label4 = AnimatedClickableLabel4(text, self, wizard=self)
             option_label4.clicked.connect(lambda text=text: self.option_clicked4(text))
             option_layout4.addWidget(option_label4)
-    
+
             page4_layout.addLayout(option_layout4)
             self.option_layouts4.append(option_layout4)
             self.options4.append(option_label4)
@@ -785,7 +783,7 @@ class SetupWizard(QDialog):
         # Add a spacer before the navigation buttons to push them to the bottom.
         spacer4 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         page4_layout.addItem(spacer4)
-        
+
         # Navigation buttons for page2.
         btn_layout4 = QHBoxLayout()
         btn_layout4.addStretch()
@@ -815,17 +813,16 @@ class SetupWizard(QDialog):
         self.next_button4.setEnabled(False)  # Disable by default
         self.next_button4.clicked.connect(self.on_next_clicked4)
         btn_layout4.addWidget(self.next_button4)
-        
+
         page4_layout.addLayout(btn_layout4)
         self.stacked_widget.addWidget(self.page4)
-        
-        
+
         # Create the fifth/last page (new frame).
         self.page5 = QWidget()
         page5_layout = QVBoxLayout(self.page5)
         page5_layout.setSpacing(15)
         page5_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # Title label
         title_label5 = QLabel("Log Documentation Setup Wizard")
         title_label5.setStyleSheet("""
@@ -841,7 +838,7 @@ class SetupWizard(QDialog):
         title_label5.setFixedHeight(80)
         title_label5.setAlignment(Qt.AlignmentFlag.AlignCenter)
         page5_layout.addWidget(title_label5)
-        
+
         # Instruction label
         instruction_label5 = QLabel("This application contains a built-in dictionary on\neach log mode. Do you want to create your \nown?:")
         instruction_label5.setStyleSheet("""
@@ -852,7 +849,7 @@ class SetupWizard(QDialog):
             margin-left: 25px;    
         """)
         page5_layout.addWidget(instruction_label5)
-        
+
         # Option layouts
         self.option_layouts5 = []
         self.options5 = []
@@ -864,12 +861,12 @@ class SetupWizard(QDialog):
             # Create a vertical layout for each option
             option_layout5 = QVBoxLayout()
             option_layout5.setSpacing(5)
-    
+
             # Replace OptionLabel with AnimatedClickableLabel2
             option_label5 = AnimatedClickableLabel5(text, self, wizard=self)
             option_label5.clicked.connect(lambda text=text: self.option_clicked5(text))
             option_layout5.addWidget(option_label5)
-    
+
             page5_layout.addLayout(option_layout5)
             self.option_layouts5.append(option_layout5)
             self.options5.append(option_label5)
@@ -877,7 +874,7 @@ class SetupWizard(QDialog):
         # Add a spacer before the navigation buttons to push them to the bottom.
         spacer5 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         page5_layout.addItem(spacer5)
-        
+
         # Navigation buttons for page2.
         btn_layout5 = QHBoxLayout()
         btn_layout5.addStretch()
@@ -907,10 +904,40 @@ class SetupWizard(QDialog):
         self.next_button5.setEnabled(False)  # Disable by default
         self.next_button5.clicked.connect(self.on_next_clicked5)
         btn_layout5.addWidget(self.next_button5)
-        
+
         page5_layout.addLayout(btn_layout5)
         self.stacked_widget.addWidget(self.page5)
-    
+
+    def get_setup_data(self):
+        # Collect all relevant data from the wizard's fields
+        return {
+            "user_name": (
+                self.name_text_box.toPlainText().strip() if self.name_text_box else ""
+            ),
+            "pdf_title": (
+                self.title_text_box.toPlainText().strip() if self.title_text_box else ""
+            ),
+            "pdf_font_size": (
+                int(self.text_size_box.text())
+                if self.text_size_box and self.text_size_box.text().isdigit()
+                else 12
+            ),
+            "pdf_line_spacing": (
+                float(self.line_spacing_box.text())
+                if self.line_spacing_box and self.line_spacing_box.text()
+                else 1.5
+            ),
+            "pdf_font": (
+                self.options4[0].text()
+                if self.options4 and self.options4[0].property("selected")
+                else "Arial"
+            ),
+            "custom_dictionary": (
+                self.dictionary_box.toPlainText().strip() if self.dictionary_box else ""
+            ),
+            "log_type": getattr(self, "log_type", "General"),
+        }
+
     def option_clicked(self, clicked_option):
         # Unselect all options and remove subtext labels.
         for option, layout in zip(self.options, self.option_layouts):
@@ -919,14 +946,19 @@ class SetupWizard(QDialog):
                 subtext_label = layout.itemAt(1).widget()
                 layout.removeWidget(subtext_label)
                 subtext_label.deleteLater()
-        
+
         # Select the clicked option.
         clicked_option.setSelected(True)
         self.selected_option = clicked_option.text()
-        
+        # Set log_type based on selection
+        if self.selected_option == "Bugs and errors":
+            self.log_type = "Debugging"
+        else:
+            self.log_type = "General"
+
         # Add the subtext label below the clicked option.
         self.add_subtext(clicked_option)
-    
+
     def add_subtext(self, clicked_option):
         subtext_map = {
             "Something general, it's up to me.": "You can document anything you want.",
@@ -935,7 +967,7 @@ class SetupWizard(QDialog):
             "Others:": ""
         }
         subtext = subtext_map.get(clicked_option.text(), "")
-        
+
         if clicked_option.text() == "Others:":
             # Combobox as a subtext
             subtext_label = QComboBox()
@@ -976,7 +1008,7 @@ class SetupWizard(QDialog):
             """)
             subtext_label.setFixedWidth(325)
             subtext_label.setFixedHeight(30)
-            
+
             def validate_combo():
                 # Enable Next if a valid selection is made (not -1)
                 self.next_button.setEnabled(subtext_label.currentIndex() != -1)
@@ -1006,7 +1038,7 @@ class SetupWizard(QDialog):
                     """)
             subtext_label.currentIndexChanged.connect(validate_combo)
             validate_combo()  # Initial validation
-        
+
         else:
             subtext_label = QLabel(subtext)
             subtext_label.setStyleSheet("""
@@ -1015,7 +1047,7 @@ class SetupWizard(QDialog):
                 margin-left: 25px;
                 color: #555555;
             """)
-        
+
             # Enable the "Next" button.
             self.next_button.setEnabled(True)
             self.next_button.setStyleSheet("""
@@ -1031,33 +1063,31 @@ class SetupWizard(QDialog):
                     stop: 0 #42f5d7, stop: 1 #14b7fc
                 );
             """)
-        
+
         # Apply an opacity effect for the fade-in animation.
         opacity_effect = QGraphicsOpacityEffect(subtext_label)
         subtext_label.setGraphicsEffect(opacity_effect)
         opacity_effect.setOpacity(0)
-        
+
         fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
         fade_anim.setDuration(500)  # Duration in milliseconds
         fade_anim.setStartValue(0)
         fade_anim.setEndValue(1)
         fade_anim.start()  # Animation will be garbage collected after finishing
-        
+
         # Keep a reference to avoid premature garbage collection.
         # Store the animation reference in a dictionary to avoid garbage collection
         if not hasattr(self, "_animations"):
             self._animations = {}
         self._animations[subtext_label] = fade_anim
-        
-        
-        
+
         # Find the layout of the clicked option and add the subtext label.
         for option, layout in zip(self.options, self.option_layouts):
             if option == clicked_option:
                 layout.addWidget(subtext_label)
                 subtext_label.setVisible(True)
                 break
-    
+
     def option_clicked2(self, clicked_option):
         # If "Proceed on default" is clicked, clear all selections.
         if clicked_option.text() == "Proceed on default":
@@ -1067,7 +1097,7 @@ class SetupWizard(QDialog):
                     subtext_label = layout.itemAt(1).widget()
                     layout.removeWidget(subtext_label)
                     subtext_label.deleteLater()
-            
+
             # Clear references to text boxes
             self.name_text_box = None
             self.title_text_box = None       
@@ -1139,7 +1169,7 @@ class SetupWizard(QDialog):
             # Clear references to text boxes since they are being removed.
             self.name_text_box = None
             self.title_text_box = None
-            
+
             subtext_label = QLabel(subtext)
             subtext_label.setEnabled(True)
             subtext_label.setStyleSheet("""
@@ -1177,9 +1207,9 @@ class SetupWizard(QDialog):
             subtext_label.setFixedHeight(25)  # Adjust height to match QLabel's appearance
             subtext_label.setPlaceholderText("Enter your input here...")  # Add placeholder text
             subtext_label.setFocus()
-            
+
             a = clicked_option.text() == "Set my name to"
-            
+
             # Store references to the text boxes for validation.
             if clicked_option.text() == "Set my name to":
                 self.next_button2.setEnabled(False)
@@ -1193,7 +1223,7 @@ class SetupWizard(QDialog):
                     color: black;
                 """)
                 self.name_text_box = subtext_label
-                
+
             elif clicked_option.text() == "Set document title to":
                 self.next_button2.setEnabled(False)
                 self.next_button2.setStyleSheet("""
@@ -1209,33 +1239,30 @@ class SetupWizard(QDialog):
 
             # Connect the textChanged signal to the validation method.
             subtext_label.textChanged.connect(self.validate_both_inputs)
-                
-            
-        
+
         # Apply an opacity effect for the fade-in animation.
         opacity_effect = QGraphicsOpacityEffect(subtext_label)
         subtext_label.setGraphicsEffect(opacity_effect)
         opacity_effect.setOpacity(0)
-    
+
         fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
         fade_anim.setDuration(500)  # Duration in milliseconds
         fade_anim.setStartValue(0)
         fade_anim.setEndValue(1)
         fade_anim.start()  # Animation will be garbage collected after finishing
-    
+
         # Keep a reference to avoid premature garbage collection.
         if not hasattr(self, "_animations"):
             self._animations = {}
         self._animations[subtext_label] = fade_anim
-    
-        
+
         # Find the layout of the clicked option and add the subtext label.
         for option, layout in zip(self.options2, self.option_layouts2):
             if option == clicked_option:
                 layout.addWidget(subtext_label)
                 subtext_label.setVisible(True)
                 break
-    
+
     def option_clicked3(self, clicked_option):
         # If "Proceed on default" is clicked, clear all selections.
         if clicked_option.text() == "Proceed on default":
@@ -1245,7 +1272,7 @@ class SetupWizard(QDialog):
                     subtext_label = layout.itemAt(1).widget()
                     layout.removeWidget(subtext_label)
                     subtext_label.deleteLater()
-                    
+
             # Clear references to text boxes
             self.text_size_box = None
             self.line_spacing_box = None        
@@ -1316,7 +1343,7 @@ class SetupWizard(QDialog):
             # Clear references to text boxes since they are being removed.
             self.text_size_box = None
             self.line_spacing_box = None
-            
+
             subtext_label = QLabel(subtext)
             subtext_label.setEnabled(True)
             subtext_label.setStyleSheet("""
@@ -1355,8 +1382,7 @@ class SetupWizard(QDialog):
             subtext_label.setFixedHeight(25)  # Adjust height to match QLabel's appearance
             subtext_label.setPlaceholderText("Enter your input here...")  # Add placeholder text
             subtext_label.setFocus()
-            
-            
+
             # Store references to the text boxes for validation.
             if clicked_option.text() == "Set the text size to":
                 self.next_button3.setEnabled(False)
@@ -1370,7 +1396,7 @@ class SetupWizard(QDialog):
                     color: black;
                 """)
                 self.text_size_box = subtext_label
-                
+
             elif clicked_option.text() == "Set the line spacing to":
                 self.next_button3.setEnabled(False)
                 self.next_button3.setStyleSheet("""
@@ -1386,33 +1412,30 @@ class SetupWizard(QDialog):
 
             # Connect the textChanged signal to the validation method.
             subtext_label.textChanged.connect(self.validate_both_inputs2)
-                
-            
-        
+
         # Apply an opacity effect for the fade-in animation.
         opacity_effect = QGraphicsOpacityEffect(subtext_label)
         subtext_label.setGraphicsEffect(opacity_effect)
         opacity_effect.setOpacity(0)
-    
+
         fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
         fade_anim.setDuration(500)  # Duration in milliseconds
         fade_anim.setStartValue(0)
         fade_anim.setEndValue(1)
         fade_anim.start()  # Animation will be garbage collected after finishing
-    
+
         # Keep a reference to avoid premature garbage collection.
         if not hasattr(self, "_animations"):
             self._animations = {}
         self._animations[subtext_label] = fade_anim
-        
-        
+
         # Remove any existing subtext for the clicked option.
         for option, layout in zip(self.options3, self.option_layouts3):
             if option == clicked_option:
                 layout.addWidget(subtext_label)
                 subtext_label.setVisible(True)
                 break
-    
+
     def option_clicked4(self, clicked_option):
         # If "Proceed on default" is clicked, clear all selections and text box.
         if clicked_option.text() == "Proceed on default":
@@ -1422,7 +1445,7 @@ class SetupWizard(QDialog):
                     subtext_label = layout.itemAt(1).widget()
                     layout.removeWidget(subtext_label)
                     subtext_label.deleteLater()
-            
+
             clicked_option.setSelected(True)
             self.add_subtext4(clicked_option)
             self.selected_option = clicked_option.text()
@@ -1546,7 +1569,7 @@ class SetupWizard(QDialog):
             """)
             subtext_label.setFixedWidth(125)
             subtext_label.setFixedHeight(30)
-            
+
             def validate_combo():
                 # Enable Next if a valid selection is made (not -1)
                 self.next_button4.setEnabled(subtext_label.currentIndex() != -1)
@@ -1590,13 +1613,12 @@ class SetupWizard(QDialog):
             self._animations = {}
         self._animations[subtext_label] = fade_anim
 
-        
         for option, layout in zip(self.options4, self.option_layouts4):
             if option == clicked_option:
                 layout.addWidget(subtext_label)
                 subtext_label.setVisible(True)
                 break
-    
+
     def option_clicked5(self, clicked_option):
         # If "Proceed on default" is clicked, clear all selections and text box.
         if clicked_option.text() == "No, Use the default":
@@ -1711,45 +1733,43 @@ class SetupWizard(QDialog):
             self._animations = {}
         self._animations[subtext_label] = fade_anim
 
-        
         for option, layout in zip(self.options5, self.option_layouts5):
             if option == clicked_option:
                 layout.addWidget(subtext_label)
                 subtext_label.setVisible(True)
                 break
-    
-    
+
     def on_next_clicked(self):
         self.stacked_widget.setCurrentWidget(self.page2)
-    
+
     def on_back_clicked(self):
         # Optionally reset or preserve state when going back.
         self.stacked_widget.setCurrentWidget(self.page1)
-    
+
     def on_back_clicked2(self):
         # Optionally reset or preserve state when going back.
         self.stacked_widget.setCurrentWidget(self.page2)
-        
+
     def on_back_clicked3(self):
         # Optionally reset or preserve state when going back.
         self.stacked_widget.setCurrentWidget(self.page3)
-    
+
     def on_back_clicked4(self):
         # Optionally reset or preserve state when going back.
         self.stacked_widget.setCurrentWidget(self.page4)
-    
+
     def on_next_clicked2(self):
         self.stacked_widget.setCurrentWidget(self.page3)
-    
+
     def on_next_clicked3(self):
         self.stacked_widget.setCurrentWidget(self.page4)
-    
+
     def on_next_clicked4(self):
         self.stacked_widget.setCurrentWidget(self.page5)
-        
+
     def on_next_clicked5(self):
         self.accept()
-    
+
     def validate_both_inputs(self):
         # Check if the text boxes exist and are filled.
         name_filled = self.name_text_box and self.name_text_box.toPlainText().strip()
@@ -1788,7 +1808,7 @@ class SetupWizard(QDialog):
             border-radius: 8px;
             color: black;
         """)
-    
+
     def validate_both_inputs2(self):
         text_size_selected = self.text_size_box is not None
         line_spacing_selected = self.line_spacing_box is not None
@@ -1858,9 +1878,8 @@ class SetupWizard(QDialog):
                 border-radius: 8px;
                 color: black;
             """)
-    
-    
-    
+
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     wizard = SetupWizard()
