@@ -3252,7 +3252,6 @@ class LogApp(QWidget):
         self.keyword_definitions = {}
         self.keyword_definitions_file = self.get_keyword_definitions_file()
         self.load_keyword_definitions()  # Load keyword definitions
-        
 
         self.unsaved_changes = False
 
@@ -3833,7 +3832,7 @@ class LogApp(QWidget):
                 print(f"Error loading log counters: {e}")
                 self.log_counters = {"Problem ★": 0, "Solution ■": 0, "Bug ▲": 0, "Changes ◆": 0}
         else:
-            self.log_counters = {"Problem ★": 0, "Solution ■": 0, "Bug ▲": 0, "Changes ◆": 0}
+            self.detect_log_counters()
 
         # Load restore points
         restore_path = os.path.join(config_folder, "restore_points.json")
@@ -4055,7 +4054,7 @@ class LogApp(QWidget):
             color = settings.value("text_color", "#008000")
             self.text_color = QColor(color)
             print("Color loaded from global settings")
-    
+
     def dragEnterEvent(self, event):
         print("dragEnterEvent triggered")
         filter_json = ".ldsg" if self.log_type == "General" else ".ldsd"
@@ -4202,6 +4201,7 @@ class LogApp(QWidget):
                     if isinstance(label, QLabel):
                         file.write(label.text() + "\n")
             print(f"Logs auto-saved to {self.current_file}")
+            self.save_log_counters()
             self.setWindowTitle("Log Documentation System - Auto-saved")  # Update title
             QTimer.singleShot(8000, lambda: self.setWindowTitle("Log Documentation System"))  # Reset after 2 seconds
         else:
@@ -4388,7 +4388,8 @@ class LogApp(QWidget):
             "Changes ◆": 0,
         }
 
-        pattern = re.compile(r"(Problem ★|Solution ■|Bug ▲|Changes ◆).*?#(\d+)\b")  # Updated regex
+        icon_to_category = {"★": "Problem ★", "■": "Solution ■", "▲": "Bug ▲", "◆": "Changes ◆"}
+        pattern = re.compile(r"([★■▲◆]).*?#(\d+)\b")
 
         for index in range(self.log_list.count()):
             item = self.log_list.item(index)
@@ -4398,9 +4399,10 @@ class LogApp(QWidget):
                 match = pattern.search(text)
 
                 if match:
-                    category = match.group(1)
+                    category = icon_to_category.get(match.group(1))
                     number = int(match.group(2))
-                    detected_counters[category] = max(detected_counters[category], number)
+                    if category:
+                        detected_counters[category] = max(detected_counters[category], number)
 
         # Update class counters AFTER the loop to avoid resetting mid-detection
         self.log_counters = detected_counters
@@ -4690,7 +4692,7 @@ class LogApp(QWidget):
                     print(f"Restore points loaded from {json_file}")
                 except Exception as e:
                     print(f"Error loading restore points: {e}")
-                self.restore_points = {}
+                    self.restore_points = {}
             else:
                 self.restore_points = {}
 
@@ -4823,7 +4825,7 @@ class LogApp(QWidget):
             return os.path.join(config_dir, f"{safe_name}_definitions.json")
         else:
             return os.path.join(config_dir, "keyword_definitions.json")
-    
+
     def closeEvent(self, event):
         if self.unsaved_changes:
             reply = QMessageBox.question(

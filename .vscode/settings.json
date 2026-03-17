@@ -11,5 +11,14 @@
     "python.testing.unittestEnabled": false,
     "python.testing.pytestArgs": [
         "."
-    ]
+    ],
+    "files.readonlyInclude": {
+        "{**/.c4z/.extsrcs/*.PROTSYM.cbl,**/.c4z/.extsrcs/*.PROTSYM.listing}": true
+    },
+    "editor.mouseWheelZoom": true,
+    "editor.autoIndentOnPaste": true,
+    "editor.defaultFormatter": null,
+    "[javascript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    }
 }
