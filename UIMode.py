@@ -15,10 +15,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import (
     Qt, QSize, QPropertyAnimation, QRect,
     QPoint, QEasingCurve, QTimer, pyqtSignal, QEvent,
-    QParallelAnimationGroup, QEventLoop, QRectF, QPointF
+    QParallelAnimationGroup, QEventLoop, QRectF, QPointF, QObject,
+    pyqtProperty,
     )
 
-from PyQt6.QtCore import pyqtProperty
 
 from PyQt6.QtGui import (
     QIcon, QPainter, QPen, QColor, QMouseEvent,
@@ -31,7 +31,6 @@ import base64, json
 from io import BytesIO
 from datetime import datetime
 from pathlib import Path
-
 
 TOOL_MENU = [
     {
@@ -64,9 +63,13 @@ TOOL_MENU = [
 
 CUSTOM_BORDER_COLOR = "#ffffff"
 CUSTOM_OBJECT_COLOR = "#ffffff"
+_RECENT_FILES_PATH = Path.home() / ".lds-project" / "recent_files.json"
 
 
 class SideMenuPanel(QWidget):
+    space_added   = pyqtSignal()
+    space_selected = pyqtSignal(int)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -79,7 +82,7 @@ class SideMenuPanel(QWidget):
 
         # Tab bar
         tab_row = QHBoxLayout()
-        tab_row.setContentsMargins(0, 0, 0, 0)
+        tab_row.setContentsMargins(2, 0, 0, 0)
         tab_row.setSpacing(0)
         self._tabs = {}
         self._tab_contents = {}
@@ -92,6 +95,7 @@ class SideMenuPanel(QWidget):
             self._tabs[name] = btn
 
         tab_widget = QWidget()
+        tab_widget.setStyleSheet("background: white; border-left: 1px solid #ddd;")
         tab_widget.setLayout(tab_row)
         layout.addWidget(tab_widget)
 
@@ -103,24 +107,120 @@ class SideMenuPanel(QWidget):
         # File page
         file_page = QWidget()
         file_layout = QVBoxLayout(file_page)
-        file_layout.setContentsMargins(0, 8, 0, 8)
+        file_layout.setContentsMargins(2, 8, 0, 8)
         file_layout.setSpacing(0)
         self.file_actions = {}
-        for item in ["Open", "Save", "Save As", "Export", "Settings", "Hotkeys", "Exit"]:
+        self._recent_file_buttons = []
+
+        # Top group
+        for item in ["Open", "Recent"]:
             lbl = QPushButton(item)
             lbl.setFlat(True)
             lbl.setFixedHeight(38)
             lbl.setCursor(Qt.CursorShape.PointingHandCursor)
             file_layout.addWidget(lbl)
             self.file_actions[item] = lbl
+
+        # Collapsible recent files list (sits below "Recent" button)
+        recent_scroll = QScrollArea()
+        recent_scroll.setWidgetResizable(True)
+        recent_scroll.setStyleSheet("QScrollArea { border: 1px; background: transparent; margin: 0 8px; }")
+        recent_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        recent_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self.recent_list_widget = QWidget()
+        self.recent_list_layout = QVBoxLayout(self.recent_list_widget)
+        self.recent_list_layout.setContentsMargins(2, 2, 4, 2)
+        self.recent_list_layout.setSpacing(2)
+        self.recent_list_widget.setStyleSheet("background: transparent; border: 1px;")
+        _empty_lbl = QLabel("No recent files")
+        _empty_lbl.setStyleSheet("color: #999; font-size: 9pt;")
+        _empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.recent_list_layout.addWidget(_empty_lbl)
+
+        recent_scroll.setWidget(self.recent_list_widget)
+        recent_scroll.setMaximumHeight(0)
+        self.recent_scroll_area = recent_scroll
+        file_layout.addWidget(recent_scroll)
+
+        self._recent_expanded = False
+        self._recent_anim = QPropertyAnimation(recent_scroll, b"maximumHeight")
+        self._recent_anim.setDuration(300)
+        self._recent_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+
+        def toggle_recent_list():
+            expanding = not self._recent_expanded
+            self._recent_anim.stop()
+            self._recent_anim.setStartValue(recent_scroll.maximumHeight())
+            self._recent_anim.setEndValue(190 if expanding else 0)
+            self._recent_expanded = expanding
+            self._recent_anim.start()
+
+        self.file_actions["Recent"].clicked.connect(toggle_recent_list)
+
+        # Bottom group
+        for item in ["Save", "Save As", "Export", "Settings", "Hotkeys", "Exit"]:
+            lbl = QPushButton(item)
+            lbl.setFlat(True)
+            lbl.setFixedHeight(38)
+            lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            lbl.setStyleSheet("border: 1px;")
+            file_layout.addWidget(lbl)
+            self.file_actions[item] = lbl
         file_layout.addStretch()
         self._stack.addWidget(file_page)
 
-        # Pages page (placeholder)
+        # Pages page
         pages_page = QWidget()
         pages_layout = QVBoxLayout(pages_page)
-        pages_layout.addWidget(QLabel("Pages coming soon"))
-        pages_layout.addStretch()
+        pages_layout.setContentsMargins(0, 8, 0, 8)
+        pages_layout.setSpacing(8)
+
+        # Create Space button
+        self.create_space_btn = QPushButton("+ Create Space")
+        self.create_space_btn.setFixedHeight(40)
+        self.create_space_btn.setStyleSheet("""
+            QPushButton {
+                background: #ff6600; color: white; border: none;
+                font-weight: bold; border-radius: 4px; font-size: 11pt; margin: 0 8px;
+            }
+            QPushButton:hover { background: #e55a00; }
+        """)
+        self.create_space_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.create_space_btn.clicked.connect(self.space_added.emit)
+        pages_layout.addWidget(self.create_space_btn)
+
+        # Spaces header
+        spaces_header = QLabel("Spaces")
+        spaces_header.setStyleSheet(
+            "font-weight: bold; font-size: 12pt; padding-left: 8px; color: #222;"
+        )
+        spaces_header.setFixedHeight(32)
+        pages_layout.addWidget(spaces_header)
+
+        # Spaces scroll (always visible, no toggle)
+        spaces_scroll = QScrollArea()
+        spaces_scroll.setWidgetResizable(True)
+        spaces_scroll.setStyleSheet(
+            "QScrollArea { border: none; background: transparent; margin: 0 8px; }"
+        )
+        spaces_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        spaces_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self.spaces_list_widget = QWidget()
+        self.spaces_list_widget.setStyleSheet("background: transparent; border: none;")
+        self.spaces_list_layout = QVBoxLayout(self.spaces_list_widget)
+        self.spaces_list_layout.setContentsMargins(4, 4, 4, 4)
+        self.spaces_list_layout.setSpacing(4)
+        _no_spaces_lbl = QLabel("No spaces yet")
+        _no_spaces_lbl.setStyleSheet("color: #999; font-size: 9pt;")
+        _no_spaces_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.spaces_list_layout.addWidget(_no_spaces_lbl)
+        self.spaces_list_layout.addStretch()
+
+        spaces_scroll.setWidget(self.spaces_list_widget)
+        pages_layout.addWidget(spaces_scroll, stretch=1)
+        self._space_item_filters = []
         self._stack.addWidget(pages_page)
 
         # History page with accordion-style toggle
@@ -139,6 +239,7 @@ class SideMenuPanel(QWidget):
             }
             QPushButton:hover { background: #e55a00; }
         """)
+        create_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.create_checkpoint_btn = create_btn
         history_layout.addWidget(create_btn)
 
@@ -163,37 +264,46 @@ class SideMenuPanel(QWidget):
         scroll_area.setWidgetResizable(True)
         scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; margin: 0 8px; }")
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setMaximumHeight(200)
 
         self.checkpoint_list_widget = QWidget()
         self.checkpoint_list_layout = QVBoxLayout(self.checkpoint_list_widget)
         self.checkpoint_list_layout.setContentsMargins(4, 4, 4, 4)
         self.checkpoint_list_layout.setSpacing(6)
+        self.checkpoint_list_widget.setStyleSheet("background: transparent; border: none;")
 
         empty_label = QLabel("No checkpoints yet")
         empty_label.setStyleSheet("color: #999; font-size: 9pt; text-align: center;")
         empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.checkpoint_list_layout.addWidget(empty_label)
         self.checkpoint_list_layout.addStretch()
+        self._checkpoint_filters = []
 
         scroll_area.setWidget(self.checkpoint_list_widget)
 
-        # Hide scroll area by default
-        scroll_area.setVisible(False)
+        # Start collapsed via height=0 (stays in layout, animation controls size)
+        scroll_area.setMaximumHeight(0)
         self.checkpoint_scroll_area = scroll_area
         history_layout.addWidget(scroll_area)
 
         history_layout.addStretch()
         self._stack.addWidget(history_page)
 
+        # Slide animation
+        self._history_anim = QPropertyAnimation(scroll_area, b"maximumHeight")
+        self._history_anim.setDuration(500)
+        self._history_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+
         # Connect File History button to toggle
         def toggle_history_list():
-            is_visible = self.checkpoint_scroll_area.isVisible()
-            self.checkpoint_scroll_area.setVisible(not is_visible)
-            arrow = "-" if not is_visible else "▶"
-            self.file_history_btn.setText(f"File History {arrow}")
-            self._history_expanded = not is_visible
+            expanding = not self._history_expanded
+            self._history_anim.stop()
+            self._history_anim.setStartValue(scroll_area.maximumHeight())
+            self._history_anim.setEndValue(200 if expanding else 0)
+            self.file_history_btn.setText(f"File History {'-' if expanding else '▶'}")
+            self._history_expanded = expanding
+            self._history_anim.start()
 
         file_history_btn.clicked.connect(toggle_history_list)
 
@@ -227,8 +337,227 @@ class SideMenuPanel(QWidget):
         for btn in self.file_actions.values():
             btn.setStyleSheet(action_ss)
             
+        # Store for use by refresh_recent_list
+        self._accent_hex = hex_color
+
+        # Recent file buttons follow accent
+        for btn in getattr(self, '_recent_file_buttons', []):
+            btn.setStyleSheet(f"""
+                QPushButton {{ text-align: left; padding: 0 18px 0 28px;
+                              border: none; font-size: 10pt; background: white; color: #555; }}
+                QPushButton:hover {{ background: {hex_color}; color: white; }}
+            """)
+        
+        # Create Checkpoint button follows accent color
+        darker = color.darker(120).name()
+        self.create_checkpoint_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {hex_color}; color: white; border: none;
+                font-weight: bold; border-radius: 4px; font-size: 11pt; margin: 0 8px;
+            }}
+            QPushButton:hover {{ background: {darker}; }}
+        """)
+        
+        # Create Space button follows accent color
+        if hasattr(self, 'create_space_btn'):
+            self.create_space_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {hex_color}; color: white; border: none;
+                    font-weight: bold; border-radius: 4px; font-size: 11pt; margin: 0 8px;
+                }}
+                QPushButton:hover {{ background: {darker}; }}
+            """)
+
+        # File History toggle button hover follows accent
+        self.file_history_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: #222; border: none;
+                font-weight: bold; font-size: 12pt; text-align: left; padding-left: 8px;
+            }}
+            QPushButton:hover {{ color: {hex_color}; }}
+        """)
+
+        # Propagate to existing checkpoint item filters
+        for f in self._checkpoint_filters:
+            f.update_accent(hex_color)
+            
     def _toggle_history_view(self):
         pass
+    
+    def refresh_recent_list(self, recent_files, on_open=None, tooltip_fn=None):
+        while self.recent_list_layout.count():
+            item = self.recent_list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._recent_file_buttons = []
+
+        accent = getattr(self, "_accent_hex", "#ff6600")
+
+        if not recent_files:
+            lbl = QLabel("No recent files")
+            lbl.setStyleSheet("color: #999; font-size: 9pt;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.recent_list_layout.addWidget(lbl)
+            return
+
+        for fp in recent_files[:5]:
+            import os as _os
+            name = _os.path.basename(fp)
+            btn = QPushButton(name)
+            btn.setFlat(True)
+            btn.setFixedHeight(34)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{ text-align: left; padding: 0 18px 0 28px;
+                              border: none; font-size: 10pt; background: white; color: #555; }}
+                QPushButton:hover {{ background: {accent}; color: white; }}
+            """)
+            if on_open:
+                btn.clicked.connect(lambda checked, path=fp: on_open(path))
+            if tooltip_fn:
+                btn.enterEvent = lambda event, path=fp: tooltip_fn(path)
+            self.recent_list_layout.addWidget(btn)
+            self._recent_file_buttons.append(btn)
+            
+    def refresh_spaces(self, spaces: list, current_space_idx: int, current_page_idx: int,
+               on_space_selected=None, on_page_selected=None, on_delete_page=None, on_rename_page=None, 
+               tooltip_fn=None, on_rename_space=None, on_delete_space=None):
+        while self.spaces_list_layout.count():
+            item = self.spaces_list_layout.takeAt(0)
+            if item.widget():
+                item.widget().hide()
+                item.widget().deleteLater()
+        
+        self._space_item_filters.clear()
+        accent = getattr(self, "_accent_hex", "#ff6600")
+
+        if not spaces:
+            lbl = QLabel("No spaces yet")
+            lbl.setStyleSheet("color: #999; font-size: 9pt;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.spaces_list_layout.addWidget(lbl)
+            self.spaces_list_layout.addStretch()
+            return
+
+        for si, space in enumerate(spaces):
+            is_active = (si == current_space_idx)
+            arrow = "▼" if is_active else "▶"
+
+            header_btn = QPushButton(f"{arrow}  {space['name']}")
+            header_btn.setFixedHeight(34)
+            header_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            if is_active:
+                darker = QColor(accent).darker(115).name()
+                header_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        text-align: left; padding: 0 10px; border: none;
+                        background: {accent}; color: white;
+                        border-radius: 4px; font-size: 10pt; font-weight: bold;
+                    }}
+                    QPushButton:hover {{ background: {darker}; }}
+                """)
+            else:
+                header_btn.setStyleSheet("""
+                    QPushButton {
+                        text-align: left; padding: 0 10px; border: none;
+                        background: #f0f0f0; color: #444;
+                        border-radius: 4px; font-size: 10pt;
+                    }
+                    QPushButton:hover { background: #e4e4e4; }
+                """)
+
+            f_hdr = _SpaceHeaderFilter(
+                header_btn,
+                on_click=lambda _si=si: (
+                    on_space_selected(_si) if on_space_selected else None,
+                    tooltip_fn("Double-click to rename / delete", 1500) if tooltip_fn else None,
+                ),
+                on_dblclick=lambda _si=si: (
+                    on_rename_space(_si) if on_rename_space else None
+                ),
+            )
+            self._space_item_filters.append(f_hdr)
+            self.spaces_list_layout.addWidget(header_btn)
+
+            # Only show page list for the active space
+            if not is_active:
+                continue
+
+            for pi, page in enumerate(space["pages"]):
+                is_active_page = (pi == current_page_idx)
+
+                item_widget = QWidget()
+                item_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+                item_widget.setStyleSheet(
+                    f"background: {'#edf4ff' if is_active_page else '#f9f9f9'}; border-radius: 4px;"
+                )
+                item_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+                item_layout = QHBoxLayout(item_widget)
+                item_layout.setContentsMargins(6, 6, 6, 6)
+                item_layout.setSpacing(8)
+
+                # Thumbnail
+                thumb_label = QLabel()
+                thumb_label.setFixedSize(64, 46)
+                thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                thumb_label.setStyleSheet(
+                    f"border: 2px solid {accent if is_active_page else '#e0e0e0'}; "
+                    f"background: #e0e0e0; border-radius: 2px;"
+                )
+                if page.get("thumbnail"):
+                    thumb_label.setPixmap(
+                        page["thumbnail"].scaled(
+                            60, 42,
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation,
+                        )
+                    )
+                item_layout.addWidget(thumb_label)
+
+                # Name + date
+                info_layout = QVBoxLayout()
+                info_layout.setContentsMargins(0, 0, 0, 0)
+                info_layout.setSpacing(2)
+                name_lbl = QLabel(page["name"])
+                name_lbl.setStyleSheet(
+                    f"border: none; background: transparent; font-size: 9pt; font-weight: bold; "
+                    f"color: {accent if is_active_page else '#222'};"
+                )
+                date_lbl = QLabel(page.get("created", "")[:10])
+                date_lbl.setStyleSheet(
+                    "border: none; background: transparent; font-size: 8pt; color: #999;"
+                )
+                info_layout.addWidget(name_lbl)
+                info_layout.addWidget(date_lbl)
+                item_layout.addLayout(info_layout)
+                item_layout.addStretch()
+
+                # Delete (X) button
+                del_btn = QPushButton("✕")
+                del_btn.setFixedSize(22, 22)
+                del_btn.setStyleSheet(
+                    "QPushButton { border: none; color: #aaa; font-size: 11pt; background: transparent; }"
+                    "QPushButton:hover { color: #ff3300; }"
+                )
+                if on_delete_page:
+                    del_btn.clicked.connect(lambda _, _si=si, _pi=pi: on_delete_page(_si, _pi))
+                item_layout.addWidget(del_btn)
+
+                f = _CheckpointItemFilter(
+                    item_widget, accent,
+                    on_dblclick=lambda _si=si, _pi=pi: (
+                        on_rename_page(_si, _pi) if on_rename_page else None
+                    ),
+                    on_click=lambda _si=si, _pi=pi: (
+                        tooltip_fn("Double-click to rename", 1500) if tooltip_fn else None,
+                        on_page_selected(_si, _pi) if on_page_selected else None,
+                    ),
+                )
+                self._space_item_filters.append(f)
+
+                self.spaces_list_layout.addWidget(item_widget)
+
+        self.spaces_list_layout.addStretch()           
 
 # Context Menu - Properties
 
@@ -1210,6 +1539,39 @@ def _deserialize_shape(d: dict) -> tuple:
         color = QColor(d["color"])
         extras = [_deserialize_extra(e) for e in d.get("extras", [])]
         return tuple([tool, start, end, color] + extras)
+    
+
+def _serialize_page_state(state) -> dict:
+    return {
+        "name": state["name"],
+        "created": state.get("created", ""),
+        "shapes":         [_serialize_shape(s) for s in state["shapes"]],
+        "eraser_mask":    _serialize_pixmap(state["eraser_mask"]),
+        "eraser_strokes": [[_serialize_qpoint(p) for p in stroke]
+                           for stroke in state["eraser_strokes"]],
+        "scale_factor":   state["scale_factor"],
+        "zoom_percent":   state["zoom_percent"],
+        "pan_offset":     [state["pan_offset"].x(), state["pan_offset"].y()],
+        "tool_sizes":     state["tool_sizes"],
+    }
+
+def _deserialize_page_state(pd: dict, a4_size) -> dict:
+    em = _deserialize_pixmap(pd["eraser_mask"])
+    return {
+        "name":           pd["name"],
+        "shapes":         [_deserialize_shape(s) for s in pd["shapes"]],
+        "eraser_mask":    em,
+        "eraser_strokes": [[QPoint(*p) for p in stroke]
+                           for stroke in pd["eraser_strokes"]],
+        "scale_factor":   pd.get("scale_factor", 1.0),
+        "zoom_percent":   pd.get("zoom_percent", 0),
+        "pan_offset":     QPoint(*pd.get("pan_offset", [0, 0])),
+        "tool_sizes":     pd.get("tool_sizes", {}),
+        "created":        pd.get("created", ""),
+        "shape_history":  [],
+        "undo_stack":     [],
+        "redo_stack":     [],
+    }    
 
 
 class DrawingArea(QFrame):
@@ -1306,6 +1668,8 @@ class DrawingArea(QFrame):
 
         # Initialize tool sizes from last used sizes
         self.tool_sizes = self.tool_last_sizes.copy()
+        
+        self.open_file_callback = None
         
     def _to_local(self, pt, rotation, center):
         import math
@@ -2666,6 +3030,12 @@ class DrawingArea(QFrame):
                 self.shape_layers_overlay.setVisible(False)
             else:
                 self.show_shape_layers_overlay()
+            return
+        
+        # Open file
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_O:
+            if callable(getattr(self, 'open_file_callback', None)):
+                self.open_file_callback()
             return
 
         # Delete key: Delete selected shape
@@ -4588,7 +4958,291 @@ class LoadingOverlay(QWidget):
         painter.setFont(font)
         text_rect = self.rect().adjusted(0, cy + r + 14, 0, 0)
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self._text)
+        
+class PageBar(QWidget):
+    page_added    = pyqtSignal()
+    page_selected = pyqtSignal(int)
 
+    _COLLAPSED_W = 80
+    _COLLAPSED_H = 22
+    _EXPANDED_H  = 44
+
+    def __init__(self, parent=None, accent="#ff6600"):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setMouseTracking(True)
+        self._accent     = accent
+        self._pages      = ["Page 1"]
+        self._current    = 0
+        self._expanded   = False
+        self._collapsing = False
+        self._page_btns  = []
+
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self._dash_widget = QWidget()
+        self._dash_widget.setStyleSheet("background: transparent;")
+        dl = QHBoxLayout(self._dash_widget)
+        dl.setContentsMargins(0, 0, 0, 0)
+        dl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._dash_lbl = QLabel("—")
+        self._dash_lbl.setStyleSheet(
+            "color: #999; font-size: 32pt; font-weight: 900; background: transparent; border: none; letter-spacing: -2px;"
+        )
+        dl.addWidget(self._dash_lbl)
+        outer.addWidget(self._dash_widget)
+
+        self._exp_widget = QWidget()
+        self._exp_widget.setStyleSheet("background: transparent;")
+        self._exp_widget.setVisible(False)
+        el = QHBoxLayout(self._exp_widget)
+        el.setContentsMargins(4, 0, 4, 0)
+        el.setSpacing(4)
+
+        # Inner widget holds the page buttons; scroll area clips it without a visible bar
+        self._btns_widget = QWidget()
+        self._btns_widget.setStyleSheet("background: transparent;")
+        self._btns_widget.setFixedHeight(self._EXPANDED_H)
+        self._page_layout = QHBoxLayout(self._btns_widget)
+        self._page_layout.setContentsMargins(10, 0, 10, 0)
+        self._page_layout.setSpacing(6)
+        self._page_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
+        self._scroll = QScrollArea()
+        self._scroll.setWidget(self._btns_widget)
+        self._scroll.setWidgetResizable(False)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self._scroll.setFixedHeight(self._EXPANDED_H)
+        el.addWidget(self._scroll, stretch=1)
+
+        self._add_btn = QPushButton("+")
+        self._add_btn.setFixedSize(28, 28)
+        self._add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._add_btn.setStyleSheet(self._add_btn_ss())
+        self._add_btn.clicked.connect(self._on_add)
+        outer.addWidget(self._exp_widget)
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(18)
+        shadow.setOffset(0, 3)
+        shadow.setColor(QColor(0, 0, 0, 0))
+        self.setGraphicsEffect(shadow)
+
+        self._leave_timer = QTimer(self)
+        self._leave_timer.setSingleShot(True)
+        self._leave_timer.setInterval(200)
+        self._leave_timer.timeout.connect(self._check_leave)
+
+        self._geo_anim = QPropertyAnimation(self, b"geometry")
+        self._geo_anim.setDuration(240)
+        self._geo_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._geo_anim.finished.connect(self._on_anim_done)
+
+        self._apply_style()
+        self._refresh_pages()
+
+    def _apply_style(self):
+        self.setStyleSheet("""
+            PageBar {
+                background: transparent;
+                border: none;
+            }
+        """)
+
+    def _add_btn_ss(self):
+        return f"""
+            QPushButton {{
+                background: transparent; border: none;
+                font-size: 18pt; color: #888;
+            }}
+            QPushButton:hover {{ color: {self._accent}; }}
+        """
+
+    def _page_btn_ss(self, active: bool):
+        if active:
+            bg    = self._accent
+            fg    = "white"
+            hover = QColor(self._accent).lighter(130).name()
+        else:
+            bg    = "#f0f0f0"
+            fg    = "#333"
+            hover = "#e0e0e0"
+        return f"""
+            QPushButton {{
+                background: {bg}; color: {fg};
+                border: none; border-radius: 8px;
+                padding: 0 12px; font-size: 10pt;
+            }}
+            QPushButton:hover {{ background: {hover}; }}
+        """
+
+
+    def set_accent(self, color: QColor):
+        self._accent = color.name()
+        self._apply_style()
+        self._add_btn.setStyleSheet(self._add_btn_ss())
+        self._refresh_pages()
+
+    def _refresh_pages(self):
+        for btn in self._page_btns:
+            btn.setParent(None)
+        self._page_btns = []
+        self._page_layout.removeWidget(self._add_btn)
+
+        fm = self.fontMetrics()
+        btns_natural_w = 20  # left+right margins (10 each)
+        for i, name in enumerate(self._pages):
+            btn = QPushButton(name)
+            btn.setFixedHeight(30)
+            btn.setMinimumWidth(fm.horizontalAdvance(name) + 24)
+            btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(self._page_btn_ss(i == self._current))
+            btn.clicked.connect(lambda checked, idx=i: self._on_page_selected(idx))
+            self._page_layout.addWidget(btn)
+            self._page_btns.append(btn)
+            btns_natural_w += fm.horizontalAdvance(name) + 24 + 6 
+        if self._pages:
+            btns_natural_w -= 6  
+
+        # Add button lives at the end, inside the scroll
+        self._page_layout.addWidget(self._add_btn)
+        btns_natural_w += 6 + 28  # spacing + add btn width
+        
+        self._btns_natural_w = max(btns_natural_w, 60)
+        self._btns_widget.setFixedWidth(self._btns_natural_w)
+        QTimer.singleShot(0, self._fit_btns_widget_to_content)
+
+    def set_pages(self, names: list, current_idx: int):
+        self._pages = list(names)
+        self._current = current_idx
+        self._refresh_pages()
+        # If already expanded, animate to the new width
+        if self._expanded and self._geo_anim.state() != QPropertyAnimation.State.Running:
+            new_rect = self._expanded_rect()
+            if self.geometry() != new_rect:
+                self._geo_anim.stop()
+                self._geo_anim.setStartValue(self.geometry())
+                self._geo_anim.setEndValue(new_rect)
+                self._geo_anim.start()
+
+    def _on_add(self):
+        # Don't mutate internal list — UIMode owns the data
+        self.page_added.emit()
+
+    def _on_page_selected(self, idx: int):
+        self._current = idx
+        self._refresh_pages()
+        self.page_selected.emit(idx)
+
+    def _bottom_y(self) -> int:
+        ph = self.parentWidget().height() if self.parentWidget() else 600
+        margin = 18  # gap from bottom edge
+        return ph - self._EXPANDED_H - margin
+
+    def _expanded_w(self) -> int:
+        pw = self.parentWidget().width() if self.parentWidget() else 800
+        fm = self.fontMetrics()
+        btns_w = 20  # margins
+        visible_pages = self._pages[:5]  # cap visible area to 5 pages
+        for name in visible_pages:
+            btns_w += fm.horizontalAdvance(name) + 24 + 6
+        if visible_pages:
+            btns_w -= 6
+        btns_w += 6 + 28
+        max_viewport = min(pw - 200, 420)
+        visible_w = min(btns_w, max_viewport)
+        return max(100, visible_w + 8)
+
+    def _fit_btns_widget_to_content(self):
+        # Skip if buttons aren't visible — layout positions are stale
+        if not self._exp_widget.isVisible():
+            return
+        right_margin = self._page_layout.contentsMargins().right()
+        add_x = self._add_btn.x()
+        min_w = getattr(self, '_btns_natural_w', 60)
+        # Layout hasn't been applied yet — keep the pre-calculated width
+        if add_x == 0 and self._page_btns:
+            self._scroll_to_current()
+            return
+        exact_w = add_x + self._add_btn.width() + right_margin
+        if exact_w > min_w:
+            self._btns_widget.setFixedWidth(exact_w)
+        self._scroll_to_current()
+    
+    def _scroll_to_current(self):
+        if not self._page_btns or self._current >= len(self._page_btns):
+            return
+        btn = self._page_btns[self._current]
+        bar = self._scroll.horizontalScrollBar()
+        viewport_w = self._scroll.viewport().width()
+        # Center the active page button in the viewport
+        target = btn.x() + btn.width() // 2 - viewport_w // 2
+        bar.setValue(max(0, min(bar.maximum(), target)))  
+
+    def _collapsed_rect(self) -> QRect:
+        pw = self.parentWidget().width() if self.parentWidget() else 800
+        by = self._bottom_y() + (self._EXPANDED_H - self._COLLAPSED_H) // 2
+        return QRect((pw - self._COLLAPSED_W) // 2, by,
+                     self._COLLAPSED_W, self._COLLAPSED_H)
+
+    def _expanded_rect(self) -> QRect:
+        pw = self.parentWidget().width() if self.parentWidget() else 800
+        ew = self._expanded_w()
+        return QRect((pw - ew) // 2, self._bottom_y(), ew, self._EXPANDED_H)
+
+    def update_position(self, parent_w: int):
+        """Call from parent's resizeEvent to re-center."""
+        if self._geo_anim.state() == QPropertyAnimation.State.Running:
+            return
+        rect = self._expanded_rect() if self._expanded else self._collapsed_rect()
+        self.setGeometry(rect)
+
+
+    def enterEvent(self, event):
+        self._leave_timer.stop()
+        if not self._expanded or self._collapsing:
+            self._expanded   = True
+            self._collapsing = False
+            self._exp_widget.setVisible(True)
+            self._dash_widget.setVisible(False)
+            self._geo_anim.stop()
+            self._geo_anim.setStartValue(self.geometry())
+            self._geo_anim.setEndValue(self._expanded_rect())
+            self._geo_anim.start()
+            # Re-fit once layout recalculates with visible widgets
+            QTimer.singleShot(0, self._fit_btns_widget_to_content)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._leave_timer.start()
+        super().leaveEvent(event)
+
+    def _check_leave(self):
+        if not self.rect().contains(self.mapFromGlobal(QCursor.pos())):
+            self._expanded   = False
+            self._collapsing = True
+            self._geo_anim.stop()
+            self._geo_anim.setStartValue(self.geometry())
+            self._geo_anim.setEndValue(self._collapsed_rect())
+            self._geo_anim.start()
+
+    def _on_anim_done(self):
+        if self._collapsing:
+            self._collapsing = False
+            self._dash_widget.setVisible(True)
+            self._exp_widget.setVisible(False)
+            
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y() or event.angleDelta().x()
+        bar = self._scroll.horizontalScrollBar()
+        bar.setValue(bar.value() - delta // 3)
+        event.accept()
 
 class UIMode(QWidget):
     def __init__(self, parent=None):
@@ -4607,6 +5261,7 @@ class UIMode(QWidget):
         
         self.checkpoints_dir = None  # Will be set when a file is opened
         self.current_canvas_file = None  # Track the current file path
+        self._checkpoint_preview_dialogs = {}
         
         self.selected_tool = None
         self._first_ribbon_init = True
@@ -4615,18 +5270,20 @@ class UIMode(QWidget):
         self.setStyleSheet("font-family: Arial; font-size: 12pt;")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         #self.resize(1100, 700)
+        self.custom_tooltip = CustomToolTip(self)
         self.init_ui()
         self._show_controls = False
         
         
-        self.custom_tooltip = CustomToolTip(self)
+        
         self.drawing_area.shape_selected_for_edit.connect(self.deselect_tool)
         self._tool_btn_anim = None  # Initialize attribute to avoid assignment error
         self._last_category_index = 0
         self.drawing_area.shape_selected_for_edit.connect(self.sync_color_with_selected_shape)
         #self._was_maximized = False
         
-        
+        self._recent_files = self._load_recent_files()
+        self._side_menu.refresh_recent_list(self._recent_files, on_open=self.open_canvas, tooltip_fn=self.custom_tooltip.show_tooltip)
 
     def init_ui(self):
         main_layout = QHBoxLayout(self)
@@ -4708,6 +5365,7 @@ class UIMode(QWidget):
                 self.drawing_area.set_shape_color(color)  # Pass color to drawing area
                 self.update_tool_btn_border()
                 self._side_menu.set_accent_color(color)
+                self.page_bar.set_accent(color)
                 # Update selected tool button color
                 if self.selected_tool:
                     self.select_tool(self.selected_tool)
@@ -4807,7 +5465,32 @@ class UIMode(QWidget):
         scroll = custom_scroll  # Use the custom scroll area
         
         # Drawing Area
-        self.drawing_area = DrawingArea()
+        self.drawing_area = DrawingArea(self)
+        # Page state init (one page per canvas "space")
+        _em = QPixmap(self.drawing_area.a4_size)
+        _em.fill(Qt.GlobalColor.transparent)
+        self._spaces = [{
+            "name": "Space 1",
+            "current_page": 0,
+            "pages": [{
+                "name": "Page 1",
+                "shapes": [],
+                "eraser_mask": _em,
+                "eraser_strokes": [],
+                "scale_factor": 1.0,
+                "zoom_percent": 0,
+                "pan_offset": QPoint(0, 0),
+                "tool_sizes": dict(self.drawing_area.tool_last_sizes),
+                "shape_history": [],
+                "undo_stack": [],
+                "redo_stack": [],
+                "thumbnail": None,
+                "created": datetime.now().strftime("%Y-%m-%d"),
+            }]
+        }]
+        self._current_space_idx = 0
+        self._current_page_idx = 0
+        self.drawing_area.open_file_callback = self.open_canvas
         self.drawing_area.installEventFilter(self)
 
         # Top bar (custom, only shows controls on hover)
@@ -4895,12 +5578,29 @@ class UIMode(QWidget):
             lambda: (setattr(self, "current_canvas_file", None), self.save_canvas())
         )
         self._side_menu.file_actions["Open"].clicked.connect(self.open_canvas)
+        # Hotkeys Button Action
+        self._side_menu.file_actions["Hotkeys"].clicked.connect(self.show_hotkeys_dialog)
         # Connect Exit action
         self._side_menu.file_actions["Exit"].clicked.connect(self.close)
         
         # History Tab
         self._side_menu.create_checkpoint_btn.clicked.connect(self.create_file_checkpoint)
         self.menu_btn.raise_()
+        
+        # Floating page bar (top center, hover-to-expand)
+        self.page_bar = PageBar(parent=self, accent=self.current_shape_color.name())
+        # Wire PageBar ↔ UIMode
+        self.page_bar.page_added.connect(self._add_page)
+        self.page_bar.page_selected.connect(self._select_page)
+
+        # Wire side panel Pages tab ↔ UIMode
+        self._side_menu.create_space_btn.clicked.connect(self._add_space)
+        self._side_menu.space_selected.connect(self._select_space)
+
+        # Push initial single page to both UIs
+        self._sync_page_ui()
+        self.page_bar.show()
+        self.page_bar.raise_()
         
         self.ribbon_layout = ribbon_layout
         self.divider = divider  
@@ -4916,8 +5616,13 @@ class UIMode(QWidget):
         self.update_tool_btn_border()
         self.tool_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         # Add shadow effect
-        
+
         self.tool_btn.show()
+        btn_margin = 24
+        self.tool_btn.move(
+            self.width() - self.tool_btn.width() - btn_margin,
+            self.height() - self.tool_btn.height() - btn_margin,
+        )
     
         def on_tool_btn_clicked():
             target = 180 if not self._rotated else 0
@@ -4943,6 +5648,8 @@ class UIMode(QWidget):
         self._auto_save_timer = QTimer(self)
         self._auto_save_timer.timeout.connect(self._auto_save_tick)
         self._auto_save_timer.start(30000)  # Auto-save every 30 seconds
+        
+        
         
     def toggle_side_menu(self):
         h = self.height()
@@ -5344,10 +6051,16 @@ class UIMode(QWidget):
             panel_w = self._side_menu.width()
             self._side_menu.setGeometry(self.width() - panel_w, 0,
                                          panel_w, self.height())
+        
         # Floating tool button (bottom right)
         btn_margin = 24
-        self.tool_btn.move(self.width() - self.tool_btn.width() - btn_margin,
-                           self.height() - self.tool_btn.height() - btn_margin)
+        if hasattr(self, 'tool_btn'):
+            self.tool_btn.move(self.width() - self.tool_btn.width() - btn_margin,
+                               self.height() - self.tool_btn.height() - btn_margin)
+        
+        if hasattr(self, 'page_bar'):
+            self.page_bar.update_position(self.width())
+            
         # Floating hamburger (top right)
         self.menu_btn.move(self.width() - self.menu_btn.width() - 8, 4)
         super().resizeEvent(event)
@@ -5383,6 +6096,11 @@ class UIMode(QWidget):
         if hasattr(self, '_drag_pos'):
             del self._drag_pos
         super().mouseReleaseEvent(event)
+    
+    @property
+    def _page_states(self):
+        """Convenience: the pages list of the currently active space."""
+        return self._spaces[self._current_space_idx]["pages"]    
     
     def show_tool_tooltip(self, text):
         self.custom_tooltip.show_tooltip(text)
@@ -5436,7 +6154,120 @@ class UIMode(QWidget):
                     size = self.drawing_area.eraser_radius * 2
                     cursor_pix = pixmap.scaled(size, size)
                     self.drawing_area.setCursor(QCursor(cursor_pix, size // 2, size // 2))
+    
+    def show_hotkeys_dialog(self):
+        accent = self.current_shape_color.name()
+        darker = self.current_shape_color.darker(120).name()
 
+        dialog = QDialog(self)
+        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dialog.setModal(True)
+        dialog.setFixedSize(380, 480)
+        dialog.setStyleSheet("background: white; border-radius: 12px; border: 2px solid #222;")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        drag_bar = DraggableBar(dialog)
+        layout.addWidget(drag_bar)
+
+        title = QLabel("Hotkeys")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 14pt; font-weight: bold; border: none;")
+        layout.addWidget(title)
+
+        hotkeys = [
+            ("General", [
+                ("Ctrl + Z",        "Undo"),
+                ("Ctrl + Y",        "Redo"),
+                ("Ctrl + S",        "Save"),
+                ("Ctrl + C",        "Copy selected object"),
+                ("Ctrl + V",        "Paste object"),
+                ("Delete",          "Delete selected object"),
+                ("Escape",          "Cancel / Deselect tool"),
+            ]),
+            ("Canvas", [
+                ("Ctrl + Scroll",   "Zoom in / out"),
+                ("Shift + Scroll",  "Pan left / right"),
+                ("Scroll",          "Pan up / down"),
+                ("Ctrl + E",        "Toggle object layers"),
+            ]),
+            ("Tools", [
+                ("Double-click tool", "Adjust tool size"),
+            ]),
+        ]
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        container = QWidget()
+        container.setStyleSheet("background: transparent; border: none;")
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(12)
+
+        for section, items in hotkeys:
+            section_lbl = QLabel(section)
+            section_lbl.setStyleSheet(
+                f"font-size: 9pt; font-weight: bold; color: {accent}; border: none; "
+                f"border-bottom: 1px solid #eee; padding-bottom: 2px;"
+            )
+            container_layout.addWidget(section_lbl)
+
+            for key, desc in items:
+                row = QHBoxLayout()
+                row.setContentsMargins(4, 0, 4, 0)
+
+                key_lbl = QLabel(key)
+                key_lbl.setFixedWidth(140)
+                key_lbl.setStyleSheet(
+                    "font-size: 9pt; font-weight: bold; color: #333; border: none; "
+                    "background: #f0f0f0; border-radius: 4px; padding: 2px 6px;"
+                )
+
+                desc_lbl = QLabel(desc)
+                desc_lbl.setStyleSheet("font-size: 9pt; color: #555; border: none;")
+
+                row.addWidget(key_lbl)
+                row.addWidget(desc_lbl)
+                row.addStretch()
+                container_layout.addLayout(row)
+
+        container_layout.addStretch()
+        scroll.setWidget(container)
+        custom_vsb = VerticalScrollBar()
+        custom_vsb.connect_to(scroll.verticalScrollBar())
+
+        scroll_row = QHBoxLayout()
+        scroll_row.setContentsMargins(0, 0, 0, 0)
+        scroll_row.setSpacing(0)
+        scroll_row.addWidget(scroll)
+        scroll_row.addWidget(custom_vsb)
+        layout.addLayout(scroll_row)
+
+        close_btn = QPushButton("Close")
+        close_btn.setFixedHeight(34)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {accent}; color: white; border: none;
+                font-weight: bold; border-radius: 6px; font-size: 11pt; padding: 0 20px;
+            }}
+            QPushButton:hover {{ background: {darker}; }}
+        """)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.clicked.connect(dialog.accept)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(close_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        dialog.exec()
 
     def show_draw_size_dialog(self, event=None):
         dlg = DrawSizeDialog(self, self.drawing_area.draw_radius)
@@ -5550,46 +6381,41 @@ class UIMode(QWidget):
             self.show_tool_size_dialog(tool_name, current_size, 1, 20)
     
     def _core_save_canvas(self, file_path):
-        #Core save logic - handles actual serialization and file writing
-        da = self.drawing_area
+        self._snapshot_current_page()
+        self._spaces[self._current_space_idx]["current_page"] = self._current_page_idx
+
         project_folder = os.path.dirname(file_path)
-        config_folder = os.path.join(project_folder, "config")
+        config_folder  = os.path.join(project_folder, "config")
         os.makedirs(config_folder, exist_ok=True)
 
-        # Serialize shapes
-        shapes_data = [_serialize_shape(s) for s in da.shapes]
-
-        # Serialize eraser mask
-        eraser_mask_b64 = _serialize_pixmap(da.eraser_mask)
-
-        # Serialize eraser strokes
-        strokes_data = [[_serialize_qpoint(p) for p in stroke]
-                        for stroke in da.eraser_strokes]
-
-        payload = {
-            "version": 1,
-            "shapes": shapes_data,
-            "eraser_mask": eraser_mask_b64,
-            "eraser_strokes": strokes_data,
-            "scale_factor": da.scale_factor,
-            "zoom_percent": da.zoom_percent,
-            "pan_offset": [da.pan_offset.x(), da.pan_offset.y()],
-            "tool_sizes": da.tool_sizes,
-            "current_shape_color": self.current_shape_color.name(),
-        }
-
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
-
-        # Save shape history (restore points) to config
-        def _serialize_history_entry(entry):
+        def _ser_hist(entry):
             e = dict(entry)
             e["shape_data"] = _serialize_shape(entry["shape_data"])
             return e
 
-        history_data = [_serialize_history_entry(e) for e in da.shape_history]
+        payload = {
+            "version": 3,
+            "current_space": self._current_space_idx,
+            "current_shape_color": self.current_shape_color.name(),
+            "spaces": [
+                {
+                    "name": sp["name"],
+                    "current_page": sp["current_page"],
+                    "pages": [_serialize_page_state(p) for p in sp["pages"]],
+                }
+                for sp in self._spaces
+            ],
+        }
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+
+        # Per-page shape histories grouped by space
+        all_histories = [
+            [[_ser_hist(e) for e in p["shape_history"]] for p in sp["pages"]]
+            for sp in self._spaces
+        ]
         with open(os.path.join(config_folder, "shape_history.json"), "w", encoding="utf-8") as f:
-            json.dump(history_data, f, indent=2)
+            json.dump({"version": 3, "spaces": all_histories}, f, indent=2)
 
         self.current_canvas_file = file_path
 
@@ -5599,7 +6425,7 @@ class UIMode(QWidget):
             file_path = self.current_canvas_file
         else:
             file_path, _ = QFileDialog.getSaveFileName(
-                self, "Save Canvas", "", "UI Canvas (*.ldsu)"
+                self, "Save Canvas", "", "LDS File UIMode (*.ldsu)"
             )
             if not file_path:
                 return
@@ -5616,21 +6442,115 @@ class UIMode(QWidget):
         # Brief title feedback
         self.setWindowTitle("Log Documentation System - Saved")
         QTimer.singleShot(50, lambda: self.setWindowTitle("Log Documentation System - Log Mode"))
-        QTimer.singleShot(50, self._do_save_canvas)
         
-    def _do_save_canvas(self):        
+        def _do_save():
+            try:
+                self._core_save_canvas(self.current_canvas_file)
+            except Exception as e:
+                self.custom_tooltip.show_tooltip(f"Save failed: {str(e)[:40]}", duration=3000)
+                print(f"Save error: {e}")
+            finally:
+                if hasattr(self, '_loading_overlay') and self._loading_overlay:
+                    self._loading_overlay.hide_overlay()
+        QTimer.singleShot(5000, _do_save)
+        
+    def _do_open_canvas(self, file_path):
         try:
-            file_path = self.current_canvas_file
-            self._core_save_canvas(file_path)
+            with open(file_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+
+            da      = self.drawing_area
+            version = payload.get("version", 1)
+
+            if version >= 3:
+                self._spaces = []
+                for sp_data in payload.get("spaces", []):
+                    pages = [_deserialize_page_state(pd, da.a4_size) for pd in sp_data["pages"]]
+                    self._spaces.append({
+                        "name": sp_data.get("name", "Space 1"),
+                        "current_page": sp_data.get("current_page", 0),
+                        "pages": pages,
+                    })
+                self._current_space_idx = payload.get("current_space", 0)
+                self._current_page_idx  = self._spaces[self._current_space_idx]["current_page"]
+
+            elif version >= 2:
+                pages = [_deserialize_page_state(pd, da.a4_size) for pd in payload["pages"]]
+                cp    = payload.get("current_page", 0)
+                self._spaces = [{"name": "Space 1", "current_page": cp, "pages": pages}]
+                self._current_space_idx = 0
+                self._current_page_idx  = cp
+
+            else:
+                state = _deserialize_page_state({
+                    "name":           "Page 1",
+                    "shapes":         payload["shapes"],
+                    "eraser_mask":    payload["eraser_mask"],
+                    "eraser_strokes": payload["eraser_strokes"],
+                    "scale_factor":   payload.get("scale_factor", 1.0),
+                    "zoom_percent":   payload.get("zoom_percent", 0),
+                    "pan_offset":     payload.get("pan_offset", [0, 0]),
+                    "tool_sizes":     payload.get("tool_sizes", {}),
+                }, da.a4_size)
+                self._spaces = [{"name": "Space 1", "current_page": 0, "pages": [state]}]
+                self._current_space_idx = 0
+                self._current_page_idx  = 0
+
+            # Load shape histories
+            project_folder = os.path.dirname(file_path)
+            history_path   = os.path.join(project_folder, "config", "shape_history.json")
+            if os.path.exists(history_path):
+                with open(history_path, "r", encoding="utf-8") as f:
+                    hist_data = json.load(f)
+
+                def _deser_hist(entries):
+                    result = []
+                    for entry in entries:
+                        e = dict(entry)
+                        e["shape_data"] = _deserialize_shape(entry["shape_data"])
+                        result.append(e)
+                    return result
+
+                hist_ver = hist_data.get("version", 1) if isinstance(hist_data, dict) else 1
+                if isinstance(hist_data, list):
+                    self._spaces[0]["pages"][0]["shape_history"] = _deser_hist(hist_data)
+                elif hist_ver >= 3:
+                    for si, sp_hist in enumerate(hist_data.get("spaces", [])):
+                        if si < len(self._spaces):
+                            for pi, page_hist in enumerate(sp_hist):
+                                if pi < len(self._spaces[si]["pages"]):
+                                    self._spaces[si]["pages"][pi]["shape_history"] = _deser_hist(page_hist)
+                else:
+                    for i, page_hist in enumerate(hist_data.get("pages", [])):
+                        if i < len(self._spaces[0]["pages"]):
+                            self._spaces[0]["pages"][i]["shape_history"] = _deser_hist(page_hist)
+
+            color_hex = payload.get("current_shape_color", "#000000")
+            self.current_shape_color = QColor(color_hex)
+
+            self._restore_page(self._current_page_idx)
+            self.drawing_area.set_shape_color(self.current_shape_color)
+            self._side_menu.set_accent_color(self.current_shape_color)
+
+            self.current_canvas_file = file_path
+            self._add_to_recent(file_path)
+            self.drawing_area.undo_stack.clear()
+            self.drawing_area.redo_stack.clear()
+            self.drawing_area.update()
+            self.refresh_history_list()
+            self._sync_page_ui()
+
         except Exception as e:
-            QMessageBox.critical(self, "Save Error", f"Failed to save canvas:\n{e}")
+            print(f"Error opening canvas: {e}")
+            self.custom_tooltip.show_tooltip(f"Failed to open canvas: {str(e)[:40]}", duration=3000)
         finally:
             try:
-                size_bytes = os.path.getsize(self.current_canvas_file)
+                size_bytes = os.path.getsize(file_path)
             except OSError:
                 size_bytes = 0
             delay_ms = int(size_bytes / 1000 + 5000)
-            QTimer.singleShot(delay_ms, self._loading_overlay.hide_overlay)
+            if hasattr(self, '_loading_overlay') and self._loading_overlay:
+                QTimer.singleShot(delay_ms, self._loading_overlay.hide_overlay)
 
     def _auto_save_tick(self):
         # Called every 30 seconds to auto-save
@@ -5644,7 +6564,7 @@ class UIMode(QWidget):
             self._core_save_canvas(file_path)
             
             # Show success message on status overlay
-            self.drawing_area.show_status_overlay("Auto-saved ✓", duration=2000)
+            self.drawing_area.show_status_overlay("File auto saved", duration=2000)
         except Exception as e:
             # Show error briefly
             self.drawing_area.show_status_overlay(f"Auto-save failed: {str(e)[:30]}", duration=3000)
@@ -5655,7 +6575,7 @@ class UIMode(QWidget):
     def open_canvas(self, file_path=None):
         if not file_path:
             file_path, _ = QFileDialog.getOpenFileName(
-                self, "Open Canvas", "", "UI Canvas (*.ldsu)"
+                self, "Open Canvas", "", "LDS File UIMode (*.ldsu)"
             )
         if not file_path:
             return
@@ -5667,167 +6587,92 @@ class UIMode(QWidget):
         
         # Open immediately (do not delay opening itself)
         QTimer.singleShot(50, lambda: self._do_open_canvas(file_path))
-
-    def _do_open_canvas(self, file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-
-            da = self.drawing_area
-            da.shapes = [_deserialize_shape(s) for s in payload["shapes"]]
-            da.eraser_mask = _deserialize_pixmap(payload["eraser_mask"])
-            da.eraser_strokes = [
-                [QPoint(*p) for p in stroke]
-                for stroke in payload["eraser_strokes"]
-            ]
-            da.scale_factor = payload.get("scale_factor", 1.0)
-            da.zoom_percent = payload.get("zoom_percent", 0)
-            pan = payload.get("pan_offset", [0, 0])
-            da.pan_offset = QPoint(pan[0], pan[1])
-            da.tool_sizes = payload.get("tool_sizes", da.tool_sizes)
-            da.selected_shape_index = None
-
-            color_hex = payload.get("current_shape_color", "#000000")
-            self.current_shape_color = QColor(color_hex)
-            self.drawing_area.set_shape_color(self.current_shape_color)
-            self._side_menu.set_accent_color(self.current_shape_color)
-
-            project_folder = os.path.dirname(file_path)
-            history_path = os.path.join(project_folder, "config", "shape_history.json")
-            if os.path.exists(history_path):
-                with open(history_path, "r", encoding="utf-8") as f:
-                    history_raw = json.load(f)
-                da.shape_history = []
-                for entry in history_raw:
-                    e = dict(entry)
-                    e["shape_data"] = _deserialize_shape(entry["shape_data"])
-                    da.shape_history.append(e)
-            else:
-                da.shape_history = []
-
-            self.current_canvas_file = file_path
-            da.undo_stack.clear()
-            da.redo_stack.clear()
-            da.update()
-            self.refresh_history_list()
-        
-        except Exception as e:
-            print(f"Error opening canvas: {e}")
-            # Optionally show a message box here to inform the user
-            QMessageBox.critical(self, "Error", f"Failed to open canvas:\n{e}")
-        finally:
-            try:
-                size_bytes = os.path.getsize(file_path)
-            except OSError:
-                size_bytes = 0
-            delay_ms = int(size_bytes / 1000 + 5000)
-            if hasattr(self, '_loading_overlay') and self._loading_overlay:
-                QTimer.singleShot(delay_ms, self._loading_overlay.hide_overlay)
             
-
     def create_file_checkpoint(self):
         if not self.current_canvas_file:
-            QMessageBox.warning(self, "No File", "Please save a file first before creating checkpoints.")
+            self.custom_tooltip.show_tooltip("Save a file first before creating checkpoints.", duration=3000)
             return
 
+        accent = self.current_shape_color.name()
+        darker = self.current_shape_color.darker(120).name()
+
         dialog = QDialog(self)
-        dialog.setWindowTitle("Create Checkpoint")
-        dialog.setFixedSize(300, 150)
+        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dialog.setModal(True)
+        dialog.setFixedSize(320, 210)
+        dialog.setStyleSheet("background: white; border-radius: 12px; border: 2px solid #222;")
 
         layout = QVBoxLayout(dialog)
-        label = QLabel("Checkpoint Name:")
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        drag_bar = DraggableBar(dialog)
+        layout.addWidget(drag_bar)
+
+        title = QLabel("Create Checkpoint")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 14pt; font-weight: bold; border: none;")
+        layout.addWidget(title)
+
         input_field = QLineEdit()
+        input_field.setMaxLength(20)
         input_field.setPlaceholderText("e.g., First Draft")
-
-        btn_layout = QHBoxLayout()
-        ok_btn = QPushButton("Create")
-        cancel_btn = QPushButton("Cancel")
-
-        btn_layout.addWidget(ok_btn)
-        btn_layout.addWidget(cancel_btn)
-
-        layout.addWidget(label)
+        input_field.setFixedHeight(36)
+        input_field.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 11pt; border: none;
+                border-bottom: 2px solid #ddd; background: transparent; padding: 4px 6px;
+            }}
+            QLineEdit:focus {{ border-bottom: 2px solid {accent}; }}
+        """)
         layout.addWidget(input_field)
-        layout.addLayout(btn_layout)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        ok_btn = QPushButton("Create")
+        ok_btn.setFixedHeight(34)
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {accent}; color: white; border: none;
+                font-weight: bold; border-radius: 6px; font-size: 11pt; padding: 0 20px;
+            }}
+            QPushButton:hover {{ background: {darker}; }}
+        """)
+        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(34)
+        cancel_btn.setStyleSheet("""
+            QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
+            QPushButton:hover { background: #ddd; }
+        """)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        btn_row.addWidget(ok_btn)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
 
         def on_create():
             name = input_field.text().strip()
             if not name:
-                QMessageBox.warning(dialog, "Invalid", "Checkpoint name cannot be empty.")
+                input_field.setStyleSheet("""
+                    QLineEdit {
+                        font-size: 11pt; border: none;
+                        border-bottom: 2px solid #ff3300; background: transparent; padding: 4px 6px;
+                    }
+                """)
+                input_field.setPlaceholderText("Name cannot be empty!")
                 return
             dialog.accept()
             self._save_checkpoint(name)
 
         ok_btn.clicked.connect(on_create)
         cancel_btn.clicked.connect(dialog.reject)
+        input_field.returnPressed.connect(on_create)
         dialog.exec()
     
-    def _save_checkpoint(self, checkpoint_name):
-        try:
-            # Ensure checkpoints directory exists
-            history_dir = os.path.join(os.path.dirname(self.current_canvas_file), "history")
-            os.makedirs(history_dir, exist_ok=True)
-
-            # Find next checkpoint number
-            existing = [f for f in os.listdir(history_dir) if f.startswith("checkpoint_") and f.endswith(".json")]
-            next_num = len(existing) + 1
-
-            checkpoint_name_file = f"checkpoint_{next_num}"
-            config_path = os.path.join(history_dir, f"{checkpoint_name_file}.json")
-            meta_path = os.path.join(history_dir, f"{checkpoint_name_file}.meta")
-            png_path = os.path.join(history_dir, f"{checkpoint_name_file}.png")
-
-            # Save canvas state
-            self._core_save_canvas(config_path)
-
-            # Save metadata
-            meta_data = {
-                "name": checkpoint_name,
-                "timestamp": datetime.now().isoformat(),
-                "source_file": os.path.basename(self.current_canvas_file)
-            }
-            with open(meta_path, "w") as f:
-                json.dump(meta_data, f)
-
-            # Save thumbnail
-            pixmap = self._capture_drawing_area_snapshot()
-            if pixmap:
-                pixmap.save(png_path, "PNG")
-
-            self.refresh_history_list()
-            QMessageBox.information(self, "Success", f"Checkpoint '{checkpoint_name}' created.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to create checkpoint: {str(e)}")
-    
-    def _load_checkpoint(self, checkpoint_name):
-        try:
-            history_dir = os.path.join(os.path.dirname(self.current_canvas_file), "history")
-            config_path = os.path.join(history_dir, f"{checkpoint_name}.json")
-
-            if not os.path.exists(config_path):
-                QMessageBox.critical(self, "Error", f"Checkpoint file not found: {config_path}")
-                return
-
-            self._do_open_canvas(config_path)
-            QMessageBox.information(self, "Loaded", f"Checkpoint '{checkpoint_name}' loaded.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load checkpoint: {str(e)}")
-    
-    def _delete_checkpoint(self, checkpoint_name):
-        try:
-            history_dir = os.path.join(os.path.dirname(self.current_canvas_file), "history")
-            config_path = os.path.join(history_dir, f"{checkpoint_name}.json")
-            meta_path = os.path.join(history_dir, f"{checkpoint_name}.meta")
-            png_path = os.path.join(history_dir, f"{checkpoint_name}.png")
-
-            for path in [config_path, meta_path, png_path]:
-                if os.path.exists(path):
-                    os.remove(path)
-
-            self.refresh_history_list()
-            QMessageBox.information(self, "Deleted", f"Checkpoint '{checkpoint_name}' deleted.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to delete checkpoint: {str(e)}")
         
     def _capture_drawing_area_snapshot(self):
         try:
@@ -5840,61 +6685,1252 @@ class UIMode(QWidget):
         except Exception:
             return None   
 
+    def _save_checkpoint(self, checkpoint_name):
+        try:
+            project_folder = os.path.dirname(self.current_canvas_file)
+            history_dir = os.path.join(project_folder, "config", "history")
+            os.makedirs(history_dir, exist_ok=True)
+
+            # Find next checkpoint number
+            existing = [f for f in os.listdir(history_dir) if f.startswith("checkpoint_") and f.endswith(".json")]
+            next_num = len(existing) + 1
+            checkpoint_id = f"checkpoint_{next_num}"
+
+            json_path = os.path.join(history_dir, f"{checkpoint_id}.json")
+            png_path = os.path.join(history_dir, f"{checkpoint_id}.png")
+            meta_path = os.path.join(history_dir, f"{checkpoint_id}.meta")
+
+            # Build canvas payload directly
+            da = self.drawing_area
+            shapes_data = [_serialize_shape(s) for s in da.shapes]
+            eraser_mask_b64 = _serialize_pixmap(da.eraser_mask)
+            strokes_data = [[_serialize_qpoint(p) for p in stroke] for stroke in da.eraser_strokes]
+
+            self._snapshot_current_page()
+
+            def _ser_hist(entry):
+                e = dict(entry)
+                e["shape_data"] = _serialize_shape(entry["shape_data"])
+                return e
+
+            self._spaces[self._current_space_idx]["current_page"] = self._current_page_idx
+            payload = {
+                "version": 3,
+                "current_space": self._current_space_idx,
+                "current_shape_color": self.current_shape_color.name(),
+                "spaces": [
+                    {
+                        "name": sp["name"],
+                        "current_page": sp["current_page"],
+                        "pages": [_serialize_page_state(p) for p in sp["pages"]],
+                    }
+                    for sp in self._spaces
+                ],
+            }
+            
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+
+            # Save metadata + shape_history
+            def _serialize_history_entry(entry):
+                e = dict(entry)
+                e["shape_data"] = _serialize_shape(entry["shape_data"])
+                return e
+
+            meta_data = {
+                "name":          checkpoint_name,
+                "timestamp":     datetime.now().isoformat(),
+                "source_file":   os.path.basename(self.current_canvas_file),
+                "space_histories": [
+                    [[_ser_hist(e) for e in p["shape_history"]] for p in sp["pages"]]
+                    for sp in self._spaces
+                ],
+            }
+            
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta_data, f, indent=2)
+
+            # Save thumbnail
+            pixmap = self._capture_drawing_area_snapshot()
+            if pixmap:
+                pixmap.save(png_path, "PNG")
+
+            self.refresh_history_list()
+            self.custom_tooltip.show_tooltip(f"Checkpoint '{checkpoint_name}' saved", duration=2500)
+        except Exception as e:
+            self.custom_tooltip.show_tooltip(f"Checkpoint failed: {str(e)[:40]}", duration=3000)
+
+    def _load_checkpoint(self, checkpoint_name):
+        try:
+            history_dir = os.path.join(os.path.dirname(self.current_canvas_file), "config", "history")
+            json_path = os.path.join(history_dir, f"{checkpoint_name}.json")
+            meta_path = os.path.join(history_dir, f"{checkpoint_name}.meta")
+
+            if not os.path.exists(json_path):
+                self.custom_tooltip.show_tooltip(f"Checkpoint file not found", duration=3000)
+                return
+
+            with open(json_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+
+            da = self.drawing_area
+            version = payload.get("version", 1)
+
+            if version >= 3:
+                self._spaces = []
+                for sp_data in payload.get("spaces", []):
+                    pages = [_deserialize_page_state(pd, da.a4_size) for pd in sp_data["pages"]]
+                    self._spaces.append({
+                        "name": sp_data.get("name", "Space 1"),
+                        "current_page": sp_data.get("current_page", 0),
+                        "pages": pages,
+                    })
+                self._current_space_idx = payload.get("current_space", 0)
+                self._current_page_idx  = self._spaces[self._current_space_idx]["current_page"]
+            elif version >= 2:
+                pages = [_deserialize_page_state(pd, da.a4_size) for pd in payload["pages"]]
+                cp    = payload.get("current_page", 0)
+                self._spaces = [{"name": "Space 1", "current_page": cp, "pages": pages}]
+                self._current_space_idx = 0
+                self._current_page_idx  = cp
+            else:
+                state = _deserialize_page_state({
+                    "name":           "Page 1",
+                    "shapes":         payload["shapes"],
+                    "eraser_mask":    payload["eraser_mask"],
+                    "eraser_strokes": payload["eraser_strokes"],
+                    "scale_factor":   payload.get("scale_factor", 1.0),
+                    "zoom_percent":   payload.get("zoom_percent", 0),
+                    "pan_offset":     payload.get("pan_offset", [0, 0]),
+                    "tool_sizes":     payload.get("tool_sizes", {}),
+                }, da.a4_size)
+                self._spaces = [{"name": "Space 1", "current_page": 0, "pages": [state]}]
+                self._current_space_idx = 0
+                self._current_page_idx  = 0
+
+            if os.path.exists(meta_path):
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                def _deser_hist(entries):
+                    result = []
+                    for entry in entries:
+                        e = dict(entry)
+                        e["shape_data"] = _deserialize_shape(entry["shape_data"])
+                        result.append(e)
+                    return result
+                # v3 checkpoints use space_histories, older ones use page_histories
+                if "space_histories" in meta:
+                    for si, sp_hist in enumerate(meta["space_histories"]):
+                        if si < len(self._spaces):
+                            for pi, page_hist in enumerate(sp_hist):
+                                if pi < len(self._spaces[si]["pages"]):
+                                    self._spaces[si]["pages"][pi]["shape_history"] = _deser_hist(page_hist)
+                else:
+                    for i, page_hist in enumerate(meta.get("page_histories", [])):
+                        if i < len(self._spaces[0]["pages"]):
+                            self._spaces[0]["pages"][i]["shape_history"] = _deser_hist(page_hist)
+
+            color_hex = payload.get("current_shape_color", "#000000")
+            self.current_shape_color = QColor(color_hex)
+            self._restore_page(self._current_page_idx)
+            self.drawing_area.set_shape_color(self.current_shape_color)
+            self._side_menu.set_accent_color(self.current_shape_color)
+            da.undo_stack.clear()
+            da.redo_stack.clear()
+            da.update()
+            self._sync_page_ui()
+            self.custom_tooltip.show_tooltip(f"Checkpoint '{checkpoint_name}' loaded", duration=2500)
+            
+        except Exception as e:
+            self.custom_tooltip.show_tooltip(f"Failed to load checkpoint: {str(e)[:40]}", duration=3000)
+
+    def _delete_checkpoint(self, checkpoint_name):
+        # Read display name from meta
+        try:
+            history_dir = os.path.join(os.path.dirname(self.current_canvas_file), "config", "history")
+            meta_path = os.path.join(history_dir, f"{checkpoint_name}.meta")
+            with open(meta_path, "r", encoding="utf-8") as f:
+                display_name = json.load(f).get("name", checkpoint_name)
+        except Exception:
+            display_name = checkpoint_name
+
+        accent = self.current_shape_color.name()
+
+        dialog = QDialog(self)
+        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dialog.setModal(True)
+        dialog.setFixedSize(320, 185)
+        dialog.setStyleSheet("background: white; border-radius: 12px; border: 2px solid #222;")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        drag_bar = DraggableBar(dialog)
+        layout.addWidget(drag_bar)
+
+        title = QLabel("Delete Checkpoint")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 14pt; font-weight: bold; border: none;")
+        layout.addWidget(title)
+
+        msg = QLabel(f"Delete <b>{display_name}</b>?<br><span style='color:#888;font-size:9pt;'>This cannot be undone.</span>")
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg.setWordWrap(True)
+        msg.setStyleSheet("font-size: 10pt; color: #444; border: none;")
+        layout.addWidget(msg)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        yes_btn = QPushButton("Delete")
+        yes_btn.setFixedHeight(34)
+        yes_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #cc2200; color: white; border: none;
+                font-weight: bold; border-radius: 6px; font-size: 11pt; padding: 0 20px;
+            }}
+            QPushButton:hover {{ background: #aa1a00; }}
+        """)
+        yes_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        no_btn = QPushButton("Cancel")
+        no_btn.setFixedHeight(34)
+        no_btn.setStyleSheet("""
+            QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
+            QPushButton:hover { background: #ddd; }
+        """)
+        no_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        yes_btn.clicked.connect(dialog.accept)
+        no_btn.clicked.connect(dialog.reject)
+        btn_row.addWidget(yes_btn)
+        btn_row.addWidget(no_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        try:
+            for ext in [".json", ".png", ".meta"]:
+                path = os.path.join(history_dir, f"{checkpoint_name}{ext}")
+                if os.path.exists(path):
+                    os.remove(path)
+            self.refresh_history_list()
+            self.custom_tooltip.show_tooltip(f"Checkpoint '{display_name}' deleted", duration=2500)
+        except Exception as e:
+            self.custom_tooltip.show_tooltip(f"Delete failed: {str(e)[:40]}", duration=3000)
+            
+    def _confirm_and_load(self, checkpoint_name):
+        accent = self.current_shape_color.name()
+        darker = self.current_shape_color.darker(120).name()
+
+        dialog = QDialog(self)
+        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dialog.setModal(True)
+        dialog.setFixedSize(320, 185)
+        dialog.setStyleSheet("background: white; border-radius: 12px; border: 2px solid #222;")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        drag_bar = DraggableBar(dialog)
+        layout.addWidget(drag_bar)
+
+        title = QLabel("Load Checkpoint")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 14pt; font-weight: bold; border: none;")
+        layout.addWidget(title)
+
+        msg = QLabel(f"Load <b>{checkpoint_name}</b>?<br><span style='color:#888;font-size:9pt;'>This will replace the current canvas.</span>")
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg.setWordWrap(True)
+        msg.setStyleSheet("font-size: 10pt; color: #444; border: none;")
+        layout.addWidget(msg)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        yes_btn = QPushButton("Load")
+        yes_btn.setFixedHeight(34)
+        yes_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {accent}; color: white; border: none;
+                font-weight: bold; border-radius: 6px; font-size: 11pt; padding: 0 20px;
+            }}
+            QPushButton:hover {{ background: {darker}; }}
+        """)
+        yes_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        no_btn = QPushButton("Cancel")
+        no_btn.setFixedHeight(34)
+        no_btn.setStyleSheet("""
+            QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
+            QPushButton:hover { background: #ddd; }
+        """)
+        no_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        yes_btn.clicked.connect(dialog.accept)
+        no_btn.clicked.connect(dialog.reject)
+
+        btn_row.addWidget(yes_btn)
+        btn_row.addWidget(no_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._load_checkpoint(checkpoint_name)   
+            
+    def _show_checkpoint_preview(self, checkpoint_id, meta, png_path):
+        existing = self._checkpoint_preview_dialogs.get(checkpoint_id)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+    
+        dlg = CheckpointPreviewDialog(
+            self,
+            checkpoint_id=checkpoint_id,
+            meta=meta,
+            png_path=png_path,
+            on_rename=lambda name, cp=checkpoint_id: self._rename_checkpoint(cp, name),
+            accent=self.current_shape_color.name(),
+        )
+        dlg.move(self.geometry().center() - dlg.rect().center())
+        dlg.finished.connect(lambda _, cp=checkpoint_id: self._checkpoint_preview_dialogs.pop(cp, None))
+        self._checkpoint_preview_dialogs[checkpoint_id] = dlg
+        dlg.show()
+
+    def _rename_checkpoint(self, checkpoint_id, new_name):
+        try:
+            history_dir = os.path.join(os.path.dirname(self.current_canvas_file), "config", "history")
+            meta_path = os.path.join(history_dir, f"{checkpoint_id}.meta")
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            meta["name"] = new_name
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+            self.refresh_history_list()
+        except Exception as e:
+            self.custom_tooltip.show_tooltip(f"Rename failed: {str(e)[:40]}", duration=3000)       
+
     def refresh_history_list(self):
         if not self.current_canvas_file:
             return
 
-        history_dir = os.path.join(os.path.dirname(self.current_canvas_file), "history")
+        history_dir = os.path.join(os.path.dirname(self.current_canvas_file), "config", "history")
+        accent = self.current_shape_color.name()
 
-        # Clear existing items
         while self._side_menu.checkpoint_list_layout.count() > 1:
-            self._side_menu.checkpoint_list_layout.takeAt(0)
-
+            item = self._side_menu.checkpoint_list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+                
+        self._side_menu._checkpoint_filters.clear()
         if not os.path.exists(history_dir):
             return
 
-        # Get all checkpoints
-        meta_files = sorted([f for f in os.listdir(history_dir) if f.endswith(".meta")])
-
+        meta_files = sorted(
+            [f for f in os.listdir(history_dir) if f.endswith(".meta")],
+            key=lambda f: int(f.replace("checkpoint_", "").replace(".meta", "")) if f.replace("checkpoint_", "").replace(".meta", "").isdigit() else 0,
+            reverse=True
+        )
         if not meta_files:
             return
 
         for meta_file in meta_files:
-            checkpoint_name = meta_file.replace(".meta", "")
+            checkpoint_id = meta_file.replace(".meta", "")
             meta_path = os.path.join(history_dir, meta_file)
+            png_path = os.path.join(history_dir, f"{checkpoint_id}.png")
 
             try:
-                with open(meta_path, "r") as f:
+                with open(meta_path, "r", encoding="utf-8") as f:
                     meta = json.load(f)
-                    display_name = meta.get("name", checkpoint_name)
-                    timestamp = meta.get("timestamp", "")
-            except:
-                display_name = checkpoint_name
+                display_name = meta.get("name", checkpoint_id)
+                timestamp = meta.get("timestamp", "")
+            except Exception:
+                display_name = checkpoint_id
                 timestamp = ""
 
-            # Create checkpoint item
             item_widget = QWidget()
+            item_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            item_widget.setStyleSheet("background: #f9f9f9; border-radius: 4px;")
+            item_widget.setCursor(Qt.CursorShape.PointingHandCursor)
             item_layout = QHBoxLayout(item_widget)
-            item_layout.setContentsMargins(4, 4, 4, 4)
+            item_layout.setContentsMargins(6, 6, 6, 6)
+            item_layout.setSpacing(8)
 
-            label = QLabel(f"{display_name}\n{timestamp[:10]}")
-            label.setStyleSheet("font-size: 9pt;")
+            # Thumbnail
+            thumb_label = QLabel()
+            thumb_label.setFixedSize(64, 46)
+            thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            thumb_label.setStyleSheet("border: none; background: #e0e0e0; border-radius: 2px;")
+            if os.path.exists(png_path):
+                pixmap = QPixmap(png_path)
+                if not pixmap.isNull():
+                    thumb_label.setPixmap(
+                        pixmap.scaled(64, 46, Qt.AspectRatioMode.KeepAspectRatio,
+                                      Qt.TransformationMode.SmoothTransformation)
+                    )
+            else:
+                thumb_label.setText("?")
+                thumb_label.setStyleSheet(
+                    "border: none; background: #e0e0e0; color: #999; font-size: 9pt; border-radius: 2px;"
+                )
+            item_layout.addWidget(thumb_label)
 
-            load_btn = QPushButton("Load")
-            load_btn.setFixedWidth(50)
-            delete_btn = QPushButton("Delete")
-            delete_btn.setFixedWidth(60)
-
-            load_btn.clicked.connect(lambda checked, cp=checkpoint_name: self._load_checkpoint(cp))
-            delete_btn.clicked.connect(lambda checked, cp=checkpoint_name: self._delete_checkpoint(cp))
-
-            item_layout.addWidget(label)
+            # Name + date
+            info_layout = QVBoxLayout()
+            info_layout.setContentsMargins(0, 0, 0, 0)
+            info_layout.setSpacing(2)
+            name_label = QLabel(display_name)
+            name_label.setStyleSheet("border: none; background: transparent; font-size: 9pt; font-weight: bold;")
+            date_label = QLabel(timestamp[:10])
+            date_label.setStyleSheet("border: none; background: transparent; font-size: 8pt; color: #999;")
+            info_layout.addWidget(name_label)
+            info_layout.addWidget(date_label)
+            item_layout.addLayout(info_layout)
             item_layout.addStretch()
-            item_layout.addWidget(load_btn)
+
+            # Delete button only (no Load button)
+            delete_btn = QPushButton("✕")
+            delete_btn.setFixedSize(22, 22)
+            delete_btn.setStyleSheet(f"""
+                QPushButton {{ border: none; color: #aaa; font-size: 11pt; background: transparent; }}
+                QPushButton:hover {{ color: #ff3300; }}
+            """)
+            delete_btn.clicked.connect(lambda checked, cp=checkpoint_id: self._delete_checkpoint(cp))
             item_layout.addWidget(delete_btn)
 
-            self._side_menu.checkpoint_list_layout.insertWidget(self._side_menu.checkpoint_list_layout.count() - 1, item_widget)            
+            f = _CheckpointItemFilter(
+                item_widget, accent,
+                lambda cp=checkpoint_id: self._confirm_and_load(cp),
+                on_click=lambda cp=checkpoint_id, m=meta, pp=png_path: (
+                    self.custom_tooltip.show_tooltip("Double-click to load", 1500),
+                    self._show_checkpoint_preview(cp, m, pp)
+                )
+            )
+            self._side_menu._checkpoint_filters.append(f)
 
+            self._side_menu.checkpoint_list_layout.insertWidget(
+                self._side_menu.checkpoint_list_layout.count() - 1, item_widget
+            )
+    
+    def _load_recent_files(self):
+        try:
+            if _RECENT_FILES_PATH.exists():
+                with open(_RECENT_FILES_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return [p for p in data if os.path.exists(p)]
+        except Exception:
+            pass
+        return []
+
+    def _save_recent_files(self):
+        try:
+            _RECENT_FILES_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(_RECENT_FILES_PATH, "w", encoding="utf-8") as f:
+                json.dump(self._recent_files, f, indent=2)
+        except Exception:
+            pass
+        
+    def _add_to_recent(self, file_path):
+        file_path = str(file_path)
+        if file_path in self._recent_files:
+            self._recent_files.remove(file_path)
+        self._recent_files.insert(0, file_path)
+        self._recent_files = self._recent_files[:5]
+        self._save_recent_files()
+        self._side_menu.refresh_recent_list(self._recent_files, on_open=self.open_canvas, tooltip_fn=self.custom_tooltip.show_tooltip)
+
+    def _snapshot_current_page(self):
+        da = self.drawing_area
+        state = self._page_states[self._current_page_idx]
+
+        def _copy_shapes(shapes):
+            return [da._copy_single_shape(s) for s in shapes]
+
+        def _copy_stack_entry(entry):
+            shapes, eraser_mask, eraser_strokes = entry
+            return (
+                _copy_shapes(shapes),
+                eraser_mask.copy(),
+                [list(stroke) for stroke in eraser_strokes],
+            )
+
+        def _copy_history_entry(entry):
+            e = dict(entry)
+            e["shape_data"] = da._copy_single_shape(entry["shape_data"])
+            return e
+
+        state["shapes"]         = _copy_shapes(da.shapes)
+        state["eraser_mask"]    = da.eraser_mask.copy()
+        state["eraser_strokes"] = [list(stroke) for stroke in da.eraser_strokes]
+        state["scale_factor"]   = da.scale_factor
+        state["zoom_percent"]   = da.zoom_percent
+        state["pan_offset"]     = QPoint(da.pan_offset)
+        state["tool_sizes"]     = dict(da.tool_sizes)
+        state["shape_history"]  = [_copy_history_entry(e) for e in da.shape_history]
+        state["undo_stack"]     = [_copy_stack_entry(e) for e in da.undo_stack]
+        state["redo_stack"]     = [_copy_stack_entry(e) for e in da.redo_stack]
+        
+        # Capture thumbnail for side-panel display
+        snap = self._capture_drawing_area_snapshot()
+        if snap:
+            state["thumbnail"] = snap.scaled(
+                120, 80,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+
+    def _restore_page(self, idx: int):
+        da = self.drawing_area
+        state = self._page_states[idx]
+
+        def _copy_shapes(shapes):
+            return [da._copy_single_shape(s) for s in shapes]
+
+        def _copy_stack_entry(entry):
+            shapes, eraser_mask, eraser_strokes = entry
+            return (
+                _copy_shapes(shapes),
+                eraser_mask.copy(),
+                [list(stroke) for stroke in eraser_strokes],
+            )
+
+        def _copy_history_entry(entry):
+            e = dict(entry)
+            e["shape_data"] = da._copy_single_shape(entry["shape_data"])
+            return e
+
+        da.shapes         = _copy_shapes(state["shapes"])
+        da.eraser_mask    = state["eraser_mask"].copy()
+        da.eraser_strokes = [list(stroke) for stroke in state["eraser_strokes"]]
+        da.scale_factor   = state["scale_factor"]
+        da.zoom_percent   = state["zoom_percent"]
+        da.pan_offset     = QPoint(state["pan_offset"])
+        da.tool_sizes     = dict(state["tool_sizes"])
+        da.shape_history  = [_copy_history_entry(e) for e in state["shape_history"]]
+        da.undo_stack     = [_copy_stack_entry(e) for e in state["undo_stack"]]
+        da.redo_stack     = [_copy_stack_entry(e) for e in state["redo_stack"]]
+        da.selected_shape_index = None
+        da.preview_shape  = None
+        da.preview_start  = None
+        da.preview_end    = None
+        da.clamp_pan_offset()
+        da.update()
+
+    def _add_space(self):
+        space_num = len(self._spaces) + 1
+        default_name = f"Space {space_num}"
+        accent = self.current_shape_color.name()
+        darker = self.current_shape_color.darker(120).name()
+
+        dialog = QDialog(self)
+        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dialog.setModal(True)
+        dialog.setFixedSize(320, 210)
+        dialog.setStyleSheet("background: white; border-radius: 12px; border: 2px solid #222;")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        drag_bar = DraggableBar(dialog)
+        layout.addWidget(drag_bar)
+
+        title = QLabel("New Space")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 14pt; font-weight: bold; border: none;")
+        layout.addWidget(title)
+
+        input_field = QLineEdit(default_name)
+        input_field.setMaxLength(20)
+        input_field.selectAll()
+        input_field.setFixedHeight(36)
+        input_field.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 11pt; border: none;
+                border-bottom: 2px solid #ddd; background: transparent; padding: 4px 6px;
+            }}
+            QLineEdit:focus {{ border-bottom: 2px solid {accent}; }}
+        """)
+        layout.addWidget(input_field)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        ok_btn = QPushButton("Create")
+        ok_btn.setFixedHeight(34)
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {accent}; color: white; border: none;
+                font-weight: bold; border-radius: 6px; font-size: 11pt; padding: 0 20px;
+            }}
+            QPushButton:hover {{ background: {darker}; }}
+        """)
+        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(34)
+        cancel_btn.setStyleSheet("""
+            QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
+            QPushButton:hover { background: #ddd; }
+        """)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        def on_create():
+            name = input_field.text().strip()
+            if not name:
+                input_field.setStyleSheet("""
+                    QLineEdit {
+                        font-size: 11pt; border: none;
+                        border-bottom: 2px solid #ff3300; background: transparent; padding: 4px 6px;
+                    }
+                """)
+                input_field.setPlaceholderText("Name cannot be empty!")
+                return
+            dialog.accept()
+
+        ok_btn.clicked.connect(on_create)
+        cancel_btn.clicked.connect(dialog.reject)
+        input_field.returnPressed.connect(on_create)
+
+        btn_row.addWidget(ok_btn)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        space_name = input_field.text().strip()
+
+        # Original _add_space logic continues here, using space_name instead of default_name
+        self._snapshot_current_page()
+        self._spaces[self._current_space_idx]["current_page"] = self._current_page_idx
+        em = QPixmap(self.drawing_area.a4_size)
+        em.fill(Qt.GlobalColor.transparent)
+        self._spaces.append({
+            "name": space_name,   # <-- user-provided name
+            "current_page": 0,
+            "pages": [{
+                "name": "Page 1",
+                "shapes": [],
+                "eraser_mask": em,
+                "eraser_strokes": [],
+                "scale_factor": 1.0,
+                "zoom_percent": 0,
+                "pan_offset": QPoint(0, 0),
+                "tool_sizes": dict(self.drawing_area.tool_last_sizes),
+                "shape_history": [],
+                "undo_stack": [],
+                "redo_stack": [],
+                "thumbnail": None,
+                "created": datetime.now().strftime("%Y-%m-%d"),
+            }]
+        })
+        self._current_space_idx = len(self._spaces) - 1
+        self._current_page_idx  = 0
+        self._restore_page(0)
+        self._sync_page_ui()
+
+    def _select_space(self, space_idx: int):
+        # Switch to a different space, restoring its last active page.
+        if space_idx == self._current_space_idx:
+            return
+        self._snapshot_current_page()
+        self._spaces[self._current_space_idx]["current_page"] = self._current_page_idx
+        self._current_space_idx = space_idx
+        self._current_page_idx  = self._spaces[space_idx]["current_page"]
+        self._restore_page(self._current_page_idx)
+        self._sync_page_ui()
+
+    def _add_page(self):
+        # Add a new page to the current space and switch to it.
+        self._snapshot_current_page()
+        cur_pages = self._spaces[self._current_space_idx]["pages"]
+        existing_nums = []
+        for p in cur_pages:
+            name = p.get("name", "")
+            if name.startswith("Page ") and name[5:].isdigit():
+                existing_nums.append(int(name[5:]))
+        page_num = max(existing_nums, default=0) + 1
+        em = QPixmap(self.drawing_area.a4_size)
+        em.fill(Qt.GlobalColor.transparent)
+        cur_pages.append({
+            "name": f"Page {page_num}",
+            "shapes": [],
+            "eraser_mask": em,
+            "eraser_strokes": [],
+            "scale_factor": 1.0,
+            "zoom_percent": 0,
+            "pan_offset": QPoint(0, 0),
+            "tool_sizes": dict(self.drawing_area.tool_last_sizes),
+            "shape_history": [],
+            "undo_stack": [],
+            "redo_stack": [],
+            "thumbnail": None,
+            "created": datetime.now().strftime("%Y-%m-%d"),
+        })
+        self._current_page_idx = len(cur_pages) - 1
+        self._restore_page(self._current_page_idx)
+        self._sync_page_ui()
+
+    def _select_page(self, page_idx: int):
+        # Switch pages within the current space.
+        if page_idx == self._current_page_idx:
+            return
+        self._snapshot_current_page()
+        self._current_page_idx = page_idx
+        self._restore_page(page_idx)
+        self._sync_page_ui()
+
+    def _select_page_in_space(self, space_idx: int, page_idx: int):
+        # Select a specific page in a specific space (called from side-panel thumbnails).
+        if space_idx != self._current_space_idx:
+            self._select_space(space_idx)
+        if page_idx != self._current_page_idx:
+            self._select_page(page_idx)
+
+    def _sync_page_ui(self):
+        # Refresh thumbnail for the currently active page before rendering the panel.
+        snap = self._capture_drawing_area_snapshot()
+        if snap:
+            self._page_states[self._current_page_idx]["thumbnail"] = snap.scaled(
+                120, 80,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        # Push current space/page state to PageBar and side panel.
+        cur_space  = self._spaces[self._current_space_idx]
+        
+        page_names = [p["name"] for p in cur_space["pages"]]
+        self.page_bar.set_pages(page_names, self._current_page_idx)
+        self._side_menu.refresh_spaces(
+            self._spaces,
+            self._current_space_idx,
+            self._current_page_idx,
+            on_space_selected=self._select_space,
+            on_page_selected=self._select_page_in_space,
+            on_delete_page=self._delete_page,
+            on_rename_page=self._rename_page,
+            tooltip_fn=self.custom_tooltip.show_tooltip,
+            on_rename_space=self._rename_space,
+            on_delete_space=self._delete_space,
+        )
+        
+    def _delete_page(self, space_idx: int, page_idx: int):
+        pages = self._spaces[space_idx]["pages"]
+        if len(pages) <= 1:
+            self.custom_tooltip.show_tooltip("Cannot delete the only page in a space", duration=2000)
+            return
+
+        page_name = pages[page_idx]["name"]
+        dialog = QDialog(self)
+        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dialog.setModal(True)
+        dialog.setFixedSize(320, 185)
+        dialog.setStyleSheet("background: white; border-radius: 12px; border: 2px solid #222;")
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+        drag_bar = DraggableBar(dialog)
+        layout.addWidget(drag_bar)
+        title = QLabel("Delete Page")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 14pt; font-weight: bold; border: none;")
+        layout.addWidget(title)
+        msg = QLabel(f"Delete <b>{page_name}</b>?<br><span style='color:#888;font-size:9pt;'>This cannot be undone.</span>")
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg.setWordWrap(True)
+        msg.setStyleSheet("font-size: 10pt; color: #444; border: none;")
+        layout.addWidget(msg)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        yes_btn = QPushButton("Delete")
+        yes_btn.setFixedHeight(34)
+        yes_btn.setStyleSheet("""
+            QPushButton { background: #cc2200; color: white; border: none;
+                font-weight: bold; border-radius: 6px; font-size: 11pt; padding: 0 20px; }
+            QPushButton:hover { background: #aa1a00; }
+        """)
+        yes_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        no_btn = QPushButton("Cancel")
+        no_btn.setFixedHeight(34)
+        no_btn.setStyleSheet("""
+            QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
+            QPushButton:hover { background: #ddd; }
+        """)
+        no_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        yes_btn.clicked.connect(dialog.accept)
+        no_btn.clicked.connect(dialog.reject)
+        btn_row.addWidget(yes_btn)
+        btn_row.addWidget(no_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        if space_idx == self._current_space_idx:
+            self._snapshot_current_page()
+            del pages[page_idx]
+            counter = 1
+            for p in pages:
+                name = p.get("name", "")
+                if name.startswith("Page ") and name[5:].isdigit():
+                    p["name"] = f"Page {counter}"
+                    counter += 1
+            if page_idx < self._current_page_idx:
+                new_idx = self._current_page_idx - 1
+            else:
+                new_idx = min(self._current_page_idx, len(pages) - 1)
+            self._current_page_idx = new_idx
+            self._spaces[space_idx]["current_page"] = new_idx
+            self._restore_page(new_idx)
+        else:
+            del pages[page_idx]
+            counter = 1
+            for p in pages:
+                name = p.get("name", "")
+                if name.startswith("Page ") and name[5:].isdigit():
+                    p["name"] = f"Page {counter}"
+                    counter += 1
+            stored = self._spaces[space_idx]["current_page"]
+            if stored >= len(pages):
+                self._spaces[space_idx]["current_page"] = len(pages) - 1
+        self._sync_page_ui()            
+
+    def _rename_page(self, space_idx: int, page_idx: int):
+        page = self._spaces[space_idx]["pages"][page_idx]
+        current_name = page["name"]
+        accent = self.current_shape_color.name()
+        darker = self.current_shape_color.darker(120).name()
+
+        dialog = QDialog(self)
+        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dialog.setModal(True)
+        dialog.setFixedSize(320, 210)
+        dialog.setStyleSheet("background: white; border-radius: 12px; border: 2px solid #222;")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        drag_bar = DraggableBar(dialog)
+        layout.addWidget(drag_bar)
+
+        title = QLabel("Rename Page")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 14pt; font-weight: bold; border: none;")
+        layout.addWidget(title)
+
+        input_field = QLineEdit(current_name)
+        input_field.setMaxLength(10)
+        input_field.selectAll()
+        input_field.setFixedHeight(36)
+        input_field.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 11pt; border: none;
+                border-bottom: 2px solid #ddd; background: transparent; padding: 4px 6px;
+            }}
+            QLineEdit:focus {{ border-bottom: 2px solid {accent}; }}
+        """)
+        layout.addWidget(input_field)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        ok_btn = QPushButton("Rename")
+        ok_btn.setFixedHeight(34)
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {accent}; color: white; border: none;
+                font-weight: bold; border-radius: 6px; font-size: 11pt; padding: 0 20px;
+            }}
+            QPushButton:hover {{ background: {darker}; }}
+        """)
+        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(34)
+        cancel_btn.setStyleSheet("""
+            QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
+            QPushButton:hover { background: #ddd; }
+        """)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        def on_rename():
+            name = input_field.text().strip()
+            if not name:
+                input_field.setStyleSheet("""
+                    QLineEdit {
+                        font-size: 11pt; border: none;
+                        border-bottom: 2px solid #ff3300; background: transparent; padding: 4px 6px;
+                    }
+                """)
+                input_field.setPlaceholderText("Name cannot be empty!")
+                return
+            dialog.accept()
+
+        ok_btn.clicked.connect(on_rename)
+        cancel_btn.clicked.connect(dialog.reject)
+        input_field.returnPressed.connect(on_rename)
+
+        btn_row.addWidget(ok_btn)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        page["name"] = input_field.text().strip()
+        # Renumber remaining default-named pages
+        pages = self._spaces[space_idx]["pages"]
+        counter = 1
+        for p in pages:
+            name = p.get("name", "")
+            if name.startswith("Page ") and name[5:].isdigit():
+                p["name"] = f"Page {counter}"
+                counter += 1
+        self._sync_page_ui()       
+        
+    def _rename_space(self, space_idx: int):
+        space = self._spaces[space_idx]
+        current_name = space["name"]
+        accent = self.current_shape_color.name()
+        darker = self.current_shape_color.darker(120).name()
+
+        dialog = QDialog(self)
+        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dialog.setModal(True)
+        dialog.setFixedSize(320, 240)
+        dialog.setStyleSheet("background: white; border-radius: 12px; border: 2px solid #222;")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        drag_bar = DraggableBar(dialog)
+        layout.addWidget(drag_bar)
+
+        title = QLabel("Space Options")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 14pt; font-weight: bold; border: none;")
+        layout.addWidget(title)
+
+        input_field = QLineEdit(current_name)
+        input_field.setMaxLength(20)
+        input_field.selectAll()
+        input_field.setFixedHeight(36)
+        input_field.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 11pt; border: none;
+                border-bottom: 2px solid #ddd; background: transparent; padding: 4px 6px;
+            }}
+            QLineEdit:focus {{ border-bottom: 2px solid {accent}; }}
+        """)
+        layout.addWidget(input_field)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        rename_btn = QPushButton("Rename")
+        rename_btn.setFixedHeight(34)
+        rename_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {accent}; color: white; border: none;
+                font-weight: bold; border-radius: 6px; font-size: 11pt; padding: 0 16px;
+            }}
+            QPushButton:hover {{ background: {darker}; }}
+        """)
+        rename_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        delete_btn = QPushButton("Delete")
+        delete_btn.setFixedHeight(34)
+        delete_btn.setStyleSheet("""
+            QPushButton { border: none; color: white; padding: 0 16px; border-radius: 6px;
+                background: #cc2200; font-weight: bold; font-size: 11pt; }
+            QPushButton:hover { background: #aa1a00; }
+        """)
+        delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(34)
+        cancel_btn.setStyleSheet("""
+            QPushButton { border: none; color: #222; padding: 0 12px; border-radius: 6px; background: #f0f0f0; }
+            QPushButton:hover { background: #ddd; }
+        """)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        _result = [None]
+
+        def on_rename():
+            name = input_field.text().strip()
+            if not name:
+                input_field.setStyleSheet("""
+                    QLineEdit {
+                        font-size: 11pt; border: none;
+                        border-bottom: 2px solid #ff3300; background: transparent; padding: 4px 6px;
+                    }
+                """)
+                input_field.setPlaceholderText("Name cannot be empty!")
+                return
+            _result[0] = "rename"
+            dialog.accept()
+
+        def on_delete():
+            _result[0] = "delete"
+            dialog.accept()
+
+        rename_btn.clicked.connect(on_rename)
+        delete_btn.clicked.connect(on_delete)
+        cancel_btn.clicked.connect(dialog.reject)
+        input_field.returnPressed.connect(on_rename)
+
+        btn_row.addWidget(rename_btn)
+        btn_row.addWidget(delete_btn)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        if _result[0] == "rename":
+            space["name"] = input_field.text().strip()
+            self._sync_page_ui()
+        elif _result[0] == "delete":
+            self._delete_space(space_idx)
+
+    def _delete_space(self, space_idx: int):
+        if len(self._spaces) <= 1:
+            self.custom_tooltip.show_tooltip("Cannot delete the only space", duration=2000)
+            return
+
+        space_name = self._spaces[space_idx]["name"]
+        page_count = len(self._spaces[space_idx]["pages"])
+        dialog = QDialog(self)
+        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dialog.setModal(True)
+        dialog.setFixedSize(320, 185)
+        dialog.setStyleSheet("background: white; border-radius: 12px; border: 2px solid #222;")
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+        drag_bar = DraggableBar(dialog)
+        layout.addWidget(drag_bar)
+        title = QLabel("Delete Space")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 14pt; font-weight: bold; border: none;")
+        layout.addWidget(title)
+        msg = QLabel(f"Delete <b>{space_name}</b> and all {page_count} page(s)?<br><span style='color:#888;font-size:9pt;'>This cannot be undone.</span>")
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg.setWordWrap(True)
+        msg.setStyleSheet("font-size: 10pt; color: #444; border: none;")
+        layout.addWidget(msg)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        yes_btn = QPushButton("Delete")
+        yes_btn.setFixedHeight(34)
+        yes_btn.setStyleSheet("""
+            QPushButton { background: #cc2200; color: white; border: none;
+                font-weight: bold; border-radius: 6px; font-size: 11pt; padding: 0 20px; }
+            QPushButton:hover { background: #aa1a00; }
+        """)
+        yes_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        no_btn = QPushButton("Cancel")
+        no_btn.setFixedHeight(34)
+        no_btn.setStyleSheet("""
+            QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
+            QPushButton:hover { background: #ddd; }
+        """)
+        no_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        yes_btn.clicked.connect(dialog.accept)
+        no_btn.clicked.connect(dialog.reject)
+        btn_row.addWidget(yes_btn)
+        btn_row.addWidget(no_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        self._snapshot_current_page()
+        del self._spaces[space_idx]
+        if self._current_space_idx >= len(self._spaces):
+            self._current_space_idx = len(self._spaces) - 1
+        self._current_page_idx = self._spaces[self._current_space_idx]["current_page"]
+        self._restore_page(self._current_page_idx)
+        self._sync_page_ui()
+
+class CheckpointPreviewDialog(QDialog):
+    def __init__(self, parent=None, checkpoint_id=None, meta=None, png_path=None, on_rename=None, accent="#ff6600"):
+        super().__init__(parent)
+        self._checkpoint_id = checkpoint_id
+        self._on_rename = on_rename
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setModal(False)
+        self.setFixedSize(320, 420)
+        self.setStyleSheet("background: white; border-radius: 12px; border: 2px solid #222;")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        self.draggable_bar = DraggableBar(self)
+        layout.addWidget(self.draggable_bar)
+
+        darker = QColor(accent).darker(120).name()
+        # Editable title
+        self._title_edit = QLineEdit(meta.get("name", checkpoint_id) if meta else (checkpoint_id or ""))
+        self._title_edit.setMaxLength(20)
+        self._title_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._title_edit.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 13pt; font-weight: bold; border: none;
+                border-bottom: 2px solid #ddd; background: transparent; padding: 4px;
+            }}
+            QLineEdit:focus {{ border-bottom: 2px solid {accent}; }}
+        """)
+        layout.addWidget(self._title_edit)
+
+        # Snapshot
+        snap_label = QLabel()
+        snap_label.setFixedSize(280, 175)
+        snap_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        snap_label.setStyleSheet("background: #f0f0f0; border-radius: 6px; border: 1px solid #ddd;")
+        if png_path and os.path.exists(png_path):
+            pixmap = QPixmap(png_path)
+            if not pixmap.isNull():
+                snap_label.setPixmap(
+                    pixmap.scaled(280, 175, Qt.AspectRatioMode.KeepAspectRatio,
+                                  Qt.TransformationMode.SmoothTransformation)
+                )
+        else:
+            snap_label.setText("No snapshot")
+            snap_label.setStyleSheet(
+                "background: #f0f0f0; border-radius: 6px; border: 1px solid #ddd; color: #999; font-size: 9pt;"
+            )
+        layout.addWidget(snap_label, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Date
+        timestamp = meta.get("timestamp", "") if meta else ""
+        formatted_date = ""
+        if timestamp:
+            try:
+                dt = datetime.fromisoformat(timestamp)
+                formatted_date = dt.strftime(f"[%Y-%m-%d %H:%M:%S][UIMode] {checkpoint_id}")
+            except Exception:
+                formatted_date = timestamp[:16]
+        date_label = QLabel(formatted_date)
+        date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        date_label.setStyleSheet("color: #999; font-size: 9pt; border: none;")
+        layout.addWidget(date_label)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        save_btn.setFixedHeight(32)
+        save_btn.setStyleSheet(f"""
+            QPushButton {{ border: none; color: #222; padding: 4px 18px; border-radius: 6px; background: #f0f0f0; }}
+            QPushButton:hover {{ background: {accent}; color: white; }}
+        """)
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        close_btn = QPushButton("Close")
+        close_btn.setFixedHeight(32)
+        close_btn.setStyleSheet("""
+            QPushButton { border: none; color: #222; padding: 4px 18px; border-radius: 6px; background: #f0f0f0; }
+            QPushButton:hover { background: #ddd; }
+        """)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        def on_save():
+            new_name = self._title_edit.text().strip()
+            if new_name and self._on_rename:
+                self._on_rename(new_name)
+            self.close()
+
+        save_btn.clicked.connect(on_save)
+        close_btn.clicked.connect(self.close)
+
+        btn_row.addStretch()
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(close_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)            
+            
+class _CheckpointItemFilter(QObject):
+    def __init__(self, widget, accent_hex, on_dblclick, on_click=None):
+        super().__init__(widget)
+        self._widget = widget
+        self._accent_hex = accent_hex
+        self._on_dblclick = on_dblclick
+        self._on_click = on_click
+        self._click_timer = QTimer(self)
+        self._click_timer.setSingleShot(True)
+        self._click_timer.setInterval(220)
+        self._click_timer.timeout.connect(self._fire_click)
+        widget.installEventFilter(self)
+
+    def update_accent(self, hex_color):
+        self._accent_hex = hex_color
+
+    def _fire_click(self):
+        if self._on_click:
+            self._on_click()
+
+    def eventFilter(self, obj, a0):
+        if obj is self._widget:
+            t = a0.type()
+            if t == QEvent.Type.Enter:
+                c = QColor(self._accent_hex)
+                self._widget.setStyleSheet(
+                    f"background: rgba({c.red()},{c.green()},{c.blue()},40); border-radius: 4px;"
+                )
+            elif t == QEvent.Type.Leave:
+                self._widget.setStyleSheet("background: #f9f9f9; border-radius: 4px;")
+            elif t == QEvent.Type.MouseButtonRelease:
+                if a0.button() == Qt.MouseButton.LeftButton and self._on_click:
+                    self._click_timer.start()
+            elif t == QEvent.Type.MouseButtonDblClick:
+                self._click_timer.stop()
+                self._on_dblclick()
+                return True
+        return False
+
+class _SpaceHeaderFilter(QObject):
+    # Click-timer + double-click handler for space header buttons (no hover override).
+    def __init__(self, btn, on_click=None, on_dblclick=None):
+        super().__init__(btn)
+        self._btn = btn
+        self._on_click = on_click
+        self._on_dblclick = on_dblclick
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(220)
+        self._timer.timeout.connect(self._fire_click)
+        btn.installEventFilter(self)
+
+    def _fire_click(self):
+        if self._on_click:
+            self._on_click()
+
+    def eventFilter(self, obj, event):
+        if obj is self._btn:
+            t = event.type()
+            if t == QEvent.Type.MouseButtonRelease:
+                if event.button() == Qt.MouseButton.LeftButton and self._on_click:
+                    self._timer.start()
+            elif t == QEvent.Type.MouseButtonDblClick:
+                self._timer.stop()
+                if self._on_dblclick:
+                    self._on_dblclick()
+                return True
+        return False       
 
 class DrawSizeDialog(QDialog):
     def __init__(self, parent, current_value):
