@@ -10,19 +10,20 @@ from PyQt6.QtWidgets import (
     QFrame, QSizePolicy, QApplication, QScrollArea, QStackedLayout,
     QGraphicsOpacityEffect, QGraphicsDropShadowEffect, QColorDialog,
     QToolButton, QMenu, QDialog, QSlider, QListWidget, QListWidgetItem,
-    QFileDialog, QMessageBox, QLineEdit,
+    QFileDialog, QMessageBox, QFontComboBox, QLineEdit, QTextEdit
 )
 from PyQt6.QtCore import (
     Qt, QSize, QPropertyAnimation, QRect,
     QPoint, QEasingCurve, QTimer, pyqtSignal, QEvent,
     QParallelAnimationGroup, QEventLoop, QRectF, QPointF, QObject,
-    pyqtProperty,
+    pyqtProperty, QThread, pyqtSlot, QRegularExpression
     )
 
 
 from PyQt6.QtGui import (
     QIcon, QPainter, QPen, QColor, QMouseEvent,
-    QCursor, QFont, QColor, QPixmap, QClipboard, QAction, QBrush, QImage
+    QCursor, QFont, QColor, QPixmap, QClipboard, QAction, QBrush, 
+    QImage, QRegularExpressionValidator
     )
 import sys
 import math
@@ -562,34 +563,56 @@ class SideMenuPanel(QWidget):
 # Context Menu - Properties
 
 class ColorButton(QPushButton):
-    def __init__(self, color, parent=None):
+    def __init__(self, color, parent=None, is_transparent=False):
         super().__init__(parent)
-        self.color = QColor(color)
+        self.is_transparent = is_transparent
+        self.color = QColor(Qt.GlobalColor.transparent) if is_transparent else QColor(color)
         self.setFixedSize(28, 28)
         self.setCheckable(True)
-        self.setStyleSheet(
-            f"border-radius: 14px; background: {self.color.name()}; border: 2px solid #222;"
-        )
+        if is_transparent:
+            self.setStyleSheet(
+                "border-radius: 14px; background: white; border: 2px solid #222;"
+            )
+        else:
+            self.setStyleSheet(
+                f"border-radius: 14px; background: {self.color.name()}; border: 2px solid #222;"
+            )
         self._hovered = False
     
     def enterEvent(self, event):
         self._hovered = True
-        self.setStyleSheet(
-            f"border-radius: 14px; background: {self.color.name()}; border: 2px solid #ff6600;"
-        )
+        if self.is_transparent:
+            self.setStyleSheet(
+                "border-radius: 14px; background: white; border: 2px solid #ff6600;"
+            )
+        else:
+            self.setStyleSheet(
+                f"border-radius: 14px; background: {self.color.name()}; border: 2px solid #ff6600;"
+            )
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update()
 
     def leaveEvent(self, a0):
         self._hovered = False
-        self.setStyleSheet(
-            f"border-radius: 14px; background: {self.color.name()}; border: 2px solid #222;"
-        )
+        if self.is_transparent:
+            self.setStyleSheet(
+                "border-radius: 14px; background: white; border: 2px solid #222;"
+            )
+        else:
+            self.setStyleSheet(
+                f"border-radius: 14px; background: {self.color.name()}; border: 2px solid #222;"
+            )
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.update()
 
     def paintEvent(self, a0):
         super().paintEvent(a0)
+        if self.is_transparent:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(QPen(QColor("#cc0000"), 2))
+            painter.drawLine(6, self.height() - 6, self.width() - 6, 6)
+            painter.end()
         if self.isChecked():
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -953,6 +976,9 @@ class PropertiesDialog(QDialog):
         super().__init__(parent)
         self.drawing_area = drawing_area
         self.shape_idx = shape_idx
+        # Parent the tooltip on UIMode (parent of DrawingArea), not on this dialog
+        _ui_parent = parent.parent() if parent is not None and parent.parent() is not None else (parent or self)
+        self.custom_tooltip = CustomToolTip(_ui_parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setModal(False)
         self.setFixedSize(300, 460)
@@ -992,7 +1018,7 @@ class PropertiesDialog(QDialog):
         border_weight_label = QLabel("Border Weight")
         border_weight_label.setStyleSheet("border: none;")
         layout.addWidget(border_weight_label)
-        self.weight_slider = CustomSlider(1, 20, 2, self)
+        self.weight_slider = CustomSlider(0, 20, 2, self)
         layout.addWidget(self.weight_slider, alignment=Qt.AlignmentFlag.AlignCenter)
         self.weight_slider.setValue(border_weight)
         
@@ -1004,20 +1030,54 @@ class PropertiesDialog(QDialog):
         layout.addWidget(border_color_label)
         border_color_row = QHBoxLayout()
         self.border_color_buttons = []
-        self.selected_border_color = QColor(border_color)
-        border_colors = ["#000000", "#ffb366", "#ffe066", "#b3ff66", "#66ffd9", CUSTOM_BORDER_COLOR]
+        self._initial_border_color = border_color
+        self._initial_fill_color = fill_color
+        self.selected_border_color = QColor(Qt.GlobalColor.transparent) if border_color == "transparent" else QColor(border_color)
+        border_colors = ["#000000", "#ffb366", "#ffe066", "#b3ff66", "transparent", CUSTOM_BORDER_COLOR, ]
         for i, color in enumerate(border_colors):
-            btn = ColorButton(color)
+            is_transp = (color == "transparent")
+            btn = ColorButton(color, is_transparent=is_transp)
             if i == len(border_colors) - 1:
                 # Last button: show quick properties color picker
                 btn.clicked.connect(lambda _, b=btn: self._pick_custom_border_color(b))
+            elif is_transp:
+                btn.clicked.connect(partial(self._on_border_color_selected, "transparent", btn))
             else:
                 btn.clicked.connect(partial(self._on_border_color_selected, color, btn))
             border_color_row.addWidget(btn)
             self.border_color_buttons.append(btn)
-            if color.lower() == border_color.lower():
+            if is_transp and border_color.lower() == "transparent":
+                btn.setChecked(True)
+            elif not is_transp and color.lower() == border_color.lower():
                 btn.setChecked(True)
         layout.addLayout(border_color_row)
+
+        # Sync weight slider with transparent border button (connected after buttons exist)
+        def _on_weight_changed(val):
+            if val == 0:
+                # Auto-select transparent border button
+                for btn in self.border_color_buttons:
+                    btn.blockSignals(True)
+                    btn.setChecked(False)
+                    btn.blockSignals(False)
+                # The transparent button is at index 4
+                if len(self.border_color_buttons) > 4:
+                    self.border_color_buttons[4].blockSignals(True)
+                    self.border_color_buttons[4].setChecked(True)
+                    self.border_color_buttons[4].blockSignals(False)
+                self.selected_border_color = QColor(Qt.GlobalColor.transparent)
+            else:
+                # If border was transparent, pick the first color
+                if self.selected_border_color.alpha() == 0:
+                    for btn in self.border_color_buttons:
+                        btn.blockSignals(True)
+                        btn.setChecked(False)
+                        btn.blockSignals(False)
+                    self.border_color_buttons[0].blockSignals(True)
+                    self.border_color_buttons[0].setChecked(True)
+                    self.border_color_buttons[0].blockSignals(False)
+                    self.selected_border_color = QColor("#000000")
+        self.weight_slider.valueChanged.connect(_on_weight_changed)
 
         # Object Color
         object_color_label = QLabel("Object Color")
@@ -1025,17 +1085,22 @@ class PropertiesDialog(QDialog):
         layout.addWidget(object_color_label)
         object_color_row = QHBoxLayout()
         self.object_color_buttons = []
-        self.selected_object_color = QColor(fill_color)
-        object_colors = ["#000000", "#ffb366", "#ffe066", "#b3ff66", "#66ffd9", CUSTOM_OBJECT_COLOR]
+        self.selected_object_color = QColor(Qt.GlobalColor.transparent) if fill_color == "transparent" else QColor(fill_color)
+        object_colors = ["#000000", "#ffb366", "#ffe066", "#b3ff66", "transparent", CUSTOM_OBJECT_COLOR, ]
         for i, color in enumerate(object_colors):
-            btn = ColorButton(color)
+            is_transp = (color == "transparent")
+            btn = ColorButton(color, is_transparent=is_transp)
             if i == len(object_colors) - 1:
                 btn.clicked.connect(lambda _, b=btn: self._pick_custom_object_color(b))
+            elif is_transp:
+                btn.clicked.connect(partial(self._on_object_color_selected, "transparent", btn))
             else:
                 btn.clicked.connect(partial(self._on_object_color_selected, color, btn))
             object_color_row.addWidget(btn)
             self.object_color_buttons.append(btn)
-            if color.lower() == fill_color.lower():
+            if is_transp and fill_color.lower() == "transparent":
+                btn.setChecked(True)
+            elif not is_transp and color.lower() == fill_color.lower():
                 btn.setChecked(True)
         layout.addLayout(object_color_row)
 
@@ -1091,18 +1156,42 @@ class PropertiesDialog(QDialog):
                 restore_dlg.activateWindow()
     
         restore.clicked = open_restore_points
+        
+        self._block_close = False
 
         # Close button (optional)
         close_btn = QPushButton("Close")
         def on_accept():
-            props = {
-                "border_radius": self.radius_slider.getValue(),
-                "border_weight": self.weight_slider.getValue(),
-                "border_color": self.selected_border_color,
-                "object_color": self.selected_object_color,
-            }
-            self.properties_applied.emit(props)
-            self.accept()
+            border_weight = self.weight_slider.getValue()
+            border_color_val = self.selected_border_color
+            object_color_val = self.selected_object_color
+
+            # Border weight 0 means transparent border
+            if border_weight == 0:
+                border_color_val = QColor(Qt.GlobalColor.transparent)
+
+            border_is_transparent = border_color_val.alpha() == 0
+            object_is_transparent = object_color_val.alpha() == 0
+
+            if border_is_transparent and object_is_transparent and shape_type != "label":
+                # Block ESC/other close attempts while tooltip is visible
+                self._block_close = True
+                self.custom_tooltip.show_tooltip("Both colors cannot be transparent", 2500)
+                def _unblock():
+                    self._block_close = False
+                QTimer.singleShot(2500, _unblock)
+                return
+            
+            else:
+                props = {
+                    "border_radius": self.radius_slider.getValue(),
+                    "border_weight": border_weight,
+                    "border_color": border_color_val,
+                    "object_color": object_color_val,
+                }
+                self.properties_applied.emit(props)
+                self.accept()
+            
 
         close_btn.clicked.connect(on_accept)
         close_btn.setStyleSheet("""
@@ -1130,7 +1219,15 @@ class PropertiesDialog(QDialog):
         button.blockSignals(True)
         button.setChecked(True)
         button.blockSignals(False)
-        self.selected_border_color = QColor(color_hex)
+        if color_hex == "transparent":
+            self.selected_border_color = QColor(Qt.GlobalColor.transparent)
+            # Auto-set weight to 0
+            self.weight_slider.setValue(0)
+        else:
+            self.selected_border_color = QColor(color_hex)
+            # If weight was 0, restore to 1 so the border is visible
+            if self.weight_slider.getValue() == 0:
+                self.weight_slider.setValue(1)
         button.update()
 
     def _on_object_color_selected(self, color_hex, button):
@@ -1144,7 +1241,10 @@ class PropertiesDialog(QDialog):
         button.blockSignals(True)
         button.setChecked(True)
         button.blockSignals(False)
-        self.selected_object_color = QColor(color_hex)
+        if color_hex == "transparent":
+            self.selected_object_color = QColor(Qt.GlobalColor.transparent)
+        else:
+            self.selected_object_color = QColor(color_hex)
         button.update()
     
     def _pick_custom_border_color(self, button):
@@ -1168,6 +1268,12 @@ class PropertiesDialog(QDialog):
             )
             CUSTOM_OBJECT_COLOR = color.name()
             self._on_object_color_selected(color.name(), button)
+    
+    def closeEvent(self, event):
+        if self._block_close:
+            event.ignore()
+            return
+        super().closeEvent(event)
 
 
 class ArcToolMenu(QWidget):
@@ -1452,6 +1558,8 @@ def _serialize_qpoint(p):
     return [p.x(), p.y()]
 
 def _serialize_qcolor(c):
+    if c.alpha() == 0:
+        return "transparent"
     return c.name()  # "#rrggbb"
 
 def _serialize_pixmap(px: QPixmap) -> str:
@@ -1467,6 +1575,69 @@ def _deserialize_pixmap(s: str) -> QPixmap:
     px = QPixmap()
     px.loadFromData(data, "PNG")
     return px
+
+def _pixmap_to_qimage(px: QPixmap) -> QImage:
+    return px.toImage()
+
+def _encode_qimage_b64(img: QImage) -> str:
+    from PyQt6.QtCore import QBuffer, QIODevice
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    data = bytes(buf.data())
+    return base64.b64encode(data).decode("utf-8")
+
+def _serialize_shape_for_thread(shape: tuple) -> dict:
+    tool = shape[0]
+    if tool == "image":
+        return {
+            "tool": "image",
+            "start": _serialize_qpoint(shape[1]),
+            "end": _serialize_qpoint(shape[2]),
+            "qimage": _pixmap_to_qimage(shape[3]),
+        }
+    elif tool == "draw":
+        d = {
+            "tool": "draw",
+            "points": [_serialize_qpoint(p) for p in shape[1]],
+            "color": _serialize_qcolor(shape[3]),
+            "extras": []
+        }
+        for item in shape[4:]:
+            d["extras"].append(_serialize_extra(item))
+        return d
+    else:
+        d = {
+            "tool": tool,
+            "start": _serialize_qpoint(shape[1]),
+            "end": _serialize_qpoint(shape[2]),
+            "color": _serialize_qcolor(shape[3]),
+            "extras": []
+        }
+        for item in shape[4:]:
+            d["extras"].append(_serialize_extra(item))
+        return d
+
+def _serialize_page_state_for_thread(state) -> dict:
+    return {
+        "name": state["name"],
+        "created": state.get("created", ""),
+        "shapes": [_serialize_shape_for_thread(s) for s in state["shapes"]],
+        "eraser_mask_img": _pixmap_to_qimage(state["eraser_mask"]),
+        "eraser_strokes": [[_serialize_qpoint(p) for p in stroke]
+                           for stroke in state["eraser_strokes"]],
+        "scale_factor": state["scale_factor"],
+        "zoom_percent": state["zoom_percent"],
+        "pan_offset": [state["pan_offset"].x(), state["pan_offset"].y()],
+        "tool_sizes": state["tool_sizes"],
+    }
+
+def _finalize_page_for_json(page_dict: dict) -> dict:
+    page_dict["eraser_mask"] = _encode_qimage_b64(page_dict.pop("eraser_mask_img"))
+    for shape in page_dict["shapes"]:
+        if "qimage" in shape:
+            shape["pixmap"] = _encode_qimage_b64(shape.pop("qimage"))
+    return page_dict
 
 def _serialize_shape(shape: tuple) -> dict:
     tool = shape[0]
@@ -1503,7 +1674,7 @@ def _serialize_shape(shape: tuple) -> dict:
 
 def _serialize_extra(item):
     if isinstance(item, QColor):
-        return {"type": "color", "value": item.name()}
+        return {"type": "color", "value": "transparent" if item.alpha() == 0 else item.name()}
     elif isinstance(item, dict):
         # border_weight dict — values may include color strings, keep as-is
         return {"type": "dict", "value": item}
@@ -1513,6 +1684,8 @@ def _serialize_extra(item):
 
 def _deserialize_extra(d):
     if d["type"] == "color":
+        if d["value"] == "transparent":
+            return QColor(Qt.GlobalColor.transparent)
         return QColor(d["value"])
     elif d["type"] == "dict":
         return d["value"]
@@ -1530,13 +1703,13 @@ def _deserialize_shape(d: dict) -> tuple:
         )
     elif tool == "draw":
         pts = [QPoint(*p) for p in d["points"]]
-        color = QColor(d["color"])
+        color = QColor(Qt.GlobalColor.transparent) if d["color"] == "transparent" else QColor(d["color"])
         extras = [_deserialize_extra(e) for e in d.get("extras", [])]
         return tuple(["draw", pts, None, color] + extras)
     else:
         start = QPoint(*d["start"])
         end = QPoint(*d["end"])
-        color = QColor(d["color"])
+        color = QColor(Qt.GlobalColor.transparent) if d["color"] == "transparent" else QColor(d["color"])
         extras = [_deserialize_extra(e) for e in d.get("extras", [])]
         return tuple([tool, start, end, color] + extras)
     
@@ -1572,6 +1745,212 @@ def _deserialize_page_state(pd: dict, a4_size) -> dict:
         "undo_stack":     [],
         "redo_stack":     [],
     }    
+
+
+class _LabelTextOverlay(QWidget):
+    # Movable, resizable text-box overlay for the label tool (MS Paint style).
+
+    HANDLE_SIZE    = 8
+    HANDLE_MARGIN  = 8    # Extra margin so handles are not clipped
+    BORDER_HIT     = 12   # px from edge that triggers move cursor
+
+    _RESIZE_CURSORS = [
+        Qt.CursorShape.SizeFDiagCursor,  # 0 TL
+        Qt.CursorShape.SizeVerCursor,    # 1 TM
+        Qt.CursorShape.SizeBDiagCursor,  # 2 TR
+        Qt.CursorShape.SizeHorCursor,    # 3 MR
+        Qt.CursorShape.SizeFDiagCursor,  # 4 BR
+        Qt.CursorShape.SizeVerCursor,    # 5 BM
+        Qt.CursorShape.SizeBDiagCursor,  # 6 BL
+        Qt.CursorShape.SizeHorCursor,    # 7 ML
+    ]
+
+    def __init__(self, drawing_area, canvas_rect, text_edit, toolbar):
+        super().__init__(drawing_area)
+        self._da              = drawing_area
+        self._canvas_rect     = QRect(canvas_rect)
+        self._te              = text_edit
+        self._toolbar         = toolbar
+        self._drag_mode       = None          # None | ('move',) | ('resize', idx)
+        self._drag_start_global = None
+        self._drag_start_rect   = None
+
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("background: none;")
+
+        layout = QVBoxLayout(self)
+        hs = self.HANDLE_SIZE
+        layout.setContentsMargins(hs, hs, hs, hs)
+        layout.setSpacing(0)
+        layout.addWidget(text_edit)
+        self._te.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._te.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    # geometry helpers
+
+    def handle_points_local(self):
+        r  = self.rect()
+        x1, y1, x2, y2 = r.left(), r.top(), r.right(), r.bottom()
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        return [
+            QPoint(x1, y1), QPoint(cx, y1), QPoint(x2, y1),
+            QPoint(x2, cy),
+            QPoint(x2, y2), QPoint(cx, y2), QPoint(x1, y2),
+            QPoint(x1, cy),
+        ]
+
+    def _hit_test(self, pos):
+        hs = self.HANDLE_SIZE + 4
+        for i, h in enumerate(self.handle_points_local()):
+            if abs(pos.x() - h.x()) <= hs and abs(pos.y() - h.y()) <= hs:
+                return ('resize', i)
+        bh = self.BORDER_HIT
+        if not self.rect().adjusted(bh, bh, -bh, -bh).contains(pos):
+            return ('move',)
+        return ('inside',)
+
+    def _reposition(self):
+        # Add margin for handles so they are not clipped
+        margin = self.HANDLE_MARGIN
+        tl = self._da.canvas_to_widget(self._canvas_rect.topLeft())
+        br = self._da.canvas_to_widget(self._canvas_rect.bottomRight())
+        widget_rect = QRect(tl, br).normalized()
+        widget_rect = widget_rect.adjusted(-margin, -margin, margin, margin)
+        self.setGeometry(widget_rect)
+        if self._toolbar and self._toolbar.isVisible():
+            toolbar_h = self._toolbar.height()
+            tx = widget_rect.left()
+            ty = max(0, widget_rect.top() - toolbar_h - 2)
+            self._toolbar.move(tx, ty)
+            min_w = getattr(self._da, '_label_toolbar_min_width', 300)
+            self._toolbar.setFixedWidth(max(widget_rect.width(), min_w))
+
+    # MouseEvents
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+        hit = self._hit_test(event.pos())
+        if hit[0] in ('resize', 'move'):
+            self._drag_mode         = hit
+            self._drag_start_global = event.globalPosition().toPoint()
+            self._drag_start_rect   = QRect(self._canvas_rect)
+            self.grabMouse()
+            event.accept()
+        else:
+            self._te.setFocus()
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_mode is None:
+            hit = self._hit_test(event.pos())
+            if hit[0] == 'resize':
+                self.setCursor(self._RESIZE_CURSORS[hit[1]])
+            elif hit[0] == 'move':
+                self.setCursor(Qt.CursorShape.SizeAllCursor)
+            else:
+                self.unsetCursor()
+            super().mouseMoveEvent(event)
+            return
+
+        curr = event.globalPosition().toPoint()
+        dw   = curr - self._drag_start_global
+        dx   = int(round(dw.x() / self._da.scale_factor))
+        dy   = int(round(dw.y() / self._da.scale_factor))
+
+        orig = self._drag_start_rect
+        x1, y1, x2, y2 = orig.left(), orig.top(), orig.right(), orig.bottom()
+
+        if self._drag_mode[0] == 'move':
+            new_rect = QRect(QPoint(x1 + dx, y1 + dy), QPoint(x2 + dx, y2 + dy))
+            new_rect, guides = self._da._find_snap_guides(new_rect)
+            self._da._active_guides = guides
+        else:
+            idx = self._drag_mode[1]
+            if   idx == 0: new_rect = QRect(QPoint(x1+dx, y1+dy), QPoint(x2,    y2   ))
+            elif idx == 1: new_rect = QRect(QPoint(x1,    y1+dy), QPoint(x2,    y2   ))
+            elif idx == 2: new_rect = QRect(QPoint(x1,    y1+dy), QPoint(x2+dx, y2   ))
+            elif idx == 3: new_rect = QRect(QPoint(x1,    y1   ), QPoint(x2+dx, y2   ))
+            elif idx == 4: new_rect = QRect(QPoint(x1,    y1   ), QPoint(x2+dx, y2+dy))
+            elif idx == 5: new_rect = QRect(QPoint(x1,    y1   ), QPoint(x2,    y2+dy))
+            elif idx == 6: new_rect = QRect(QPoint(x1+dx, y1   ), QPoint(x2,    y2+dy))
+            elif idx == 7: new_rect = QRect(QPoint(x1+dx, y1   ), QPoint(x2,    y2   ))
+            else:          new_rect = QRect(orig)
+            new_rect = new_rect.normalized()
+            self._da._active_guides = []
+
+        if new_rect.width() > 20 and new_rect.height() > 20:
+            self._canvas_rect           = new_rect
+            self._da._label_canvas_rect = new_rect
+            self._reposition()
+            # Force the text widget and canvas to repaint so the text
+            # visibly moves live as the overlay is dragged.
+            try:
+                if self._te is not None:
+                    self._te.update()
+                    self._te.repaint()
+            except Exception:
+                pass
+            try:
+                self._da.update()
+            except Exception:
+                pass
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if self._drag_mode is not None:
+            self.releaseMouse()
+            self._drag_mode = None
+            self.unsetCursor()
+            self._da._active_guides = []
+            # Sync logical canvas_rect to overlay geometry (minus margin)
+            margin = self.HANDLE_MARGIN
+            overlay_rect = self.geometry()
+            logical_rect = overlay_rect.adjusted(margin, margin, -margin, -margin)
+            da = self._da
+            top_left = da.widget_to_canvas(logical_rect.topLeft())
+            bottom_right = da.widget_to_canvas(logical_rect.bottomRight())
+            self._canvas_rect = QRect(top_left, bottom_right).normalized()
+            if hasattr(da, '_label_canvas_rect'):
+                da._label_canvas_rect = QRect(self._canvas_rect)
+            # Reposition overlay so the margin frame remains consistent after release
+            self._reposition()
+            # Ensure canvas is refreshed after commit
+            try:
+                da.update()
+            except Exception:
+                pass
+        super().mouseReleaseEvent(event)
+
+    # paint
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Dotted blue border, matching DrawingArea
+        pen = QPen(QColor("#0078d7"), 1, Qt.PenStyle.DotLine)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        margin = self.HANDLE_MARGIN
+        r = self.rect().adjusted(margin, margin, -margin-1, -margin-1)
+        painter.drawRect(r)
+        # Handles (match DrawingArea)
+        hs = self.HANDLE_SIZE // 2
+        # Use same handle placement as DrawingArea
+        x1, y1, x2, y2 = r.left(), r.top(), r.right(), r.bottom()
+        xm, ym = (x1 + x2)//2, (y1 + y2)//2
+        points = [
+            QPoint(x1, y1), QPoint(xm, y1), QPoint(x2, y1),
+            QPoint(x2, ym),
+            QPoint(x2, y2), QPoint(xm, y2), QPoint(x1, y2),
+            QPoint(x1, ym),
+        ]
+        for pt in points:
+            painter.setBrush(QColor("white"))
+            painter.setPen(QPen(QColor("#0078d7"), 2))
+            painter.drawRect(pt.x() - hs, pt.y() - hs, self.HANDLE_SIZE, self.HANDLE_SIZE)
+        painter.end()
 
 
 class DrawingArea(QFrame):
@@ -1670,7 +2049,217 @@ class DrawingArea(QFrame):
         self.tool_sizes = self.tool_last_sizes.copy()
         
         self.open_file_callback = None
-        
+        self.save_file_callback = None
+        self.tooltip_callback = None
+
+        # Snap-to-grid state
+        self.snap_to_grid = False
+        self.grid_size = 20
+
+        # Alignment guides state
+        self._active_guides = []  # list of ("h"|"v", coordinate) tuples
+
+        # Label / text-box tool state
+        self._labeling = False
+        self._label_start = None
+        self._label_end = None
+        self._text_edit_overlay = None
+        self._text_edit_widget = None
+        self._label_font_size = 14
+        self._label_font_family = "Arial"
+        self._label_font_underline = False
+        self._label_text_align = "left"
+        # Minimum width for the inline label toolbar (can be adjusted at runtime)
+        self._label_toolbar_min_width = 300
+        self._label_edit_index = None
+        self._label_edit_rotation = 0
+
+    # Snap-to-grid helpers
+
+    def _snap_to_grid(self, pt):
+        g = self.grid_size
+        return QPoint(round(pt.x() / g) * g, round(pt.y() / g) * g)
+
+    def _snap_delta_to_grid(self, delta):
+        g = self.grid_size
+        return QPoint(round(delta.x() / g) * g, round(delta.y() / g) * g)
+
+    # Alignment guide helpers
+
+    def _get_alignment_edges(self, exclude_idx=None):
+        """Collect horizontal and vertical alignment coordinates from all shapes + canvas edges."""
+        vs = set()  # vertical lines (x coordinates)
+        hs = set()  # horizontal lines (y coordinates)
+        # Canvas edges and centers
+        w, h = self.a4_size.width(), self.a4_size.height()
+        vs.update([0, w // 2, w])
+        hs.update([0, h // 2, h])
+        for idx, shape in enumerate(self.shapes):
+            if idx == exclude_idx:
+                continue
+            tool = shape[0]
+            if tool == "draw" and isinstance(shape[1], list) and shape[1]:
+                pts = shape[1]
+                xs = [p.x() for p in pts]
+                ys = [p.y() for p in pts]
+                left, right = min(xs), max(xs)
+                top, bottom = min(ys), max(ys)
+            elif tool != "draw":
+                r = QRect(shape[1], shape[2]).normalized()
+                left, right = r.left(), r.right()
+                top, bottom = r.top(), r.bottom()
+            else:
+                continue
+            cx = (left + right) // 2
+            cy = (top + bottom) // 2
+            vs.update([left, cx, right])
+            hs.update([top, cy, bottom])
+        return vs, hs
+
+    def _find_snap_guides(self, shape_rect, threshold=8):
+        """Given the rect of the shape being moved, find alignment snaps.
+        Returns (snapped_rect, guides) where guides is list of ("h"|"v", coord)."""
+        vs, hs = self._get_alignment_edges(exclude_idx=self.selected_shape_index)
+        guides = []
+        dx = 0
+        dy = 0
+        # Shape edges
+        sl, sr = shape_rect.left(), shape_rect.right()
+        st, sb = shape_rect.top(), shape_rect.bottom()
+        scx = (sl + sr) // 2
+        scy = (st + sb) // 2
+        # Check vertical alignment (x)
+        best_vdist = threshold + 1
+        for edge_x in vs:
+            for sx in (sl, scx, sr):
+                dist = abs(sx - edge_x)
+                if dist < best_vdist:
+                    best_vdist = dist
+                    dx = edge_x - sx
+                    best_vguide = edge_x
+        if best_vdist <= threshold:
+            guides.append(("v", best_vguide))
+        else:
+            dx = 0
+        # Check horizontal alignment (y)
+        best_hdist = threshold + 1
+        for edge_y in hs:
+            for sy in (st, scy, sb):
+                dist = abs(sy - edge_y)
+                if dist < best_hdist:
+                    best_hdist = dist
+                    dy = edge_y - sy
+                    best_hguide = edge_y
+        if best_hdist <= threshold:
+            guides.append(("h", best_hguide))
+        else:
+            dy = 0
+        snapped = shape_rect.translated(dx, dy)
+        return snapped, guides
+
+    def _find_resize_snap_guides(self, rect, handle_idx, threshold=8):
+        """Find alignment snaps during resize, only adjusting the dragged edge(s)."""
+        vs, hs = self._get_alignment_edges(exclude_idx=self.selected_shape_index)
+        guides = []
+
+        # Which edges are being dragged by this handle?
+        drag_left   = handle_idx in (0, 6, 7)
+        drag_right  = handle_idx in (2, 3, 4)
+        drag_top    = handle_idx in (0, 1, 2)
+        drag_bottom = handle_idx in (4, 5, 6)
+
+        sl, sr = rect.left(), rect.right()
+        st, sb = rect.top(), rect.bottom()
+
+        # Vertical (x) snap — only the dragged left or right edge
+        dx = 0
+        check_xs = []
+        if drag_left:
+            check_xs.append(sl)
+        if drag_right:
+            check_xs.append(sr)
+
+        best_vdist = threshold + 1
+        best_vguide = None
+        for edge_x in vs:
+            for sx in check_xs:
+                dist = abs(sx - edge_x)
+                if dist < best_vdist:
+                    best_vdist = dist
+                    dx = edge_x - sx
+                    best_vguide = edge_x
+        if best_vdist <= threshold and best_vguide is not None:
+            guides.append(("v", best_vguide))
+        else:
+            dx = 0
+
+        # Horizontal (y) snap — only the dragged top or bottom edge
+        dy = 0
+        check_ys = []
+        if drag_top:
+            check_ys.append(st)
+        if drag_bottom:
+            check_ys.append(sb)
+
+        best_hdist = threshold + 1
+        best_hguide = None
+        for edge_y in hs:
+            for sy in check_ys:
+                dist = abs(sy - edge_y)
+                if dist < best_hdist:
+                    best_hdist = dist
+                    dy = edge_y - sy
+                    best_hguide = edge_y
+        if best_hdist <= threshold and best_hguide is not None:
+            guides.append(("h", best_hguide))
+        else:
+            dy = 0
+
+        # Only adjust the dragged edges, leaving the opposite edges in place
+        snapped = QRect(rect)
+        if drag_left:
+            snapped.setLeft(rect.left() + dx)
+        elif drag_right:
+            snapped.setRight(rect.right() + dx)
+        if drag_top:
+            snapped.setTop(rect.top() + dy)
+        elif drag_bottom:
+            snapped.setBottom(rect.bottom() + dy)
+
+        return snapped, guides
+
+    def _apply_aspect_ratio_constraint(self, new_rect, orig_rect, handle_idx):
+        """Constrain new_rect to orig_rect's aspect ratio during a corner handle resize.
+        Only the dragged corner moves; the opposite corner stays fixed."""
+        orig_w = orig_rect.width() or 1
+        orig_h = orig_rect.height() or 1
+        orig_aspect = orig_w / orig_h
+        nw = new_rect.width()
+        nh = new_rect.height()
+        if nw == 0 or nh == 0:
+            return new_rect
+        # Drive by whichever axis changed proportionally more
+        if abs(nw / orig_w) >= abs(nh / orig_h):
+            nw_new = nw
+            nh_new = max(1, int(round(nw / orig_aspect)))
+        else:
+            nh_new = nh
+            nw_new = max(1, int(round(nh * orig_aspect)))
+        # Re-anchor opposite corner for each corner handle
+        if handle_idx == 0:    # TL dragged → BR fixed
+            fixed = new_rect.bottomRight()
+            return QRect(QPoint(fixed.x() - nw_new, fixed.y() - nh_new), fixed).normalized()
+        elif handle_idx == 2:  # TR dragged → BL fixed
+            fixed = new_rect.bottomLeft()
+            return QRect(fixed, QPoint(fixed.x() + nw_new, fixed.y() - nh_new)).normalized()
+        elif handle_idx == 4:  # BR dragged → TL fixed
+            fixed = new_rect.topLeft()
+            return QRect(fixed, QPoint(fixed.x() + nw_new, fixed.y() + nh_new)).normalized()
+        elif handle_idx == 6:  # BL dragged → TR fixed
+            fixed = new_rect.topRight()
+            return QRect(QPoint(fixed.x() - nw_new, fixed.y()), QPoint(fixed.x(), fixed.y() + nh_new)).normalized()
+        return new_rect
+
     def _to_local(self, pt, rotation, center):
         import math
         rad = math.radians(-rotation)
@@ -1735,6 +2324,12 @@ class DrawingArea(QFrame):
         modifiers = event.modifiers()
         delta = event.angleDelta().y()
         if modifiers & Qt.KeyboardModifier.ControlModifier:
+            # Block zoom while the inline text editor is open — font sizes
+            # in the widget are tied to the current scale_factor and
+            # rescaling mid-edit would desync editor vs committed text.
+            if getattr(self, '_text_edit_overlay', None) is not None:
+                event.accept()
+                return
             # Zoom
             if delta > 0:
                 self.zoom_by(10)
@@ -1816,6 +2411,16 @@ class DrawingArea(QFrame):
             self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
 
     def mousePressEvent(self, event):
+        # Commit text overlay if user clicks anywhere outside the overlay
+        # Skip on right-click so contextMenuEvent can handle lock/unlock for labels
+        if self._text_edit_overlay is not None and self._text_edit_overlay.isVisible():
+            if event.button() == Qt.MouseButton.RightButton:
+                return
+            click_pos = event.position().toPoint()
+            if not self._text_edit_overlay.geometry().contains(click_pos):
+                self._commit_text_overlay()
+            return
+
         pt = self.widget_to_canvas(event.position().toPoint())
 
         # PREVENT ANY INTERACTION WITH LOCKED SHAPES
@@ -1960,6 +2565,8 @@ class DrawingArea(QFrame):
                     self._drag_origin_center = rect.center()
                     self.set_resize_cursor(idx)
                     self._pending_shape_action = "Resize"
+                    # Store original rect for aspect-ratio constraint (Shift+resize)
+                    self._resize_orig_rect = QRect(rect)
                     # Store the anchor corner's world position so resize won't move the shape
                     if rotation:
                         r = rect  # already normalized
@@ -1996,6 +2603,7 @@ class DrawingArea(QFrame):
                 fill_color = None
                 rotation = getattr(self, "preview_rotation", 0)
                 extra_dicts = []
+                label_text = None
                 lock_flag = None
 
                 for item in old_shape[4:]:
@@ -2003,6 +2611,8 @@ class DrawingArea(QFrame):
                         fill_color = item
                     elif isinstance(item, bool):
                         lock_flag = item
+                    elif isinstance(item, str):
+                        label_text = item
                     elif isinstance(item, (int, float)):
                         rotation = item
                     elif isinstance(item, dict):
@@ -2025,12 +2635,18 @@ class DrawingArea(QFrame):
                             self.preview_pixmap
                         )
                 else:
-                    # Rebuild shape preserving fill, rotation, dicts (border_radius/border_weight), and lock
+                    # Rebuild shape preserving fill, rotation, label text, dicts, and lock
                     new_shape = [self.preview_shape, self.preview_start, self.preview_end, border_color]
                     if fill_color is not None:
                         new_shape.append(fill_color)
                     if rotation != 0:
                         new_shape.append(rotation)
+                    # Preserve label text from the original shape
+                    if label_text is not None:
+                        new_shape.append(label_text)
+                    for item in getattr(self, '_pending_shape_extras', []):
+                        new_shape.append(item)
+                    self._pending_shape_extras = []
                     for d in extra_dicts:
                         new_shape.append(d)
                     if lock_flag is not None:
@@ -2062,6 +2678,14 @@ class DrawingArea(QFrame):
                         shape_tuple.append(fill_color)
                     if rotation != 0:
                         shape_tuple.append(rotation)
+                    # Preserve label text for pasted label shapes
+                    pending_label = getattr(self, '_pending_label_text', None)
+                    if pending_label is not None:
+                        shape_tuple.append(pending_label)
+                        self._pending_label_text = None
+                    for item in getattr(self, '_pending_shape_extras', []):
+                        shape_tuple.append(item)
+                    self._pending_shape_extras = []
                     self.shapes.append(tuple(shape_tuple))
 
             self.preview_shape = None
@@ -2103,6 +2727,19 @@ class DrawingArea(QFrame):
                 self.crop_start = pt
                 self.crop_end = pt
             self.update()
+            return
+
+        if self.current_tool == "label" and event.button() == Qt.MouseButton.LeftButton:
+            if self.canvas_contains(pt):
+                self._labeling = True
+                self._label_start = pt
+                self._label_end = pt
+                self.preview_shape = "label"
+                self.preview_start = pt
+                self.preview_end = pt
+                self.preview_rotation = 0
+                self.selected_shape_index = None
+                self.update()
             return
 
         # PLACING NEW SHAPE OR IMAGE
@@ -2147,6 +2784,14 @@ class DrawingArea(QFrame):
                             shape_tuple.append(fill_color)
                         if rotation != 0:
                             shape_tuple.append(rotation)
+                        # Preserve label text for pasted label shapes
+                        pending_label = getattr(self, '_pending_label_text', None)
+                        if pending_label is not None:
+                            shape_tuple.append(pending_label)
+                            self._pending_label_text = None
+                        for item in getattr(self, '_pending_shape_extras', []):
+                            shape_tuple.append(item)
+                        self._pending_shape_extras = []
                         self.shapes.append(tuple(shape_tuple))
 
                         # Clear preview attributes after placing
@@ -2230,6 +2875,8 @@ class DrawingArea(QFrame):
             orig_bbox = self._orig_bbox
             # Get new bbox from handle drag
             pt = self.widget_to_canvas(event.position().toPoint())
+            if self.snap_to_grid:
+                pt = self._snap_to_grid(pt)
             x1, y1, x2, y2 = orig_bbox.left(), orig_bbox.top(), orig_bbox.right(), orig_bbox.bottom()
             idx = self._dragging_handle
             # Update bbox corners/edges
@@ -2251,6 +2898,15 @@ class DrawingArea(QFrame):
                 new_bbox = QRect(QPoint(pt.x(), y1), QPoint(x2, y2)).normalized()
             else:
                 new_bbox = QRect(orig_bbox)
+            # Alignment guides for freehand resize
+            if not self.snap_to_grid:
+                snapped, self._active_guides = self._find_resize_snap_guides(new_bbox, idx)
+                new_bbox = snapped
+            else:
+                self._active_guides = []
+            # Aspect ratio constraint: hold Shift on a corner handle to scale proportionally
+            if (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) and idx in (0, 2, 4, 6):
+                new_bbox = self._apply_aspect_ratio_constraint(new_bbox, self._orig_bbox, idx)
             # Scale all points from orig_bbox to new_bbox
             def scale_point(p):
                 ox, oy = orig_bbox.left(), orig_bbox.top()
@@ -2277,8 +2933,18 @@ class DrawingArea(QFrame):
             box_rect = orig_bbox.adjusted(-draw_margin, -draw_margin, draw_margin, draw_margin)
             offset = pt - self._drag_offset
             delta = offset - box_rect.topLeft()
+            # Apply snap-to-grid
+            if self.snap_to_grid:
+                delta = self._snap_delta_to_grid(delta)
+            # Apply alignment guides (when grid is off)
+            new_bbox = orig_bbox.translated(delta)
+            if not self.snap_to_grid:
+                new_bbox, self._active_guides = self._find_snap_guides(new_bbox)
+                delta = QPoint(new_bbox.left() - orig_bbox.left(), new_bbox.top() - orig_bbox.top())
+            else:
+                self._active_guides = []
             self.preview_start = [p + delta for p in points]
-            self.preview_bbox = orig_bbox.translated(delta)
+            self.preview_bbox = new_bbox
             self.update()
             return
 
@@ -2341,8 +3007,10 @@ class DrawingArea(QFrame):
                         self.preview_start = QPoint(ps.x() + dx, ps.y() + dy)
                         self.preview_end   = QPoint(pe.x() + dx, pe.y() + dy)
             else:
-                # Non-rotated: original logic unchanged
+                # Non-rotated: snap point then compute new start/end
                 self.set_resize_cursor(handle)
+                if self.snap_to_grid:
+                    pt = self._snap_to_grid(pt)
                 rect = QRect(self.preview_start, self.preview_end)
                 x1, y1, x2, y2 = rect.left(), rect.top(), rect.right(), rect.bottom()
                 if handle == 0:
@@ -2361,6 +3029,22 @@ class DrawingArea(QFrame):
                     self.preview_start = QPoint(pt.x(), y1); self.preview_end = QPoint(x2, pt.y())
                 elif handle == 7:
                     self.preview_start = QPoint(pt.x(), y1); self.preview_end = QPoint(x2, y2)
+                # Alignment guides for non-rotated resize
+                if not self.snap_to_grid:
+                    new_rect = QRect(self.preview_start, self.preview_end).normalized()
+                    snapped, self._active_guides = self._find_resize_snap_guides(new_rect, handle)
+                    self.preview_start = snapped.topLeft()
+                    self.preview_end = snapped.bottomRight()
+                else:
+                    self._active_guides = []
+                # Aspect ratio constraint: hold Shift on a corner handle to scale proportionally
+                if (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) and handle in (0, 2, 4, 6) and hasattr(self, '_resize_orig_rect'):
+                    constrained = self._apply_aspect_ratio_constraint(
+                        QRect(self.preview_start, self.preview_end).normalized(),
+                        self._resize_orig_rect, handle
+                    )
+                    self.preview_start = constrained.topLeft()
+                    self.preview_end = constrained.bottomRight()
             self.update()
             return
 
@@ -2423,6 +3107,16 @@ class DrawingArea(QFrame):
                 # Move the box, but update preview_start/end to match the new box_rect minus margin
                 new_box_rect = QRect(offset, size)
                 new_shape_rect = new_box_rect.adjusted(margin, margin, -margin, -margin)
+                # Apply snap-to-grid
+                if self.snap_to_grid:
+                    snapped_tl = self._snap_to_grid(new_shape_rect.topLeft())
+                    snap_delta = snapped_tl - new_shape_rect.topLeft()
+                    new_shape_rect.translate(snap_delta)
+                # Apply alignment guides (when grid is off)
+                if not self.snap_to_grid:
+                    new_shape_rect, self._active_guides = self._find_snap_guides(new_shape_rect)
+                else:
+                    self._active_guides = []
                 self.preview_start = new_shape_rect.topLeft()
                 self.preview_end = new_shape_rect.bottomRight()
                 self.update()
@@ -2470,12 +3164,35 @@ class DrawingArea(QFrame):
             self.update()
             return
 
-        if self.preview_shape:
+        if self.current_tool == "label" and self._labeling:
+            self._label_end = pt
+            self.preview_end = pt
+            self.update()
+            return
+
+        # Only update placement preview for active tool drawing (not selected-shape editing)
+        if self.preview_shape and self.current_tool is not None and self.selected_shape_index is None:
             pt = self.widget_to_canvas(event.position().toPoint())
+            if self.snap_to_grid:
+                pt = self._snap_to_grid(pt)
             self.preview_end = pt
             self.update()
 
     def mouseReleaseEvent(self, event):
+
+        if self.current_tool == "label" and self._labeling and event.button() == Qt.MouseButton.LeftButton:
+            self._labeling = False
+            if self.preview_start is not None and self.preview_end is not None:
+                canvas_rect = QRect(self.preview_start, self.preview_end).normalized()
+                if canvas_rect.width() > 5 and canvas_rect.height() > 5:
+                    self.preview_shape = None  # hide the preview placeholder
+                    self._show_text_overlay(canvas_rect)
+                else:
+                    self.preview_shape = None
+                    self.preview_start = None
+                    self.preview_end = None
+            self.update()
+            return
 
         if self._free_rotating:
             if event.button() != Qt.MouseButton.LeftButton:
@@ -2502,12 +3219,15 @@ class DrawingArea(QFrame):
                     tool, start, end, border_color = shape[:4]
                     fill_color = None
                     extra_dicts = []
+                    label_text = None
                     lock_flag = None
                     for item in shape[4:]:
                         if isinstance(item, QColor):
                             fill_color = item
                         elif isinstance(item, bool):
                             lock_flag = item
+                        elif isinstance(item, str):
+                            label_text = item
                         elif isinstance(item, dict):
                             extra_dicts.append(item)
                     rotation = getattr(self, 'preview_rotation', 0)
@@ -2515,6 +3235,8 @@ class DrawingArea(QFrame):
                     if fill_color is not None:
                         new_shape.append(fill_color)
                     new_shape.append(rotation)
+                    if label_text is not None:
+                        new_shape.append(label_text)
                     for d in extra_dicts:
                         new_shape.append(d)
                     if lock_flag is not None:
@@ -2524,7 +3246,20 @@ class DrawingArea(QFrame):
             self.update()
             return
 
+        # Commit overset move/resize for non-draw shape edits so label stays in view after drag
+        if (self._dragging_box or self._dragging_handle) and self.selected_shape_index is not None:
+            idx = self.selected_shape_index
+            if 0 <= idx < len(self.shapes) and self.preview_shape is not None and self.preview_start is not None and self.preview_end is not None:
+                old_shape = self.shapes[idx]
+                if old_shape[0] != "draw":
+                    base = [old_shape[0], self.preview_start, self.preview_end]
+                    if len(old_shape) > 3:
+                        base.append(old_shape[3])
+                    base.extend(old_shape[4:])
+                    self.shapes[idx] = tuple(base)
+
         self._dragging_handle = None
+        self._active_guides = []
 
         if self.preview_shape == "draw" and isinstance(self.preview_start, list):
             # Commit edit if handle/box drag finished
@@ -2689,6 +3424,21 @@ class DrawingArea(QFrame):
         painter.setPen(QPen(QColor("#bbbbbb"), 3))
         painter.drawRect(0, 0, self.a4_size.width(), self.a4_size.height())
 
+        # Draw snap grid overlay
+        if self.snap_to_grid:
+            grid_pen = QPen(QColor(180, 180, 180, 60), 1, Qt.PenStyle.SolidLine)
+            painter.setPen(grid_pen)
+            g = self.grid_size
+            w, h = self.a4_size.width(), self.a4_size.height()
+            x = g
+            while x < w:
+                painter.drawLine(x, 0, x, h)
+                x += g
+            y = g
+            while y < h:
+                painter.drawLine(0, y, w, y)
+                y += g
+
         # Draw shapes, but skip the one being edited (if any)
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
@@ -2718,6 +3468,9 @@ class DrawingArea(QFrame):
 
             if self.selected_shape_index is not None and idx == self.selected_shape_index and self.preview_shape:
                 continue  # Skip the one being edited
+            # Skip label shapes that are currently open for text editing
+            if tool == "label" and idx == getattr(self, "_label_edit_index", None) and self._text_edit_overlay is not None:
+                continue
             painter.save()
 
             if tool == "image" and isinstance(data, QPixmap):
@@ -2751,10 +3504,79 @@ class DrawingArea(QFrame):
                         painter.setBrush(QBrush(fill_color))
                         painter.setPen(Qt.PenStyle.NoPen)
                         self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight(), border_radius=border_radius)
-                    # Draw border
-                    painter.setBrush(Qt.BrushStyle.NoBrush)
-                    painter.setPen(QPen(color, border_weight if border_weight is not None else 3))
-                    self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight(), line_width=border_weight, border_radius=border_radius)
+                    # Draw border (skip if transparent or weight is 0)
+                    if color.alpha() > 0 and border_weight and border_weight > 0:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QPen(color, border_weight if border_weight is not None else 3))
+                        self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight(), line_width=border_weight, border_radius=border_radius)
+                    # Draw text content for label shapes
+                    if tool == "label":
+                        lbl_text = ""
+                        lbl_font_size = 14
+                        lbl_bold = False
+                        lbl_italic = False
+                        lbl_underline = False
+                        lbl_font_family = getattr(self, "_label_font_family", "Arial")
+                        lbl_align = "left"
+                        for _item in shape[4:]:
+                            if isinstance(_item, str):
+                                lbl_text = _item
+                            elif isinstance(_item, dict) and "font_size" in _item:
+                                lbl_font_size = _item.get("font_size", lbl_font_size)
+                                lbl_bold = _item.get("font_bold", False)
+                                lbl_italic = _item.get("font_italic", False)
+                                lbl_underline = _item.get("font_underline", False)
+                                lbl_font_family = _item.get("font_family", lbl_font_family)
+                                lbl_align = _item.get("text_align", lbl_align)
+                        if lbl_text:
+                            # Prefer rendering rich text (HTML) so per-character styles like
+                            # background highlight are preserved. Fall back to plain drawText
+                            # if the rich-text render path fails.
+                            try:
+                                from PyQt6.QtGui import QTextDocument
+                                text_draw_rect = rect.adjusted(4, 4, -4, -4)
+                                lbl_font = QFont(lbl_font_family, lbl_font_size)
+                                lbl_font.setBold(lbl_bold)
+                                lbl_font.setItalic(lbl_italic)
+                                lbl_font.setUnderline(lbl_underline)
+
+                                doc = QTextDocument()
+                                doc.setDefaultFont(lbl_font)
+
+                                # Heuristic: treat the stored text as HTML if it contains tags
+                                is_html = isinstance(lbl_text, str) and ("<" in lbl_text and ">" in lbl_text and any(k in lbl_text.lower() for k in ("<span", "<p", "<div", "<br", "<b", "<i", "<u", "style=", "<!doctype", "<html")))
+                                if is_html:
+                                    doc.setHtml(lbl_text)
+                                else:
+                                    # Escape plain text and wrap with styling for color/alignment
+                                    safe_text = (lbl_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>"))
+                                    doc.setHtml(f'<div style="color:{color.name()}; font-family:{lbl_font_family}; font-size:{lbl_font_size}pt; text-align:{lbl_align};">{safe_text}</div>')
+
+                                doc.setTextWidth(float(text_draw_rect.width()))
+                                painter.save()
+                                painter.translate(text_draw_rect.left(), text_draw_rect.top())
+                                doc.drawContents(painter, QRectF(0, 0, text_draw_rect.width(), text_draw_rect.height()))
+                                painter.restore()
+                            except Exception:
+                                painter.setPen(QPen(color))
+                                lbl_font = QFont(lbl_font_family, lbl_font_size)
+                                lbl_font.setBold(lbl_bold)
+                                lbl_font.setItalic(lbl_italic)
+                                lbl_font.setUnderline(lbl_underline)
+                                painter.setFont(lbl_font)
+                                text_draw_rect = rect.adjusted(4, 4, -4, -4)
+                                # map stored alignment to a Qt flag
+                                align_map = {
+                                    "left": Qt.AlignmentFlag.AlignLeft,
+                                    "center": Qt.AlignmentFlag.AlignHCenter,
+                                    "right": Qt.AlignmentFlag.AlignRight,
+                                }
+                                a_flag = align_map.get(lbl_align, Qt.AlignmentFlag.AlignLeft)
+                                painter.drawText(
+                                    text_draw_rect,
+                                    a_flag | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                                    lbl_text,
+                                )
             painter.restore()
 
         if self.current_tool == "draw" and getattr(self, "drawing", False):
@@ -2834,11 +3656,78 @@ class DrawingArea(QFrame):
                 preview_pen = QPen(QColor("#ff6600"), 3, Qt.PenStyle.DashLine)
                 painter.setPen(preview_pen)
                 points = self.preview_start
-
                 painter.drawPolyline(*points)
             elif self.preview_shape == "image" and hasattr(self, "preview_pixmap") and isinstance(self.preview_pixmap, QPixmap):
                 painter.drawPixmap(rect, self.preview_pixmap)
-            elif self.preview_shape is not None and rect is not None:
+            elif self.preview_shape == "label" and self.selected_shape_index is not None:
+                # Draw selected label's text + border (using live preview rect while moving)
+                if 0 <= self.selected_shape_index < len(self.shapes):
+                    lbl_shape = self.shapes[self.selected_shape_index]
+                    if len(lbl_shape) >= 4 and lbl_shape[0] == "label":
+                        _, s_start, s_end, s_data, *rest = lbl_shape
+                        if self.preview_start is not None and self.preview_end is not None:
+                            rect_show = QRect(self.preview_start, self.preview_end).normalized()
+                        else:
+                            rect_show = QRect(s_start, s_end).normalized()
+                        # Fill / border for label shape if needed
+                        color = s_data if isinstance(s_data, QColor) else QColor("#000000")
+                        fill_color = None
+                        lbl_text = ""
+                        lbl_font_size = self._label_font_size
+                        lbl_bold = False
+                        lbl_italic = False
+                        lbl_underline = False
+                        lbl_font_family = getattr(self, "_label_font_family", "Arial")
+                        lbl_align = getattr(self, "_label_text_align", "left")
+                        for item in rest:
+                            if isinstance(item, QColor):
+                                fill_color = item
+                            elif isinstance(item, str):
+                                lbl_text = item
+                            elif isinstance(item, dict):
+                                lbl_font_size = item.get("font_size", lbl_font_size)
+                                lbl_bold = item.get("font_bold", False)
+                                lbl_italic = item.get("font_italic", False)
+                                lbl_underline = item.get("font_underline", False)
+                                lbl_font_family = item.get("font_family", lbl_font_family)
+                                lbl_align = item.get("text_align", lbl_align)
+                        if fill_color is not None:
+                            painter.setBrush(QBrush(fill_color))
+                            painter.setPen(Qt.PenStyle.NoPen)
+                            self.draw_shape(painter, "label", rect_show.topLeft(), rect_show.bottomRight())
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QPen(color, 2))
+                        self.draw_shape(painter, "label", rect_show.topLeft(), rect_show.bottomRight())
+                        if lbl_text:
+                            text_draw_rect = rect_show.adjusted(4, 4, -4, -4)
+                            lbl_font = QFont(lbl_font_family, lbl_font_size)
+                            lbl_font.setBold(lbl_bold)
+                            lbl_font.setItalic(lbl_italic)
+                            lbl_font.setUnderline(lbl_underline)
+                            try:
+                                from PyQt6.QtGui import QTextDocument
+                                doc = QTextDocument()
+                                doc.setDefaultFont(lbl_font)
+                                is_html = isinstance(lbl_text, str) and ("<" in lbl_text and ">" in lbl_text and any(k in lbl_text.lower() for k in ("<span", "<p", "<div", "<br", "<b", "<i", "<u", "style=", "<!doctype", "<html")))
+                                if is_html:
+                                    doc.setHtml(lbl_text)
+                                else:
+                                    safe_text = (lbl_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>"))
+                                    doc.setHtml(f'<div style="color:{color.name()}; font-family:{lbl_font_family}; font-size:{lbl_font_size}pt; text-align:{lbl_align};">{safe_text}</div>')
+                                doc.setTextWidth(float(text_draw_rect.width()))
+                                painter.save()
+                                painter.translate(text_draw_rect.left(), text_draw_rect.top())
+                                doc.drawContents(painter, QRectF(0, 0, text_draw_rect.width(), text_draw_rect.height()))
+                                painter.restore()
+                            except Exception:
+                                painter.setPen(QPen(color))
+                                painter.setFont(lbl_font)
+                                painter.drawText(
+                                    text_draw_rect,
+                                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                                    lbl_text,
+                                )
+            elif self.preview_shape is not None and self.preview_shape != "label" and rect is not None:
                 preview_pen = QPen(QColor("#ff6600"), 3, Qt.PenStyle.DashLine)
                 painter.setPen(preview_pen)
                 self.draw_shape(painter, self.preview_shape, rect.topLeft(), rect.bottomRight())
@@ -2853,23 +3742,40 @@ class DrawingArea(QFrame):
                 if isinstance(item, (int, float)) and not isinstance(item, bool):
                     rotation = item
 
-            painter.save()
-            highlight_pen = QPen(QColor("#ff6600"), 4, Qt.PenStyle.DashLine)
-            painter.setPen(highlight_pen)
-            if tool == "draw" and isinstance(start, list) and len(start) > 1:
-                # Draw the polyline directly
-                painter.drawPolyline(*start)
+            # Do not draw the orange selection highlight while the inline
+            # label editor overlay is active for this shape — the overlay
+            # provides its own visual chrome.
+            if getattr(self, '_text_edit_overlay', None) is not None and getattr(self, '_label_edit_index', None) == self.selected_shape_index:
+                pass
             else:
-                rect = QRect(start, end).normalized()
-                if rotation:
-                    painter.translate(rect.center())
-                    painter.rotate(rotation)
-                    painter.translate(-rect.center())
-                if tool == "image":
-                    painter.drawRect(rect)
+                painter.save()
+                highlight_pen = QPen(QColor("#ff6600"), 4, Qt.PenStyle.DashLine)
+                painter.setPen(highlight_pen)
+                if tool == "draw" and isinstance(start, list) and len(start) > 1:
+                    # Draw the polyline directly
+                    painter.drawPolyline(*start)
                 else:
-                    self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight())
-            painter.restore()
+                    rect = QRect(start, end).normalized()
+                    if rotation:
+                        painter.translate(rect.center())
+                        painter.rotate(rotation)
+                        painter.translate(-rect.center())
+                    if tool == "image":
+                        painter.drawRect(rect)
+                    else:
+                        self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight())
+                painter.restore()
+
+        # Draw alignment guide lines
+        if self._active_guides:
+            guide_pen = QPen(QColor("#0078d7"), 1, Qt.PenStyle.DashLine)
+            painter.setPen(guide_pen)
+            w, h = self.a4_size.width(), self.a4_size.height()
+            for direction, coord in self._active_guides:
+                if direction == "v":
+                    painter.drawLine(coord, 0, coord, h)
+                else:
+                    painter.drawLine(0, coord, w, coord)
 
         painter.restore()
 
@@ -2938,8 +3844,13 @@ class DrawingArea(QFrame):
 
     def draw_shape(self, painter, tool, start, end, line_width=None, border_radius=None):
         if line_width is None:
-            line_width = self.tool_sizes.get('shapes' if tool not in ['line'] else 'line', 2)
-        painter.setPen(QPen(painter.pen().color(), line_width))
+            if painter.pen().style() == Qt.PenStyle.NoPen:
+                pass  # Preserve NoPen for fill-only drawing
+            else:
+                line_width = self.tool_sizes.get('shapes' if tool not in ['line'] else 'line', 2)
+                painter.setPen(QPen(painter.pen().color(), line_width))
+        else:
+            painter.setPen(QPen(painter.pen().color(), line_width))
         if tool == "draw":
             # Polyline drawing
             if isinstance(start, list) and len(start) > 1:
@@ -2971,14 +3882,872 @@ class DrawingArea(QFrame):
         elif tool == "roundrect":
             r = border_radius if border_radius is not None else 18
             painter.drawRoundedRect(rect, r, r)
+        elif tool == "label":
+            painter.drawRect(rect)
 
     def widget_to_canvas(self, pos):
-        """Convert widget coordinates to canvas coordinates, considering zoom and centering."""
+        # Convert widget coordinates to canvas coordinates, considering zoom and centering
         center = self.get_canvas_center()
         # Subtract pan_offset here!
         x = (pos.x() - center.x() - self.pan_offset.x()) / self.scale_factor + self.a4_size.width() / 2
         y = (pos.y() - center.y() - self.pan_offset.y()) / self.scale_factor + self.a4_size.height() / 2
-        return QPoint(int(x), int(y))
+        return QPoint(int(round(x)), int(round(y)))
+
+    def canvas_to_widget(self, pt):
+        # Convert canvas coordinates to widget coordinates (inverse of widget_to_canvas)
+        center = self.get_canvas_center()
+        x = center.x() + self.pan_offset.x() + (pt.x() - self.a4_size.width() / 2) * self.scale_factor
+        y = center.y() + self.pan_offset.y() + (pt.y() - self.a4_size.height() / 2) * self.scale_factor
+        return QPoint(int(round(x)), int(round(y)))
+
+    def _show_text_overlay(self, canvas_rect, existing_text=""):
+        # Show an editable, movable/resizable text box overlaid on the canvas rectangle
+        self._cancel_text_overlay()
+
+        tl = self.canvas_to_widget(canvas_rect.topLeft())
+        br = self.canvas_to_widget(canvas_rect.bottomRight())
+        widget_rect = QRect(tl, br).normalized()
+        widget_rect = widget_rect.intersected(self.rect())
+        if widget_rect.width() < 10 or widget_rect.height() < 10:
+            return
+
+        # toolbar (font size + bold + italic) shown above the text box ──
+        toolbar_h = 28
+        toolbar_y = max(0, widget_rect.top() - toolbar_h - 2)
+        toolbar = QWidget(self)
+        toolbar.setFixedHeight(toolbar_h)
+        toolbar.setGeometry(widget_rect.left(), toolbar_y, max(widget_rect.width(), 300), toolbar_h)
+        # Derive colors from the current shape/app accent so the toolbar matches
+        acc_qcolor = getattr(self, 'shape_color', None)
+        if acc_qcolor is None:
+            # fallback to a sensible accent used elsewhere
+            acc_qcolor = getattr(self, 'current_shape_color', QColor("#ff6600"))
+        accent = acc_qcolor if isinstance(acc_qcolor, QColor) else QColor(str(acc_qcolor))
+        accent_hex = accent.name()
+
+        tb_layout = QHBoxLayout(toolbar)
+        tb_layout.setContentsMargins(4, 2, 4, 2)
+        tb_layout.setSpacing(4)
+
+        # Force toolbar to use the exact accent color
+        toolbar.setStyleSheet(f"background: {accent_hex}; border-radius:4px;")
+
+        size_lbl = QLabel("A", toolbar)
+        size_lbl.setStyleSheet(f"color:white; font-size:11pt; border:none; background:transparent;")
+        tb_layout.addWidget(size_lbl)
+
+        font_size_input = QLineEdit(str(self._label_font_size), toolbar)
+        font_size_input.setFixedWidth(38)
+        font_size_input.setFixedHeight(23)
+        font_size_input.setMaxLength(3)
+        #font_size_input.setInputMask("000")  # Only allow 3 digits for font size
+        regex = QRegularExpression(r'[1-9][0-9]{0,2}')  # 1-999
+        validator = QRegularExpressionValidator(regex, font_size_input)
+        font_size_input.setValidator(validator)
+        # - background: white by default; becomes black if accent is white
+        # - foreground: black by default; becomes white if accent is black
+        accent_hex_lower = accent_hex.lower()
+        control_bg = "#000000" if accent_hex_lower in ("#ffffff", "white") else "#ffffff"
+        control_fg = "#ffffff" if accent_hex_lower in ("#000000", "black") else "#000000"
+        # Safety: ensure contrast — if they accidentally match, invert the foreground
+        if control_bg == control_fg:
+            control_fg = "#ffffff" if control_bg == "#000000" else "#000000"
+
+        border_col = accent.darker(120).name()
+        font_size_input.setStyleSheet(
+            f"background:{control_bg}; color:{control_fg}; border:1px solid {border_col}; border-radius:3px; font-size:10pt; margin-top:1px;"
+        )
+        tb_layout.addWidget(font_size_input)
+
+        # Font family selector
+        font_combo = QFontComboBox(toolbar)
+        font_combo.setFixedHeight(23)
+        font_combo.setFixedWidth(100)
+        font_combo.setStyleSheet(
+            f"background:{control_bg}; color:{control_fg}; border:1px solid {border_col}; border-radius:3px; font-size:10pt; margin-top:1px;"
+        )
+        # initialize to current selection if set
+        current_family = getattr(self, "_label_font_family", "Arial")
+        try:
+            font_combo.setCurrentFont(QFont(current_family))
+        except Exception:
+            pass
+        tb_layout.addWidget(font_combo)
+
+        # Text color to use when a button is shown with the accent background
+        checked_text_color = "#ffffff" if accent_hex_lower in ("#000000", "black") else "#000000"
+
+        bold_btn = QPushButton("B", toolbar)
+        bold_btn.setCheckable(True)
+        bold_btn.setChecked(getattr(self, "_label_font_bold", False))
+        bold_btn.setFixedSize(24, 22)
+        bold_style = (
+            f"QPushButton{{background:{control_bg};color:{control_fg};border:1px solid {border_col};border-radius:3px;font-weight:bold;font-size:10pt;}}"
+            f"QPushButton:checked{{background:{accent_hex};border-color:{accent_hex};color:{checked_text_color};}}"
+        )
+        bold_btn.setStyleSheet(bold_style)
+        tb_layout.addWidget(bold_btn)
+
+        italic_btn = QPushButton("I", toolbar)
+        italic_btn.setCheckable(True)
+        italic_btn.setChecked(getattr(self, "_label_font_italic", False))
+        italic_btn.setFixedSize(24, 22)
+        italic_style = (
+            f"QPushButton{{background:{control_bg};color:{control_fg};border:1px solid {border_col};border-radius:3px;font-style:italic;font-size:10pt;}}"
+            f"QPushButton:checked{{background:{accent_hex};border-color:{accent_hex};color:{checked_text_color};}}"
+        )
+        italic_btn.setStyleSheet(italic_style)
+        tb_layout.addWidget(italic_btn)
+        
+        # Underline button
+        underline_btn = QPushButton("U", toolbar)
+        underline_btn.setCheckable(True)
+        underline_btn.setChecked(getattr(self, "_label_font_underline", False))
+        underline_btn.setFixedSize(24, 22)
+        # give the button an underlined appearance
+        ufont = QFont()
+        ufont.setUnderline(True)
+        ufont.setBold(True)
+        underline_btn.setFont(ufont)
+        underline_style = (
+            f"QPushButton{{background:{control_bg};color:{control_fg};border:1px solid {border_col};border-radius:3px;font-size:10pt;}}"
+            f"QPushButton:checked{{background:{accent_hex};border-color:{accent_hex};color:{checked_text_color};}}"
+        )
+        underline_btn.setStyleSheet(underline_style)
+        tb_layout.addWidget(underline_btn)
+
+        # Alignment toggle button (cycles: Left -> Center -> Right)
+        align_btn = QPushButton("L", toolbar)
+        align_btn.setFixedSize(24, 22)
+        align_style = (
+            f"QPushButton{{background:{control_bg};color:{control_fg};border:1px solid {border_col};border-radius:3px;font-size:10pt;}}"
+            f"QPushButton:pressed{{background:{accent_hex};border-color:{accent_hex};color:{checked_text_color};}}"
+        )
+        align_btn.setStyleSheet(align_style)
+        align_btn.setToolTip("Cycle alignment (Left → Center → Right)")
+        tb_layout.addWidget(align_btn)
+
+        # helper to update the visible label on the align button
+        def _update_align_btn_text():
+            val = getattr(self, "_label_text_align", "left")
+            if val == "left":
+                align_btn.setText("L")
+            elif val == "center":
+                align_btn.setText("C")
+            else:
+                align_btn.setText("R")
+
+        _update_align_btn_text()
+
+        def _cycle_align():
+            order = ["left", "center", "right"]
+            cur = getattr(self, "_label_text_align", "left")
+            nxt = order[(order.index(cur) + 1) % len(order)]
+            setattr(self, "_label_text_align", nxt)
+            _update_align_btn_text()
+            # apply alignment: to selection if present, otherwise to whole document
+            try:
+                align_map = {
+                    "left": Qt.AlignmentFlag.AlignLeft,
+                    "center": Qt.AlignmentFlag.AlignHCenter,
+                    "right": Qt.AlignmentFlag.AlignRight,
+                }
+                a = align_map.get(nxt, Qt.AlignmentFlag.AlignLeft)
+                cursor = te.textCursor()
+                from PyQt6.QtGui import QTextBlockFormat
+                block_fmt = QTextBlockFormat()
+                block_fmt.setAlignment(a)
+                if cursor.hasSelection():
+                    cursor.beginEditBlock()
+                    cursor.mergeBlockFormat(block_fmt)
+                    cursor.endEditBlock()
+                else:
+                    # apply to entire document
+                    cursor.select(cursor.SelectionType.Document)
+                    cursor.mergeBlockFormat(block_fmt)
+                    try:
+                        te.setAlignment(a)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        align_btn.clicked.connect(_cycle_align)
+        tb_layout.addStretch()
+        toolbar.show()
+
+        # Keep references to toolbar controls so eventFilter hotkeys
+        # can update the UI (checked state / displayed values).
+        self._label_bold_btn = bold_btn
+        self._label_italic_btn = italic_btn
+        self._label_underline_btn = underline_btn
+        self._label_align_btn = align_btn
+        self._label_font_size_input = font_size_input
+        self._label_font_combo = font_combo
+
+        # text edit
+        te = QTextEdit()
+        te.setFrameShape(QFrame.Shape.NoFrame)
+        te.setStyleSheet("QTextEdit { border: none; background: transparent; }")
+        # hide scrollbars for inline editor
+        te.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        te.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        te.setWordWrapMode(te.wordWrapMode().WordWrap)
+        # If existing_text contains HTML (from a previous rich-text edit), preserve it.
+        try:
+            if isinstance(existing_text, str) and ("<" in existing_text and ">" in existing_text and any(k in existing_text.lower() for k in ("<span", "<p", "<div", "<br", "<b", "<i", "<u", "style=", "<!doctype", "<html"))):
+                # Preserve inline per-character styling (underline / font-size)
+                # when present. Only strip absolute font-size declarations
+                # when no inline sizes exist to avoid losing selection-specific
+                # formatting. This prevents accidental application of underline
+                # or size to the entire label when only part was edited.
+                try:
+                    import re
+                    s = existing_text
+                    has_inline_size = bool(re.search(r"font-size\s*:\s*[^;\"']+", s, flags=re.I) or re.search(r"<font[^>]*\s+size\s*=\s*[\"']", s, flags=re.I))
+                    # If no inline sizes are present, it's safe to normalize
+                    # by removing any stray absolute declarations. Otherwise,
+                    # keep inline sizes intact so per-character sizes survive.
+                    if not has_inline_size:
+                        s = re.sub(r"font-size\s*:\s*[^;\"']+;?", "", s, flags=re.I)
+                        s = re.sub(r'(<font[^>]*?)\s+size\s*=\s*"[^\"]*"([^>]*>)', r'\1\2', s, flags=re.I)
+                        s = re.sub(r"(<font[^>]*?)\s+size\s*=\s*'[^']*'([^>]*>)", r'\1\2', s, flags=re.I)
+                        s = re.sub(r'style\s*=\s*"\s*"', '', s, flags=re.I)
+                    else:
+                        # Stored HTML has unscaled (canvas-space) font sizes.
+                        # Scale them up by scale_factor for WYSIWYG display in
+                        # the editor widget.
+                        sf = self.scale_factor or 1.0
+                        if sf != 1.0:
+                            def _scale_fs(m):
+                                val = float(m.group(1))
+                                unit = m.group(2) if m.group(2) else 'pt'
+                                scaled = val * sf
+                                if abs(scaled - round(scaled)) < 0.05:
+                                    return f"font-size:{int(round(scaled))}{unit}"
+                                return f"font-size:{scaled:.1f}{unit}"
+                            s = re.sub(r'font-size\s*:\s*([0-9.]+)\s*(pt|px)?', _scale_fs, s, flags=re.I)
+                except Exception:
+                    s = existing_text
+                te.setHtml(s)
+            else:
+                te.setPlainText(existing_text)
+        except Exception:
+            te.setPlainText(existing_text)
+
+        # movable/resizable overlay 
+        overlay = _LabelTextOverlay(self, canvas_rect, te, toolbar)
+        overlay._reposition()  # ensure margin plus handles is applied immediately
+        overlay.show()
+        overlay.raise_()
+
+        # Always scale the editor font by the current canvas zoom so the
+        # text in the overlay matches the committed label visually (WYSIWYG).
+        self._apply_label_font_to_editor(te, apply_style_flags=False, scale_font=True)
+        te.setFocus()
+        if existing_text:
+            cursor = te.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            te.setTextCursor(cursor)
+
+        self._text_edit_overlay    = overlay
+        self._text_edit_widget     = te
+        self._label_toolbar_widget = toolbar
+        self._label_canvas_rect    = canvas_rect
+
+        # Wire toolbar controls (apply to selection if present, otherwise to whole document)
+        def _on_font_size_changed(text):
+            try:
+                sz = int(text)
+                if 1 <= sz <= 999: # limit font size to 999
+                    self._label_font_size = sz
+                    # If a selection exists, apply size only to selection
+                    try:
+                        cursor = te.textCursor()
+                        from PyQt6.QtGui import QTextCharFormat
+                        pt_size = max(1, int(sz * (self.scale_factor or 1.0)))
+                        fmt = QTextCharFormat()
+                        fmt.setFontPointSize(float(pt_size))
+                        fmt.setFontFamily(getattr(self, "_label_font_family", "Arial"))
+                        if cursor.hasSelection():
+                            cursor.beginEditBlock()
+                            cursor.mergeCharFormat(fmt)
+                            cursor.endEditBlock()
+                        te.mergeCurrentCharFormat(fmt)
+                        te.update()
+                    except Exception:
+                        pass
+            except ValueError:
+                pass
+
+        def _on_bold_toggled(checked: bool):
+            self._label_font_bold = checked
+            try:
+                cursor = te.textCursor()
+                from PyQt6.QtGui import QTextCharFormat
+                fmt = QTextCharFormat()
+                fmt.setFontWeight(QFont.Weight.Bold if checked else QFont.Weight.Normal)
+                if cursor.hasSelection():
+                    cursor.beginEditBlock()
+                    cursor.mergeCharFormat(fmt)
+                    cursor.endEditBlock()
+                te.mergeCurrentCharFormat(fmt)
+                te.update()
+            except Exception:
+                pass
+
+        def _on_italic_toggled(checked: bool):
+            self._label_font_italic = checked
+            try:
+                cursor = te.textCursor()
+                from PyQt6.QtGui import QTextCharFormat
+                fmt = QTextCharFormat()
+                fmt.setFontItalic(bool(checked))
+                if cursor.hasSelection():
+                    cursor.beginEditBlock()
+                    cursor.mergeCharFormat(fmt)
+                    cursor.endEditBlock()
+                te.mergeCurrentCharFormat(fmt)
+                te.update()
+            except Exception:
+                pass
+
+        def _on_underline_toggled(checked: bool):
+            self._label_font_underline = checked
+            try:
+                cursor = te.textCursor()
+                from PyQt6.QtGui import QTextCharFormat
+                fmt = QTextCharFormat()
+                fmt.setFontUnderline(bool(checked))
+                if cursor.hasSelection():
+                    cursor.beginEditBlock()
+                    cursor.mergeCharFormat(fmt)
+                    cursor.endEditBlock()
+                te.mergeCurrentCharFormat(fmt)
+                te.update()
+            except Exception:
+                pass
+
+        def _on_font_changed(qf):
+            try:
+                family = qf.family()
+            except Exception:
+                # Some PyQt versions may emit no-arg signal; fall back
+                self._apply_label_font_to_editor(te)
+                return
+            self._label_font_family = family
+            try:
+                cursor = te.textCursor()
+                from PyQt6.QtGui import QTextCharFormat
+                fmt = QTextCharFormat()
+                fmt.setFontFamily(family)
+                if cursor.hasSelection():
+                    cursor.beginEditBlock()
+                    cursor.mergeCharFormat(fmt)
+                    cursor.endEditBlock()
+                te.mergeCurrentCharFormat(fmt)
+                te.update()
+            except Exception:
+                pass
+
+        font_size_input.textChanged.connect(_on_font_size_changed)
+        bold_btn.toggled.connect(_on_bold_toggled)
+        italic_btn.toggled.connect(_on_italic_toggled)
+        underline_btn.toggled.connect(_on_underline_toggled)
+        try:
+            font_combo.currentFontChanged.connect(_on_font_changed)
+        except Exception:
+            try:
+                # Fallback: connect without args and re-apply whole document
+                font_combo.currentFontChanged.connect(lambda: self._apply_label_font_to_editor(te))
+            except Exception:
+                pass
+
+        # Install event filter for Escape / Ctrl+Enter
+        te.installEventFilter(self)
+
+    def _apply_label_font_to_editor(self, te, apply_style_flags: bool = True, scale_font: bool = True):
+        # Apply current label font settings to the QTextEdit overlay.
+
+        # If apply_style_flags is False, only update font family and point-size
+        # (used when scaling on zoom/pan) to avoid overwriting per-character
+        # bold/italic/underline that may have been applied to a selection.
+        
+        if te is None:
+            return
+        # Compute point size. When `scale_font` is True, apply canvas zoom
+        # so the widget matches the canvas rendering. When False, use the
+        # logical label font size (useful for new labels where the user
+        # expects the configured point-size regardless of current zoom).
+        if scale_font:
+            pt_size = max(1, int(self._label_font_size * (self.scale_factor or 1.0)))
+        else:
+            pt_size = max(1, int(self._label_font_size))
+
+        family = getattr(self, "_label_font_family", "Arial")
+        # Base font (do not force style flags here if only scaling)
+        font = QFont(family, pt_size)
+        if apply_style_flags:
+            font.setBold(getattr(self, "_label_font_bold", False))
+            font.setItalic(getattr(self, "_label_font_italic", False))
+            font.setUnderline(getattr(self, "_label_font_underline", False))
+
+        # Apply to the widget and update document default font
+        te.setFont(font)
+        try:
+            te.document().setDefaultFont(font)
+
+            # When apply_style_flags is False (used for zoom/pan rescaling)
+            # avoid merging char/block formats across the whole document
+            # because that would overwrite per-character selection styles.
+            cursor = te.textCursor()
+            if apply_style_flags:
+                # Merge a char format across the document for family/size and
+                # optionally style flags (bold/italic/underline).
+                cursor.select(cursor.SelectionType.Document)
+                from PyQt6.QtGui import QTextCharFormat
+                fmt = QTextCharFormat()
+                fmt.setFontPointSize(float(pt_size))
+                fmt.setFontFamily(family)
+                # Only set these if caller explicitly wants to apply style flags
+                try:
+                    fmt.setFontWeight(QFont.Weight.Bold if getattr(self, "_label_font_bold", False) else QFont.Weight.Normal)
+                except Exception:
+                    pass
+                try:
+                    fmt.setFontItalic(getattr(self, "_label_font_italic", False))
+                except Exception:
+                    pass
+                try:
+                    fmt.setFontUnderline(getattr(self, "_label_font_underline", False))
+                except Exception:
+                    pass
+                cursor.mergeCharFormat(fmt)
+
+                # Also merge block/paragraph alignment so existing paragraphs adopt
+                # the chosen horizontal alignment (left/center/right).
+                try:
+                    from PyQt6.QtGui import QTextBlockFormat
+                    align_map = {
+                        "left": Qt.AlignmentFlag.AlignLeft,
+                        "center": Qt.AlignmentFlag.AlignHCenter,
+                        "right": Qt.AlignmentFlag.AlignRight,
+                    }
+                    a = align_map.get(getattr(self, "_label_text_align", "left"), Qt.AlignmentFlag.AlignLeft)
+                    block_fmt = QTextBlockFormat()
+                    block_fmt.setAlignment(a)
+                    cursor.mergeBlockFormat(block_fmt)
+                    te.setTextCursor(cursor)
+                    try:
+                        te.setAlignment(a)
+                    except Exception:
+                        pass
+                except Exception:
+                    te.setTextCursor(cursor)
+            else:
+                # Only update widget/document default fonts (no per-char merges)
+                # so zoom/pan only affects on-screen sizing and does not change
+                # stored character formatting.
+                pass
+        except Exception:
+            pass
+        te.update()
+        te.repaint()
+
+    def _commit_text_overlay(self):
+        # Commit the text-box contents as a label shape on the canvas.
+        if self._text_edit_widget is None:
+            return
+        # Preserve rich-text formatting (highlights, spans) by using HTML when available
+        try:
+            text = self._text_edit_widget.toHtml()
+        except Exception:
+            text = self._text_edit_widget.toPlainText()
+        # Prefer to preserve per-character inline styles (underline / font-size)
+        # when present. Only remove absolute font-size declarations when no
+        # inline sizes exist to avoid losing selection-specific formatting.
+        has_inline_size = False
+        has_inline_underline = False
+        try:
+            import re
+            if isinstance(text, str):
+                has_inline_size = bool(re.search(r"font-size\s*:\s*[^;\"']+", text, flags=re.I) or re.search(r"<font[^>]*\s+size\s*=\s*[\"']", text, flags=re.I))
+                has_inline_underline = bool(re.search(r'<u\b', text, flags=re.I) or re.search(r'text-decoration\s*:\s*underline', text, flags=re.I))
+                # The editor uses scaled font sizes (logical_size × scale_factor)
+                # for WYSIWYG display.  Convert inline font-sizes back to logical
+                # (unscaled) canvas-space values before storing, so that
+                # paintEvent's painter.scale() doesn't double-scale them.
+                sf = self.scale_factor or 1.0
+                if sf != 1.0 and has_inline_size:
+                    def _unscale_fs(m):
+                        val = float(m.group(1))
+                        unit = m.group(2) if m.group(2) else 'pt'
+                        unscaled = val / sf
+                        if abs(unscaled - round(unscaled)) < 0.05:
+                            return f"font-size:{int(round(unscaled))}{unit}"
+                        return f"font-size:{unscaled:.1f}{unit}"
+                    text = re.sub(r'font-size\s*:\s*([0-9.]+)\s*(pt|px)?', _unscale_fs, text, flags=re.I)
+                    # Re-check after unscaling
+                    has_inline_size = bool(re.search(r"font-size\s*:\s*[^;\"']+", text, flags=re.I) or re.search(r"<font[^>]*\s+size\s*=\s*[\"']", text, flags=re.I))
+                if not has_inline_size:
+                    text = re.sub(r"font-size\s*:\s*[^;\"']+;?", "", text, flags=re.I)
+                    text = re.sub(r'(<font[^>]*?)\s+size\s*=\s*"[^\"]*"([^>]*>)', r'\1\2', text, flags=re.I)
+                    text = re.sub(r"(<font[^>]*?)\s+size\s*=\s*'[^']*'([^>]*>)", r'\1\2', text, flags=re.I)
+                    text = re.sub(r'style\s*=\s*"\s*"', '', text, flags=re.I)
+                else:
+                    # still remove empty style attributes
+                    text = re.sub(r'style\s*=\s*"\s*"', '', text, flags=re.I)
+        except Exception:
+            pass
+        canvas_rect = getattr(self, "_label_canvas_rect", None)
+        color = self.shape_color
+        font_size = self._label_font_size
+        font_bold = getattr(self, "_label_font_bold", False)
+        font_italic = getattr(self, "_label_font_italic", False)
+        edit_idx = self._label_edit_index
+
+        # When editing an existing label, preserve its stored border color
+        # instead of overwriting it with the current tool color.
+        if edit_idx is not None and 0 <= edit_idx < len(self.shapes):
+            orig_border = self.shapes[edit_idx][3]
+            if isinstance(orig_border, QColor):
+                color = orig_border
+
+        self._cancel_text_overlay()
+
+        if canvas_rect is None:
+            self.preview_shape = None
+            self.preview_start = None
+            self.preview_end = None
+            self._label_edit_index = None
+            self.update()
+            return
+
+        start = canvas_rect.topLeft()
+        end = canvas_rect.bottomRight()
+
+        if text.strip():
+            self.push_undo()
+            # If the saved HTML contains per-character font sizes or underlines,
+            # prefer those inline styles and avoid forcing a global font_size or
+            # font_underline flag that would apply to the whole label.
+            font_dict = {
+                "font_bold": font_bold,
+                "font_italic": font_italic,
+                "font_family": getattr(self, "_label_font_family", "Arial"),
+                "text_align": getattr(self, "_label_text_align", "left"),
+            }
+            # Only include a global font_size when there are no inline sizes
+            if not has_inline_size:
+                font_dict["font_size"] = font_size
+            # Only include a global underline flag when no inline underline
+            # formatting is present; otherwise inline <u> spans will control
+            # which characters are underlined.
+            font_dict["font_underline"] = (getattr(self, "_label_font_underline", False) and not has_inline_underline)
+            # Keep explicit bold/italic keys (already in dict)
+            font_dict["font_bold"] = font_bold
+            font_dict["font_italic"] = font_italic
+            new_shape = ("label", start, end, color, text, font_dict)
+            # Preserve rotation from the original shape being edited
+            edit_rotation = getattr(self, '_label_edit_rotation', 0)
+            if edit_rotation:
+                new_shape = new_shape + (edit_rotation,)
+            if edit_idx is not None and 0 <= edit_idx < len(self.shapes):
+                # Re-attach any border_weight / border_radius dicts that were
+                # applied via Properties and must survive a move/re-edit.
+                orig = self.shapes[edit_idx]
+                for item in orig[4:]:
+                    if isinstance(item, dict) and ("border_weight" in item or "border_radius" in item):
+                        new_shape = new_shape + (item,)
+                self.shapes[edit_idx] = new_shape
+            else:
+                self.shapes.append(new_shape)
+                
+        self.preview_shape = None
+        self.preview_start = None
+        self.preview_end = None
+        self._label_edit_index = None
+        self._label_edit_rotation = 0
+        self.selected_shape_index = None
+        self.update()
+
+    def _cancel_text_overlay(self):
+        # Dismiss the text-box overlay without committing
+        if self._text_edit_overlay is not None:
+            self._text_edit_overlay.hide()
+            self._text_edit_overlay.setParent(None)
+            self._text_edit_overlay.deleteLater()
+            self._text_edit_overlay = None
+        if self._text_edit_widget is not None:
+            self._text_edit_widget = None
+        if getattr(self, "_label_toolbar_widget", None) is not None:
+            self._label_toolbar_widget.hide()
+            self._label_toolbar_widget.setParent(None)
+            self._label_toolbar_widget.deleteLater()
+            self._label_toolbar_widget = None
+        # Clear stored toolbar control references
+        self._label_bold_btn = None
+        self._label_italic_btn = None
+        self._label_underline_btn = None
+        self._label_align_btn = None
+        self._label_font_size_input = None
+        self._label_font_combo = None
+
+    def eventFilter(self, obj, event):
+        """Intercept key events on the label text-edit overlay."""
+        if self._text_edit_widget is not None and obj is self._text_edit_widget:
+            if event.type() == QEvent.Type.KeyPress:
+                key = event.key()
+                mods = event.modifiers()
+
+                # Cancel overlay
+                if key == Qt.Key.Key_Escape:
+                    self._cancel_text_overlay()
+                    self.preview_shape = None
+                    self.preview_start = None
+                    self.preview_end = None
+                    self._label_edit_index = None
+                    self.update()
+                    return True
+
+                # Commit: Ctrl+Enter
+                if (key in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                        and mods & Qt.KeyboardModifier.ControlModifier):
+                    self._commit_text_overlay()
+                    return True
+
+                te = self._text_edit_widget
+
+                # Toggle Bold: Ctrl+B
+                if key == Qt.Key.Key_B and mods & Qt.KeyboardModifier.ControlModifier:
+                    btn = getattr(self, "_label_bold_btn", None)
+                    if btn is not None:
+                        try:
+                            btn.setChecked(not btn.isChecked())
+                        except Exception:
+                            try:
+                                new_bold = not getattr(self, "_label_font_bold", False)
+                                self._label_font_bold = new_bold
+                                cursor = te.textCursor()
+                                from PyQt6.QtGui import QTextCharFormat
+                                if cursor.hasSelection():
+                                    fmt = QTextCharFormat()
+                                    fmt.setFontWeight(QFont.Weight.Bold if new_bold else QFont.Weight.Normal)
+                                    cursor.beginEditBlock()
+                                    cursor.mergeCharFormat(fmt)
+                                    cursor.endEditBlock()
+                                    try:
+                                        te.mergeCurrentCharFormat(fmt)
+                                    except Exception:
+                                        pass
+                                    te.update()
+                                else:
+                                    self._apply_label_font_to_editor(te)
+                            except Exception:
+                                self._apply_label_font_to_editor(te)
+                    else:
+                        try:
+                            new_bold = not getattr(self, "_label_font_bold", False)
+                            self._label_font_bold = new_bold
+                            cursor = te.textCursor()
+                            from PyQt6.QtGui import QTextCharFormat
+                            if cursor.hasSelection():
+                                fmt = QTextCharFormat()
+                                fmt.setFontWeight(QFont.Weight.Bold if new_bold else QFont.Weight.Normal)
+                                cursor.beginEditBlock()
+                                cursor.mergeCharFormat(fmt)
+                                cursor.endEditBlock()
+                                try:
+                                    te.mergeCurrentCharFormat(fmt)
+                                except Exception:
+                                    pass
+                                te.update()
+                            else:
+                                self._apply_label_font_to_editor(te)
+                        except Exception:
+                            self._apply_label_font_to_editor(te)
+                    return True
+
+                # Toggle Italic: Ctrl+I
+                if key == Qt.Key.Key_I and mods & Qt.KeyboardModifier.ControlModifier:
+                    btn = getattr(self, "_label_italic_btn", None)
+                    if btn is not None:
+                        try:
+                            btn.setChecked(not btn.isChecked())
+                        except Exception:
+                            try:
+                                new_italic = not getattr(self, "_label_font_italic", False)
+                                self._label_font_italic = new_italic
+                                cursor = te.textCursor()
+                                from PyQt6.QtGui import QTextCharFormat
+                                fmt = QTextCharFormat()
+                                fmt.setFontItalic(bool(new_italic))
+                                if cursor.hasSelection():
+                                    cursor.beginEditBlock()
+                                    cursor.mergeCharFormat(fmt)
+                                    cursor.endEditBlock()
+                                    try:
+                                        te.mergeCurrentCharFormat(fmt)
+                                    except Exception:
+                                        pass
+                                    te.update()
+                                else:
+                                    self._apply_label_font_to_editor(te)
+                            except Exception:
+                                self._apply_label_font_to_editor(te)
+                    else:
+                        try:
+                            new_italic = not getattr(self, "_label_font_italic", False)
+                            self._label_font_italic = new_italic
+                            cursor = te.textCursor()
+                            from PyQt6.QtGui import QTextCharFormat
+                            fmt = QTextCharFormat()
+                            fmt.setFontItalic(bool(new_italic))
+                            if cursor.hasSelection():
+                                cursor.beginEditBlock()
+                                cursor.mergeCharFormat(fmt)
+                                cursor.endEditBlock()
+                                try:
+                                    te.mergeCurrentCharFormat(fmt)
+                                except Exception:
+                                    pass
+                                te.update()
+                            else:
+                                self._apply_label_font_to_editor(te)
+                        except Exception:
+                            self._apply_label_font_to_editor(te)
+                    return True
+
+                # Toggle Underline: Ctrl+U
+                if key == Qt.Key.Key_U and mods & Qt.KeyboardModifier.ControlModifier:
+                    btn = getattr(self, "_label_underline_btn", None)
+                    if btn is not None:
+                        try:
+                            btn.setChecked(not btn.isChecked())
+                        except Exception:
+                            try:
+                                new_underline = not getattr(self, "_label_font_underline", False)
+                                self._label_font_underline = new_underline
+                                cursor = te.textCursor()
+                                from PyQt6.QtGui import QTextCharFormat
+                                fmt = QTextCharFormat()
+                                try:
+                                    fmt.setFontUnderline(bool(new_underline))
+                                except Exception:
+                                    fmt.setFontUnderline(bool(new_underline))
+                                if cursor.hasSelection():
+                                    cursor.beginEditBlock()
+                                    cursor.mergeCharFormat(fmt)
+                                    cursor.endEditBlock()
+                                    try:
+                                        te.mergeCurrentCharFormat(fmt)
+                                    except Exception:
+                                        pass
+                                    te.update()
+                                else:
+                                    self._apply_label_font_to_editor(te)
+                            except Exception:
+                                self._apply_label_font_to_editor(te)
+                    else:
+                        try:
+                            new_underline = not getattr(self, "_label_font_underline", False)
+                            self._label_font_underline = new_underline
+                            cursor = te.textCursor()
+                            from PyQt6.QtGui import QTextCharFormat
+                            fmt = QTextCharFormat()
+                            try:
+                                fmt.setFontUnderline(bool(new_underline))
+                            except Exception:
+                                fmt.setFontUnderline(bool(new_underline))
+                            if cursor.hasSelection():
+                                cursor.beginEditBlock()
+                                cursor.mergeCharFormat(fmt)
+                                cursor.endEditBlock()
+                                try:
+                                    te.mergeCurrentCharFormat(fmt)
+                                except Exception:
+                                    pass
+                                te.update()
+                            else:
+                                self._apply_label_font_to_editor(te)
+                        except Exception:
+                            self._apply_label_font_to_editor(te)
+                    return True
+
+                # Alignment: Ctrl+L (left), Ctrl+T (center), Ctrl+R (right)
+                if key in (Qt.Key.Key_L, Qt.Key.Key_T, Qt.Key.Key_R) and mods & Qt.KeyboardModifier.ControlModifier:
+                    try:
+                        if key == Qt.Key.Key_L:
+                            self._label_text_align = 'left'
+                        elif key == Qt.Key.Key_T:
+                            self._label_text_align = 'center'
+                        else:
+                            self._label_text_align = 'right'
+                        cursor = te.textCursor()
+                        from PyQt6.QtGui import QTextBlockFormat
+                        align_map = {
+                            'left': Qt.AlignmentFlag.AlignLeft,
+                            'center': Qt.AlignmentFlag.AlignHCenter,
+                            'right': Qt.AlignmentFlag.AlignRight,
+                        }
+                        a = align_map.get(self._label_text_align, Qt.AlignmentFlag.AlignLeft)
+                        if cursor.hasSelection():
+                            block_fmt = QTextBlockFormat()
+                            block_fmt.setAlignment(a)
+                            cursor.beginEditBlock()
+                            cursor.mergeBlockFormat(block_fmt)
+                            cursor.endEditBlock()
+                        else:
+                            # Apply to entire document
+                            cursor.select(cursor.SelectionType.Document)
+                            block_fmt = QTextBlockFormat()
+                            block_fmt.setAlignment(a)
+                            cursor.mergeBlockFormat(block_fmt)
+                            try:
+                                te.setAlignment(a)
+                            except Exception:
+                                pass
+                        # Update align button text if toolbar present
+                        ab = getattr(self, '_label_align_btn', None)
+                        if ab is not None:
+                            try:
+                                ab.setText('L' if self._label_text_align == 'left' else ('C' if self._label_text_align == 'center' else 'R'))
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    return True
+
+                # Font size increase/decrease: Ctrl + '+' / Ctrl + '-'
+                if mods & Qt.KeyboardModifier.ControlModifier and (key == Qt.Key.Key_Plus or key == Qt.Key.Key_Equal):
+                    try:
+                        self._label_font_size = max(1, min(999, getattr(self, '_label_font_size', 14) + 1))
+                        self._apply_label_font_to_editor(te)
+                        # reflect in toolbar input if present
+                        fi = getattr(self, '_label_font_size_input', None)
+                        if fi is not None:
+                            try:
+                                fi.setText(str(self._label_font_size))
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    return True
+                if mods & Qt.KeyboardModifier.ControlModifier and key == Qt.Key.Key_Minus:
+                    try:
+                        self._label_font_size = max(1, getattr(self, '_label_font_size', 14) - 1)
+                        self._apply_label_font_to_editor(te)
+                        fi = getattr(self, '_label_font_size_input', None)
+                        if fi is not None:
+                            try:
+                                fi.setText(str(self._label_font_size))
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    return True
+
+        return super().eventFilter(obj, event)
 
     def canvas_contains(self, pt):
         """Check if a canvas point is inside the A4 canvas."""
@@ -3004,15 +4773,33 @@ class DrawingArea(QFrame):
             py = max(-max_pan_y, min(self.pan_offset.y(), max_pan_y))
 
         self.pan_offset = QPoint(int(px), int(py))
+        # If an inline label editor is active, reposition it so it remains
+        # glued to the canvas after pan/zoom changes and refresh its font.
+        overlay = getattr(self, '_text_edit_overlay', None)
+        if overlay is not None:
+            try:
+                overlay._reposition()
+                # Re-apply font sizing based on new scale_factor (preserve per-char styles)
+                try:
+                    self._apply_label_font_to_editor(getattr(self, '_text_edit_widget', None), apply_style_flags=False)
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
     def keyPressEvent(self, event):
-
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_C:
             if (
                 self.selected_shape_index is not None
                 and 0 <= self.selected_shape_index < len(self.shapes)
             ):
-                self.copy_selected_shape_to_clipboard()
+                tool = self.shapes[self.selected_shape_index][0]
+                if tool == "image":
+                    self.copy_selected_image_to_clipboard()
+                else:
+                    self.copy_selected_shape_to_clipboard()
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Copied")
             return
 
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_V:
@@ -3021,8 +4808,12 @@ class DrawingArea(QFrame):
             text = clipboard.text()
             if mime.hasImage():
                 self.paste_image_from_clipboard()
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Pasted")
             elif self._is_shape_json(text):
                 self.paste_shape_from_clipboard()
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Pasted")
             return
 
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_E:
@@ -3031,12 +4822,26 @@ class DrawingArea(QFrame):
             else:
                 self.show_shape_layers_overlay()
             return
+
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_G:
+            self.snap_to_grid = not self.snap_to_grid
+            if callable(self.tooltip_callback):
+                self.tooltip_callback("Grid: On" if self.snap_to_grid else "Grid: Off")
+            self.update()
+            return
         
         # Open file
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_O:
             if callable(getattr(self, 'open_file_callback', None)):
                 self.open_file_callback()
             return
+        
+        # Save file
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_S:
+            if callable(getattr(self, 'save_file_callback', None)):
+                self.save_file_callback()
+            return
+
 
         # Delete key: Delete selected shape
         if event.key() == Qt.Key.Key_Delete:
@@ -3062,9 +4867,116 @@ class DrawingArea(QFrame):
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_Z:
                 self.undo()
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Undo")
                 return
             elif event.key() == Qt.Key.Key_Y:
                 self.redo()
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Redo")
+                return
+            elif event.key() == Qt.Key.Key_D:
+                self.duplicate_selected_object()
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Duplicated")
+
+                return
+        
+        # Arrow keys: move selected shape (1 px; 10 px with Shift)
+        arrow_keys = {
+            Qt.Key.Key_Left:  QPoint(-1,  0),
+            Qt.Key.Key_Right: QPoint( 1,  0),
+            Qt.Key.Key_Up:    QPoint( 0, -1),
+            Qt.Key.Key_Down:  QPoint( 0,  1),
+        }
+        if event.key() in arrow_keys:
+            step = 10 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1
+            if self.snap_to_grid:
+                step = self.grid_size
+            direction = arrow_keys[event.key()]
+            delta = direction * step
+
+            def _arrow_guide_snap(rect):
+                """Apply alignment guides but never pull back against the arrow direction."""
+                snapped, guides = self._find_snap_guides(rect)
+                gd = snapped.topLeft() - rect.topLeft()
+                # Zero out any guide component opposing the arrow direction
+                gx = gd.x() if direction.x() == 0 or direction.x() * gd.x() >= 0 else 0
+                gy = gd.y() if direction.y() == 0 or direction.y() * gd.y() >= 0 else 0
+                return QPoint(gx, gy), guides
+
+            # Case 1: shape is selected and committed in self.shapes
+            if self.selected_shape_index is not None:
+                idx = self.selected_shape_index
+                if 0 <= idx < len(self.shapes) and not self.is_shape_locked(idx):
+                    self.push_undo()
+                    shape = self.shapes[idx]
+                    tool = shape[0]
+                    if tool == "draw":
+                        current_points = self.preview_start if isinstance(self.preview_start, list) else shape[1]
+                        if not self.snap_to_grid:
+                            xs = [p.x() for p in current_points]
+                            ys = [p.y() for p in current_points]
+                            cur_bbox = QRect(QPoint(min(xs), min(ys)), QPoint(max(xs), max(ys)))
+                            new_bbox = cur_bbox.translated(delta)
+                            guide_delta, self._active_guides = _arrow_guide_snap(new_bbox)
+                            delta = delta + guide_delta
+                        else:
+                            self._active_guides = []
+                        new_points = [p + delta for p in current_points]
+                        self.shapes[idx] = tuple(["draw", new_points] + list(shape[2:]))
+                        self.preview_start = [QPoint(p) for p in new_points]
+                    else:
+                        cur_start = self.preview_start if self.preview_start is not None else shape[1]
+                        cur_end = self.preview_end if self.preview_end is not None else shape[2]
+                        new_start = cur_start + delta
+                        new_end = cur_end + delta
+                        if not self.snap_to_grid:
+                            new_rect = QRect(new_start, new_end).normalized()
+                            guide_delta, self._active_guides = _arrow_guide_snap(new_rect)
+                            new_start += guide_delta
+                            new_end += guide_delta
+                        else:
+                            self._active_guides = []
+                        self.shapes[idx] = tuple([tool, new_start, new_end] + list(shape[3:]))
+                        self.preview_start = new_start
+                        self.preview_end = new_end
+                    self.update()
+                    return
+
+            # Case 2: shape is floating as a preview (after paste/duplicate)
+            elif self.preview_shape is not None:
+                if self.preview_shape == "draw" and isinstance(self.preview_start, list):
+                    if not self.snap_to_grid:
+                        xs = [p.x() for p in self.preview_start]
+                        ys = [p.y() for p in self.preview_start]
+                        cur_bbox = QRect(QPoint(min(xs), min(ys)), QPoint(max(xs), max(ys)))
+                        new_bbox = cur_bbox.translated(delta)
+                        guide_delta, self._active_guides = _arrow_guide_snap(new_bbox)
+                        delta = delta + guide_delta
+                    else:
+                        self._active_guides = []
+                    self.preview_start = [p + delta for p in self.preview_start]
+                else:
+                    if self.preview_start is not None and self.preview_end is not None:
+                        new_start = self.preview_start + delta
+                        new_end = self.preview_end + delta
+                        if not self.snap_to_grid:
+                            new_rect = QRect(new_start, new_end).normalized()
+                            guide_delta, self._active_guides = _arrow_guide_snap(new_rect)
+                            new_start += guide_delta
+                            new_end += guide_delta
+                        else:
+                            self._active_guides = []
+                        self.preview_start = new_start
+                        self.preview_end = new_end
+                    else:
+                        self._active_guides = []
+                        if self.preview_start is not None:
+                            self.preview_start = self.preview_start + delta
+                        if self.preview_end is not None:
+                            self.preview_end = self.preview_end + delta
+                self.update()
                 return
 
         super().keyPressEvent(event)
@@ -3132,18 +5044,66 @@ class DrawingArea(QFrame):
                 rotation = shape[5]
             elif len(shape) > 4 and isinstance(shape[4], (int, float)) and not isinstance(shape[4], bool):
                 rotation = shape[4]
-            self.preview_shape = tool
-            self.preview_start = start
-            self.preview_end = end
-            self.preview_rotation = rotation
-            self.preview_pixmap = data if tool == "image" else None
-            self._edit_locked_color = data if isinstance(data, QColor) else QColor("#000000")
+            if tool == "label":
+                # Open inline text editor when selecting a label from the layers
+                text = ""
+                font_size = getattr(self, "_label_font_size", 14)
+                font_bold = getattr(self, "_label_font_bold", False)
+                font_italic = getattr(self, "_label_font_italic", False)
+                font_underline = getattr(self, "_label_font_underline", False)
+                font_family = getattr(self, "_label_font_family", "Arial")
+                label_rotation = 0
+                for item in shape[4:]:
+                    if isinstance(item, str):
+                        text = item
+                    elif isinstance(item, dict) and "font_size" in item:
+                        font_size = item.get("font_size", font_size)
+                        font_bold = item.get("font_bold", False)
+                        font_italic = item.get("font_italic", False)
+                        font_underline = item.get("font_underline", False)
+                        font_family = item.get("font_family", font_family)
+                        font_align = item.get("text_align", getattr(self, "_label_text_align", "left"))
+                    elif isinstance(item, (int, float)) and not isinstance(item, bool):
+                        label_rotation = item
+                self._label_font_size = font_size
+                self._label_font_bold = font_bold
+                self._label_font_italic = font_italic
+                self._label_font_underline = font_underline
+                self._label_font_family = font_family
+                self._label_edit_rotation = label_rotation
+                # restore alignment state for editing
+                try:
+                    self._label_text_align = font_align
+                except Exception:
+                    self._label_text_align = getattr(self, "_label_text_align", "left")
+                self._label_edit_index = idx
+                canvas_rect = QRect(start, end).normalized()
+                # Hide preview and open overlay for direct editing
+                self.preview_shape = None
+                self.preview_start = None
+                self.preview_end = None
+                self._edit_locked_color = data if isinstance(data, QColor) else QColor("#000000")
+                self._show_text_overlay(canvas_rect, existing_text=text)
+            else:
+                self.preview_shape = tool
+                self.preview_start = start
+                self.preview_end = end
+                self.preview_rotation = rotation
+                self.preview_pixmap = data if tool == "image" else None
+                self._edit_locked_color = data if isinstance(data, QColor) else QColor("#000000")
 
-        # --- PATCH END ---
+        # PATCH END 
         self.shape_selected_for_edit.emit()
         self.update()
 
     def contextMenuEvent(self, event):
+        # If a label text overlay is open, commit it but preserve the selection
+        # so that Lock/Unlock and other actions remain available.
+        if self._text_edit_overlay is not None and self._text_edit_overlay.isVisible():
+            saved_idx = self.selected_shape_index
+            self._commit_text_overlay()
+            self.selected_shape_index = saved_idx
+
         menu = QMenu(self)
         clipboard = QApplication.clipboard()
         mime = clipboard.mimeData()
@@ -3160,7 +5120,7 @@ class DrawingArea(QFrame):
         lock_action.setEnabled(can_lock)
         if can_lock:
             if is_locked:
-                lock_action.triggered.connect(self.unlock_selected_shape)
+                lock_action.triggered.connect(self.unlock_selected_shape)                
             else:
                 lock_action.triggered.connect(self.lock_selected_shape)
         menu.addAction(lock_action)
@@ -3170,6 +5130,8 @@ class DrawingArea(QFrame):
         undo_action = QAction("Undo", self)
         undo_action.setEnabled(bool(self.undo_stack))
         def do_undo():
+            if callable(self.tooltip_callback):
+                self.tooltip_callback("Undo")
             self.undo()
             self.update()  
         undo_action.triggered.connect(do_undo)
@@ -3178,6 +5140,8 @@ class DrawingArea(QFrame):
         redo_action = QAction("Redo", self)
         redo_action.setEnabled(bool(self.redo_stack))
         def do_redo():
+            if callable(self.tooltip_callback):
+                self.tooltip_callback("Redo")
             self.redo()
             self.update()  
         redo_action.triggered.connect(do_redo)
@@ -3208,13 +5172,28 @@ class DrawingArea(QFrame):
             else:
                 copy_action.triggered.connect(self.copy_selected_shape_to_clipboard)
         menu.addAction(copy_action)
+        
+        # Duplicate
+        duplicate_action = QAction("Duplicate", self)
+        can_duplicate = (
+            (
+                self.selected_shape_index is not None
+                and 0 <= self.selected_shape_index < len(self.shapes)
+                and not self.is_shape_locked(self.selected_shape_index)
+            )
+            or self.preview_shape is not None
+        )
+        duplicate_action.setEnabled(can_duplicate)
+        if can_duplicate:
+            duplicate_action.triggered.connect(self.duplicate_selected_object)
+        menu.addAction(duplicate_action)
 
         # Rotate
         rotate_action = QAction("Rotate 90°", self)
         can_rotate = (
             self.selected_shape_index is not None
             and 0 <= self.selected_shape_index < len(self.shapes)
-            and self.shapes[self.selected_shape_index][0] not in ["image", "draw"]
+            and self.shapes[self.selected_shape_index][0] not in ["image", "draw", "label"]
             and not self.is_shape_locked(self.selected_shape_index)
         )
         rotate_action.setEnabled(can_rotate)
@@ -3279,7 +5258,7 @@ class DrawingArea(QFrame):
 
             # Safely extract border color (always at index 3)
             if len(shape) > 3 and isinstance(shape[3], QColor):
-                border_color = shape[3].name()
+                border_color = "transparent" if shape[3].alpha() == 0 else shape[3].name()
 
             # Extract fill color and rotation from remaining elements
             fill_color_obj = None
@@ -3291,7 +5270,7 @@ class DrawingArea(QFrame):
                     rotation = item
 
             if fill_color_obj:
-                fill_color = fill_color_obj.name()
+                fill_color = "transparent" if fill_color_obj.alpha() == 0 else fill_color_obj.name()
 
             border_radius = 0
             for item in shape[4:]:
@@ -3354,17 +5333,22 @@ class DrawingArea(QFrame):
 
                 existing_fill_color = None
                 existing_rotation = 0
+                label_text = None
+                existing_extra_dicts = []
                 for item in old_shape[4:]:
                     if isinstance(item, QColor):
                         existing_fill_color = item
-                    elif isinstance(item, (int, float)):
+                    elif isinstance(item, str):
+                        label_text = item
+                    elif isinstance(item, (int, float)) and not isinstance(item, bool):
                         existing_rotation = item
+                    elif isinstance(item, dict):
+                        existing_extra_dicts.append(item)
 
                 new_shape = [tool, start, end, new_border_color]
 
-                if (
-                    isinstance(new_object_color, QColor)
-                    and new_object_color.name() != "#ffffff"
+                if isinstance(new_object_color, QColor) and (
+                    new_object_color.name() != "#ffffff" or new_object_color.alpha() == 0
                 ):
                     new_shape.append(new_object_color)
                 elif existing_fill_color is not None:
@@ -3373,10 +5357,19 @@ class DrawingArea(QFrame):
                 if existing_rotation != 0:
                     new_shape.append(existing_rotation)
 
+                # Preserve label text
+                if label_text is not None:
+                    new_shape.append(label_text)
+
                 if new_border_radius:
                     new_shape.append({"border_radius": new_border_radius})
 
                 new_shape.append({"border_weight": new_border_weight})
+
+                # Preserve other existing dicts (e.g. font_size for labels)
+                for d in existing_extra_dicts:
+                    if "border_radius" not in d and "border_weight" not in d:
+                        new_shape.append(d)
 
                 if isinstance(old_shape[-1], bool):
                     new_shape.append(old_shape[-1])
@@ -3404,8 +5397,15 @@ class DrawingArea(QFrame):
     def start_free_rotate(self):
         if self.is_shape_locked(self.selected_shape_index):
             return
-        self._free_rotating = True
+        # Close the text overlay (committing content) before starting rotation,
+        # so that mousePressEvent won't intercept clicks to commit the overlay
+        # and deselect the shape.
         idx = self.selected_shape_index
+        if self._text_edit_widget is not None:
+            self._commit_text_overlay()
+            # _commit_text_overlay resets selected_shape_index; restore it
+            self.selected_shape_index = idx
+        self._free_rotating = True
         if idx is not None and 0 <= idx < len(self.shapes):
             shape = self.shapes[idx]
             # Ensure rotation value exists
@@ -3434,12 +5434,15 @@ class DrawingArea(QFrame):
                     self.preview_start = [QPoint(p) for p in points]
                     self._orig_points = [QPoint(p) for p in points]
             else:
-                # For non-draw shapes, use preview coords if available
+                # For non-draw shapes, use preview coords if available, fall back to shape data
+                self.preview_shape = shape[0]
                 self.preview_start = self.preview_start if self.preview_start is not None else shape[1]
                 self.preview_end = self.preview_end if self.preview_end is not None else shape[2]
                 self._orig_start = self.preview_start
                 self._orig_end = self.preview_end
                 self.preview_rotation = rotation
+        if callable(self.tooltip_callback):
+            self.tooltip_callback("Free Rotate")
         self.update()
 
         self.shape_layers_overlay.selected_idx = idx
@@ -3451,6 +5454,10 @@ class DrawingArea(QFrame):
         idx = self.selected_shape_index
         if idx is None or idx < 0 or idx >= len(self.shapes):
             return
+        # Close text overlay before rotating (same reason as free rotate)
+        if self._text_edit_widget is not None:
+            self._commit_text_overlay()
+            self.selected_shape_index = idx
         self.push_shape_restore(idx, "Rotate 90°")
         self.push_undo()
         shape = self.shapes[idx]
@@ -3532,6 +5539,8 @@ class DrawingArea(QFrame):
         self.shape_layers_overlay.refresh()
         self._show_rotation_indicator = True
         self._rotation_indicator_timer.start(1800)
+        if callable (self.tooltip_callback):
+            self.tooltip_callback("Rotated 90°")
         self.update()
 
         # Hide the indicator and commit the rotation after the timer
@@ -3558,6 +5567,8 @@ class DrawingArea(QFrame):
                 fill_color = QColor(shape_dict["fill_color"])
 
             rotation = shape_dict.get("rotation", 0)
+            draw_radius = shape_dict.get("draw_radius", None)
+            extra_dicts = shape_dict.get("extra_dicts", [])
             offset = QPoint(20, 20)
 
             if tool == "draw" and "points" in shape_dict:
@@ -3570,6 +5581,7 @@ class DrawingArea(QFrame):
                 self.preview_color = color
                 self.preview_fill_color = fill_color
                 self.preview_rotation = rotation
+                self.preview_draw_radius = draw_radius if draw_radius is not None else self.draw_radius
                 self.selected_shape_index = None
                 self.set_tool("draw")
                 if points and len(points) > 1:
@@ -3580,6 +5592,8 @@ class DrawingArea(QFrame):
                     self.preview_bbox = QRect(QPoint(min_x, min_y), QPoint(max_x, max_y)).normalized()
                 else:
                     self.preview_bbox = None
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Pasted")
                 self.update()
                 return
             elif "start" in shape_dict and "end" in shape_dict:
@@ -3592,7 +5606,17 @@ class DrawingArea(QFrame):
                 self.preview_color = color
                 self.preview_fill_color = fill_color
                 self.preview_rotation = rotation
+                # Preserve label text and font dict for label shapes
+                pending_extras = list(extra_dicts)
+                label_text = shape_dict.get("label_text")
+                if tool == "label" and label_text is not None:
+                    self._pending_label_text = label_text
+                else:
+                    self._pending_label_text = None
+                self._pending_shape_extras = pending_extras
                 self.selected_shape_index = None
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Pasted")
                 self.update()
                 return
             else:
@@ -3617,6 +5641,8 @@ class DrawingArea(QFrame):
                 self.preview_start = QPoint(center.x() - size.width()//2, center.y() - size.height()//2)
                 self.preview_end = QPoint(center.x() + size.width()//2, center.y() + size.height()//2)
                 self.selected_shape_index = None
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Pasted")
                 self.update()
 
     def copy_selected_image_to_clipboard(self):
@@ -3625,6 +5651,8 @@ class DrawingArea(QFrame):
             if tool == "image":
                 clipboard = QApplication.clipboard()
                 clipboard.setPixmap(data)
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Copied")
 
     def _is_shape_json(self, text):
         try:
@@ -3658,13 +5686,26 @@ class DrawingArea(QFrame):
             # Extract ALL properties from the shape tuple
             fill_color = None
             rotation = None
+            draw_radius = None
+            extra_dicts = []
 
-            # Parse the rest of the shape tuple to find fill_color and rotation
-            for v in shape[4:]:
-                if isinstance(v, QColor):
-                    fill_color = v
-                elif isinstance(v, (int, float)):
-                    rotation = v
+            # Parse the rest of the shape tuple
+            if tool == "draw":
+                # For draw: shape[4] is draw_radius, shape[5] is rotation
+                if len(shape) > 4 and isinstance(shape[4], (int, float)):
+                    draw_radius = shape[4]
+                if len(shape) > 5 and isinstance(shape[5], (int, float)):
+                    rotation = shape[5]
+            else:
+                for v in shape[4:]:
+                    if isinstance(v, QColor):
+                        fill_color = v
+                    elif isinstance(v, str):
+                        shape_dict["label_text"] = v
+                    elif isinstance(v, dict):
+                        extra_dicts.append(v)
+                    elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                        rotation = v
 
             # Store fill color if it exists
             if fill_color is not None:
@@ -3674,7 +5715,17 @@ class DrawingArea(QFrame):
             if rotation is not None:
                 shape_dict["rotation"] = rotation
 
+            # Store draw_radius for freehand shapes
+            if draw_radius is not None:
+                shape_dict["draw_radius"] = draw_radius
+
+            # Store dict properties (border_weight, border_radius, etc.)
+            if extra_dicts:
+                shape_dict["extra_dicts"] = extra_dicts
+
             clipboard = QApplication.clipboard()
+            if callable(self.tooltip_callback):
+                self.tooltip_callback("Copied")
             clipboard.setText(json.dumps(shape_dict))
 
     def delete_selected_shape(self):
@@ -3688,6 +5739,8 @@ class DrawingArea(QFrame):
             self.preview_start = None
             self.preview_end = None
             self.shape_layers_overlay.update_shapes(self.shapes)
+            if callable(self.tooltip_callback):
+                self.tooltip_callback("Deleted")
             self.update()
 
     def push_undo(self):
@@ -3781,6 +5834,144 @@ class DrawingArea(QFrame):
                 else:
                     new_shape.append(item)
             return tuple(new_shape)
+        
+    def duplicate_selected_object(self):
+        if self.selected_shape_index is None and self.preview_shape is not None:
+            self.push_undo()
+            if self.preview_shape == "image":
+                self.shapes.append(("image", self.preview_start, self.preview_end, self.preview_pixmap))
+            elif self.preview_shape == "draw" and isinstance(self.preview_start, list):
+                border_color = getattr(self, "preview_color", self.shape_color)
+                draw_radius = getattr(self, "preview_draw_radius", self.draw_radius)
+                rotation = getattr(self, "preview_rotation", 0)
+                shape_tuple = ["draw", list(self.preview_start), None, border_color, draw_radius]
+                if rotation != 0:
+                    shape_tuple.append(rotation)
+                self.shapes.append(tuple(shape_tuple))
+            else:
+                border_color = getattr(self, "preview_color", self.shape_color)
+                fill_color = getattr(self, "preview_fill_color", None)
+                rotation = getattr(self, "preview_rotation", 0)
+                shape_tuple = [self.preview_shape, self.preview_start, self.preview_end, border_color]
+                if fill_color is not None:
+                    shape_tuple.append(fill_color)
+                if rotation != 0:
+                    shape_tuple.append(rotation)
+                pending_label = getattr(self, '_pending_label_text', None)
+                if pending_label is not None:
+                    shape_tuple.append(pending_label)
+                    self._pending_label_text = None
+                for item in getattr(self, '_pending_shape_extras', []):
+                    shape_tuple.append(item)
+                self._pending_shape_extras = []
+                self.shapes.append(tuple(shape_tuple))
+            self.selected_shape_index = len(self.shapes) - 1
+            self.preview_shape = None
+            self.preview_start = None
+            self.preview_end = None
+            self.preview_pixmap = None
+            self.preview_fill_color = None
+            self.preview_rotation = 0
+            
+        idx = self.selected_shape_index
+        if idx is None or idx < 0 or idx >= len(self.shapes):
+            return
+        shape = self.shapes[idx]
+        new_shape = self._copy_single_shape(shape)
+        offset = QPoint(20, 20)
+        tool = new_shape[0]
+    
+        if tool == "draw":
+            pts = [p + offset for p in new_shape[1]]
+            draw_radius = new_shape[4] if len(new_shape) > 4 and isinstance(new_shape[4], (int, float)) else self.draw_radius
+            rotation = new_shape[5] if len(new_shape) > 5 and isinstance(new_shape[5], (int, float)) else 0
+            self.preview_shape = "draw"
+            self.preview_start = list(pts)
+            self.preview_end = None
+            self.preview_color = new_shape[3] if isinstance(new_shape[3], QColor) else self.shape_color
+            self.preview_draw_radius = draw_radius
+            self.preview_rotation = rotation
+            self._pending_shape_extras = []
+            if pts and len(pts) > 1:
+                min_x = min(p.x() for p in pts)
+                min_y = min(p.y() for p in pts)
+                max_x = max(p.x() for p in pts)
+                max_y = max(p.y() for p in pts)
+                self.preview_bbox = QRect(QPoint(min_x, min_y), QPoint(max_x, max_y)).normalized()
+            else:
+                self.preview_bbox = None
+        elif tool == "image":
+            start = new_shape[1] + offset
+            end = new_shape[2] + offset
+            self.preview_shape = "image"
+            self.preview_start = start
+            self.preview_end = end
+            self.preview_pixmap = new_shape[3]
+            self._pending_shape_extras = []
+        else:
+            start = new_shape[1] + offset
+            end = new_shape[2] + offset
+            color = new_shape[3]
+            fill_color = None
+            rotation = 0
+            extra_dicts = []
+            label_text = None
+            lock_flag = None
+            for item in new_shape[4:]:
+                if isinstance(item, QColor):
+                    fill_color = item
+                elif isinstance(item, bool):
+                    lock_flag = item
+                elif isinstance(item, str):
+                    label_text = item
+                elif isinstance(item, (int, float)):
+                    rotation = item
+                elif isinstance(item, dict):
+                    extra_dicts.append(dict(item))
+
+            # For label shapes, commit immediately and select the duplicate
+            if tool == "label" and label_text is not None:
+                shape_tuple = [tool, start, end, color]
+                if fill_color is not None:
+                    shape_tuple.append(fill_color)
+                if rotation != 0:
+                    shape_tuple.append(rotation)
+                shape_tuple.append(label_text)
+                for d in extra_dicts:
+                    shape_tuple.append(d)
+                if lock_flag is not None:
+                    shape_tuple.append(lock_flag)
+                # Close any active text overlay before committing duplicate
+                if self._text_edit_widget is not None:
+                    self._cancel_text_overlay()
+                self.push_undo()
+                self.shapes.append(tuple(shape_tuple))
+                new_idx = len(self.shapes) - 1
+                self.selected_shape_index = new_idx
+                self.preview_shape = tool
+                self.preview_start = start
+                self.preview_end = end
+                self.preview_color = color
+                self.preview_fill_color = fill_color
+                self.preview_rotation = rotation
+                self.shape_layers_overlay.update_shapes(self.shapes)
+                self.update()
+                return
+
+            self.preview_shape = tool
+            self.preview_start = start
+            self.preview_end = end
+            self.preview_color = color
+            self.preview_fill_color = fill_color
+            self.preview_rotation = rotation
+            self._pending_label_text = label_text
+            pending = list(extra_dicts)
+            if lock_flag is not None:
+                pending.append(lock_flag)
+            self._pending_shape_extras = pending
+    
+        self.selected_shape_index = None
+        self.update()
 
     def push_shape_restore(self, idx, action_label):
         # Record a per-shape restore point before a properties change
@@ -4012,11 +6203,12 @@ class DrawingArea(QFrame):
                     painter_img.setBrush(Qt.BrushStyle.NoBrush)
 
                 # Draw border (scale pen width by supersample factor so stroke thickness is preserved)
-                pen = QPen(border_color, border_width_disp * 1.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
-                # Because we already scaled the painter, set pen width in display units (painter.scale handles pixel density)
-                pen.setWidthF(border_width_disp)
-                painter_img.setPen(pen)
-                self.draw_shape(painter_img, tool, local_rect.topLeft(), local_rect.bottomRight(), border_radius=border_radius, line_width=border_weight)
+                if border_color.alpha() > 0 and border_weight and border_weight > 0:
+                    pen = QPen(border_color, border_width_disp * 1.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+                    # Because we already scaled the painter, set pen width in display units (painter.scale handles pixel density)
+                    pen.setWidthF(border_width_disp)
+                    painter_img.setPen(pen)
+                    self.draw_shape(painter_img, tool, local_rect.topLeft(), local_rect.bottomRight(), border_radius=border_radius, line_width=border_weight)
                 painter_img.end()
 
                 # Cache the QImage for in-progress erasing so repeated erase calls paint into the same high-res image
@@ -4319,12 +6511,19 @@ class DrawingArea(QFrame):
                     color = rest[0] if rest else QColor("#000000")
                     fill_color = None
                     rotation = 0
+                    border_weight = 2
+                    border_radius = None
 
                     # Extract properties
                     for prop in rest[1:]:
                         if isinstance(prop, QColor):
                             fill_color = prop
-                        elif isinstance(prop, (int, float)):
+                        elif isinstance(prop, dict):
+                            if "border_weight" in prop:
+                                border_weight = prop["border_weight"]
+                            if "border_radius" in prop:
+                                border_radius = prop["border_radius"]
+                        elif isinstance(prop, (int, float)) and not isinstance(prop, bool):
                             rotation = prop
 
                     painter.save()
@@ -4337,12 +6536,77 @@ class DrawingArea(QFrame):
                     if fill_color:
                         painter.setBrush(QBrush(fill_color))
                         painter.setPen(Qt.PenStyle.NoPen)
-                        self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight())
+                        self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight(), border_radius=border_radius)
 
-                    # Draw border
-                    painter.setBrush(Qt.BrushStyle.NoBrush)
-                    painter.setPen(QPen(color, 3))
-                    self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight())
+                    # Draw border (skip if transparent or weight is 0)
+                    if color.alpha() > 0 and border_weight and border_weight > 0:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QPen(color, border_weight))
+                        self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight(), line_width=border_weight, border_radius=border_radius)
+
+                    # Draw text content for label shapes
+                    if tool == "label":
+                        lbl_text = ""
+                        lbl_font_size = 14
+                        lbl_bold = False
+                        lbl_italic = False
+                        lbl_underline = False
+                        lbl_font_family = getattr(self, "_label_font_family", "Arial")
+                        lbl_align = "left"
+                        for _item in rest[1:]:
+                            if isinstance(_item, str):
+                                lbl_text = _item
+                            elif isinstance(_item, dict) and "font_size" in _item:
+                                lbl_font_size = _item.get("font_size", lbl_font_size)
+                                lbl_bold = _item.get("font_bold", False)
+                                lbl_italic = _item.get("font_italic", False)
+                                lbl_underline = _item.get("font_underline", False)
+                                lbl_font_family = _item.get("font_family", lbl_font_family)
+                                lbl_align = _item.get("text_align", lbl_align)
+                        if lbl_text:
+                            try:
+                                from PyQt6.QtGui import QTextDocument
+                                text_draw_rect = rect.adjusted(4, 4, -4, -4)
+                                lbl_font = QFont(lbl_font_family, lbl_font_size)
+                                lbl_font.setBold(lbl_bold)
+                                lbl_font.setItalic(lbl_italic)
+                                lbl_font.setUnderline(lbl_underline)
+
+                                doc = QTextDocument()
+                                doc.setDefaultFont(lbl_font)
+
+                                is_html = isinstance(lbl_text, str) and ("<" in lbl_text and ">" in lbl_text and any(k in lbl_text.lower() for k in ("<span", "<p", "<div", "<br", "<b", "<i", "<u", "style=", "<!doctype", "<html")))
+                                if is_html:
+                                    doc.setHtml(lbl_text)
+                                else:
+                                    safe_text = (lbl_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>"))
+                                    doc.setHtml(f'<div style="color:{color.name()}; font-family:{lbl_font_family}; font-size:{lbl_font_size}pt; text-align:{lbl_align};">{safe_text}</div>')
+
+                                doc.setTextWidth(float(text_draw_rect.width()))
+                                painter.save()
+                                painter.translate(text_draw_rect.left(), text_draw_rect.top())
+                                doc.drawContents(painter, QRectF(0, 0, text_draw_rect.width(), text_draw_rect.height()))
+                                painter.restore()
+                            except Exception:
+                                painter.setPen(QPen(color))
+                                lbl_font = QFont(lbl_font_family, lbl_font_size)
+                                lbl_font.setBold(lbl_bold)
+                                lbl_font.setItalic(lbl_italic)
+                                lbl_font.setUnderline(lbl_underline)
+                                painter.setFont(lbl_font)
+                                text_draw_rect = rect.adjusted(4, 4, -4, -4)
+                                align_map = {
+                                    "left": Qt.AlignmentFlag.AlignLeft,
+                                    "center": Qt.AlignmentFlag.AlignHCenter,
+                                    "right": Qt.AlignmentFlag.AlignRight,
+                                }
+                                a_flag = align_map.get(lbl_align, Qt.AlignmentFlag.AlignLeft)
+                                painter.drawText(
+                                    text_draw_rect,
+                                    a_flag | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                                    lbl_text,
+                                )
+
                     painter.restore()
 
         # Draw eraser strokes that intersect with the crop area
@@ -4411,6 +6675,7 @@ class DrawingArea(QFrame):
         self.preview_pixmap = cropped_pixmap
         self.preview_start = crop_rect.topLeft()
         self.preview_end = crop_rect.bottomRight()
+        self.preview_rotation = 0
         self.selected_shape_index = None
 
         # Clear crop state
@@ -4564,9 +6829,12 @@ class DrawingArea(QFrame):
                 fill_color = None
                 rotation = getattr(self, 'preview_rotation', 0)
                 extra_dicts = []
+                label_text = None
                 for item in old_shape[4:]:
                     if isinstance(item, QColor):
                         fill_color = item
+                    elif isinstance(item, str):
+                        label_text = item
                     elif isinstance(item, (int, float)) and not isinstance(item, bool):
                         rotation = item
                     elif isinstance(item, dict):
@@ -4576,6 +6844,8 @@ class DrawingArea(QFrame):
                     shape.append(fill_color)
                 if rotation:
                     shape.append(rotation)
+                if label_text is not None:
+                    shape.append(label_text)
                 for d in extra_dicts:
                     shape.append(d)
             else:
@@ -4588,6 +6858,8 @@ class DrawingArea(QFrame):
             self.preview_shape = None
             self.preview_start = None
             self.preview_end = None
+            if callable(self.tooltip_callback):
+                    self.tooltip_callback("Locked")
             self.update()
 
     def unlock_selected_shape(self):
@@ -4603,6 +6875,8 @@ class DrawingArea(QFrame):
             self.preview_shape = None
             self.preview_start = None
             self.preview_end = None
+            if callable(self.tooltip_callback):
+                    self.tooltip_callback("Unlocked")
             self.update()
 
     def points_close(self, p1, p2, tolerance=5):
@@ -4734,8 +7008,6 @@ class ShapeLayersOverlay(QWidget):
         self.main_layout.addWidget(self.right_arrow)
         self.installEventFilter(self)
 
-
-
     def update_shapes(self, shapes):
         self.shapes = shapes
         self.current_index = max(0, len(shapes) - 3)  # Show most recent at left
@@ -4749,6 +7021,11 @@ class ShapeLayersOverlay(QWidget):
             idx = self.current_index + i
             if idx < total:
                 tool, start, end, data = self.shapes[idx][:4]
+                # Determine stroke/color for thumbnail rendering. Default to black.
+                if isinstance(data, QColor):
+                    color = data
+                else:
+                    color = QColor("#000000")
                 pix = QPixmap(64, 64)
                 pix.fill(Qt.GlobalColor.transparent)
                 painter = QPainter(pix)
@@ -4804,6 +7081,82 @@ class ShapeLayersOverlay(QWidget):
                                 for p in start
                             ]
                             painter.drawPolyline(*scaled_points)
+                        elif tool == "label":
+                            # Render a miniature preview for label: draw border/fill and wrapped text
+                            # Shape format: ("label", start, end, color, text, font_dict)
+                            lbl_text = ""
+                            lbl_font_size = getattr(self.drawing_area, "_label_font_size", 14)
+                            lbl_bold = False
+                            lbl_italic = False
+                            lbl_underline = False
+                            lbl_font_family = getattr(self.drawing_area, "_label_font_family", "Arial")
+                            lbl_align = getattr(self.drawing_area, "_label_text_align", "left")
+                            fill_color = None
+                            # gather extra items from the full shape tuple
+                            full_shape = self.shapes[idx]
+                            for item in full_shape[4:]:
+                                if isinstance(item, str):
+                                    lbl_text = item
+                                elif isinstance(item, dict) and "font_size" in item:
+                                    lbl_font_size = item.get("font_size", lbl_font_size)
+                                    lbl_bold = item.get("font_bold", False)
+                                    lbl_italic = item.get("font_italic", False)
+                                    lbl_underline = item.get("font_underline", False)
+                                    lbl_font_family = item.get("font_family", lbl_font_family)
+                                    lbl_align = item.get("text_align", lbl_align)
+                                elif isinstance(item, QColor):
+                                    fill_color = item
+                            # draw fill if present
+                            if fill_color is not None:
+                                painter.setBrush(QBrush(fill_color))
+                                painter.setPen(Qt.PenStyle.NoPen)
+                                painter.drawRect(rect)
+                            painter.setBrush(Qt.BrushStyle.NoBrush)
+                            painter.setPen(QPen(color, 2))
+                            painter.drawRect(rect)
+                            if lbl_text:
+                                # Render miniature preview using QTextDocument to keep per-char styling
+                                try:
+                                    from PyQt6.QtGui import QTextDocument
+                                    est_size = max(6, int(rect.height() * 0.18))
+                                    lbl_font = QFont(lbl_font_family, est_size)
+                                    lbl_font.setBold(lbl_bold)
+                                    lbl_font.setItalic(lbl_italic)
+                                    lbl_font.setUnderline(lbl_underline)
+
+                                    text_draw_rect = rect.adjusted(4, 4, -4, -4)
+                                    doc = QTextDocument()
+                                    doc.setDefaultFont(lbl_font)
+                                    is_html = isinstance(lbl_text, str) and ("<" in lbl_text and ">" in lbl_text and any(k in lbl_text.lower() for k in ("<span", "<p", "<div", "<br", "<b", "<i", "<u", "style=", "<!doctype", "<html")))
+                                    if is_html:
+                                        doc.setHtml(lbl_text)
+                                    else:
+                                        safe_text = (lbl_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>"))
+                                        doc.setHtml(f'<div style="color:{color.name()}; font-family:{lbl_font_family}; font-size:{est_size}pt; text-align:{lbl_align};">{safe_text}</div>')
+                                    doc.setTextWidth(float(text_draw_rect.width()))
+                                    painter.save()
+                                    painter.translate(text_draw_rect.left(), text_draw_rect.top())
+                                    doc.drawContents(painter, QRectF(0, 0, text_draw_rect.width(), text_draw_rect.height()))
+                                    painter.restore()
+                                except Exception:
+                                    est_size = max(6, int(rect.height() * 0.18))
+                                    lbl_font = QFont(lbl_font_family, est_size)
+                                    lbl_font.setBold(lbl_bold)
+                                    lbl_font.setItalic(lbl_italic)
+                                    lbl_font.setUnderline(lbl_underline)
+                                    painter.setFont(lbl_font)
+                                    painter.setPen(QPen(color))
+                                    align_map = {
+                                        "left": Qt.AlignmentFlag.AlignLeft,
+                                        "center": Qt.AlignmentFlag.AlignHCenter,
+                                        "right": Qt.AlignmentFlag.AlignRight,
+                                    }
+                                    a_flag = align_map.get(lbl_align, Qt.AlignmentFlag.AlignLeft)
+                                    painter.drawText(
+                                        rect.adjusted(4, 4, -4, -4),
+                                        a_flag | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                                        lbl_text,
+                                    )
                 finally:
                     painter.end()
                 shape_widget.icon.setPixmap(pix)
@@ -4857,9 +7210,6 @@ class ShapeLayersOverlay(QWidget):
         else:
             app.removeEventFilter(self)
             
-
-    
-    
     def reorder_shape(self, from_idx, to_idx):
         self.drawing_area.push_undo()
         # Move shape in drawing_area.shapes and refresh everything
@@ -4881,7 +7231,7 @@ class ShapeLayersOverlay(QWidget):
         if hasattr(self.drawing_area.parent(), "deselect_tool"):
             self.drawing_area.parent().deselect_tool()
 
-    # --- Auto-scroll logic for drag ---
+    # Auto-scroll logic for drag ---
     def _start_auto_scroll(self, global_pos):
         self._scroll_direction = 0
         self._auto_scroll_timer.start()
@@ -5244,7 +7594,46 @@ class PageBar(QWidget):
         bar.setValue(bar.value() - delta // 3)
         event.accept()
 
+
+class _AutoSaveWorker(QObject):
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    @pyqtSlot(dict)
+    def do_save(self, data):
+        try:
+            file_path = data["file_path"]
+            config_folder = data["config_folder"]
+            payload = data["payload"]
+            histories_payload = data["histories"]
+
+            # Finalize pages: convert QImage objects to base64 strings
+            for sp in payload["spaces"]:
+                for page in sp["pages"]:
+                    _finalize_page_for_json(page)
+
+            # Finalize history entries that contain image shapes
+            for sp_hist in histories_payload:
+                for page_hist in sp_hist:
+                    for entry in page_hist:
+                        shape_d = entry.get("shape_data", {})
+                        if "qimage" in shape_d:
+                            shape_d["pixmap"] = _encode_qimage_b64(shape_d.pop("qimage"))
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+
+            with open(os.path.join(config_folder, "shape_history.json"), "w", encoding="utf-8") as f:
+                json.dump({"version": 3, "spaces": histories_payload}, f, indent=2)
+
+            self.finished.emit()
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class UIMode(QWidget):
+    _request_auto_save = pyqtSignal(dict)
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -5273,8 +7662,6 @@ class UIMode(QWidget):
         self.custom_tooltip = CustomToolTip(self)
         self.init_ui()
         self._show_controls = False
-        
-        
         
         self.drawing_area.shape_selected_for_edit.connect(self.deselect_tool)
         self._tool_btn_anim = None  # Initialize attribute to avoid assignment error
@@ -5491,6 +7878,8 @@ class UIMode(QWidget):
         self._current_space_idx = 0
         self._current_page_idx = 0
         self.drawing_area.open_file_callback = self.open_canvas
+        self.drawing_area.save_file_callback = self.save_canvas
+        self.drawing_area.tooltip_callback = self.show_tool_tooltip
         self.drawing_area.installEventFilter(self)
 
         # Top bar (custom, only shows controls on hover)
@@ -5648,6 +8037,18 @@ class UIMode(QWidget):
         self._auto_save_timer = QTimer(self)
         self._auto_save_timer.timeout.connect(self._auto_save_tick)
         self._auto_save_timer.start(30000)  # Auto-save every 30 seconds
+
+        # Auto-save worker thread setup
+        self._auto_save_worker = _AutoSaveWorker()
+        self._auto_save_thread = QThread(self)
+        self._auto_save_worker.moveToThread(self._auto_save_thread)
+        self._request_auto_save.connect(self._auto_save_worker.do_save)
+        self._auto_save_worker.finished.connect(self._on_auto_save_done)
+        self._auto_save_worker.error.connect(self._on_auto_save_error)
+        self._auto_save_thread.start()
+        self._auto_save_running = False
+        self._auto_save_queued = False
+        
         
         
         
@@ -6096,6 +8497,12 @@ class UIMode(QWidget):
         if hasattr(self, '_drag_pos'):
             del self._drag_pos
         super().mouseReleaseEvent(event)
+
+    def closeEvent(self, event):
+        self._auto_save_timer.stop()
+        self._auto_save_thread.quit()
+        self._auto_save_thread.wait(3000)
+        super().closeEvent(event)
     
     @property
     def _page_states(self):
@@ -6107,6 +8514,11 @@ class UIMode(QWidget):
     
             
     def keyPressEvent(self, event):
+        # Forward arrow keys to drawing area for shape nudging
+        if event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down):
+            self.drawing_area.keyPressEvent(event)
+            return
+        
         if event.key() == Qt.Key.Key_Escape:
             # Cancel placing shape if in progress
             if self.drawing_area.preview_shape is not None:
@@ -6136,6 +8548,13 @@ class UIMode(QWidget):
                 self.drawing_area.shape_layers_overlay.setVisible(False)
             else:
                 self.drawing_area.show_shape_layers_overlay()
+        
+        elif event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_G:
+            self.drawing_area.keyPressEvent(event)
+        
+        elif event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_D:
+            self.drawing_area.duplicate_selected_object()
+                            
         
         else:
             super().keyPressEvent(event)
@@ -6184,18 +8603,33 @@ class UIMode(QWidget):
                 ("Ctrl + S",        "Save"),
                 ("Ctrl + C",        "Copy selected object"),
                 ("Ctrl + V",        "Paste object"),
+                ("Ctrl + D",        "Duplicate object"),
                 ("Delete",          "Delete selected object"),
                 ("Escape",          "Cancel / Deselect tool"),
+                ("Arrow keys",      "Move object"),
+                ("Shift + Arrow keys", "Move object by 10px"),
+                ("Shift + Drag to resize", "Resize proportionally"),
             ]),
             ("Canvas", [
                 ("Ctrl + Scroll",   "Zoom in / out"),
                 ("Shift + Scroll",  "Pan left / right"),
                 ("Scroll",          "Pan up / down"),
                 ("Ctrl + E",        "Toggle object layers"),
+                ("Ctrl + G",        "Toggle snap grid"),
             ]),
             ("Tools", [
                 ("Double-click tool", "Adjust tool size"),
             ]),
+            ("Label Editing", [
+                ("Ctrl + B",        "Make the text bold"),
+                ("Ctrl + I",        "Make the text italic"),
+                ("Ctrl + U",        "Underline the text"),
+                ("Ctrl + - or +",   "Control font size"),
+                ("Ctrl + Enter",    "Commit edit"),
+                ("Ctrl + L",        "Align text to left"),
+                ("Ctrl + T",        "Align text to center"),
+                ("Ctrl + R",        "Align text to right"),
+            ])
         ]
 
         scroll = QScrollArea()
@@ -6446,6 +8880,7 @@ class UIMode(QWidget):
         def _do_save():
             try:
                 self._core_save_canvas(self.current_canvas_file)
+                self.drawing_area.show_status_overlay("File saved", duration=2000)
             except Exception as e:
                 self.custom_tooltip.show_tooltip(f"Save failed: {str(e)[:40]}", duration=3000)
                 print(f"Save error: {e}")
@@ -6558,20 +8993,71 @@ class UIMode(QWidget):
             self._perform_auto_save()
 
     def _perform_auto_save(self):
-        # Perform auto-save and display status on zoom overlay
+        # Threaded auto-save: snapshot + lightweight serialize on main thread,
+        # heavy PNG encoding + disk I/O on worker thread
+        if self._auto_save_running:
+            self._auto_save_queued = True
+            return
+
         try:
             file_path = self.current_canvas_file
-            self._core_save_canvas(file_path)
-            
-            # Show success message on status overlay
-            self.drawing_area.show_status_overlay("File auto saved", duration=2000)
+            self._snapshot_current_page()
+            self._spaces[self._current_space_idx]["current_page"] = self._current_page_idx
+
+            project_folder = os.path.dirname(file_path)
+            config_folder = os.path.join(project_folder, "config")
+            os.makedirs(config_folder, exist_ok=True)
+
+            def _ser_hist(entry):
+                e = dict(entry)
+                e["shape_data"] = _serialize_shape_for_thread(entry["shape_data"])
+                return e
+
+            payload = {
+                "version": 3,
+                "current_space": self._current_space_idx,
+                "current_shape_color": self.current_shape_color.name(),
+                "spaces": [
+                    {
+                        "name": sp["name"],
+                        "current_page": sp["current_page"],
+                        "pages": [_serialize_page_state_for_thread(p) for p in sp["pages"]],
+                    }
+                    for sp in self._spaces
+                ],
+            }
+
+            all_histories = [
+                [[_ser_hist(e) for e in p["shape_history"]] for p in sp["pages"]]
+                for sp in self._spaces
+            ]
+
+            self._auto_save_running = True
+            self._request_auto_save.emit({
+                "file_path": file_path,
+                "config_folder": config_folder,
+                "payload": payload,
+                "histories": all_histories,
+            })
         except Exception as e:
-            # Show error briefly
             self.drawing_area.show_status_overlay(f"Auto-save failed: {str(e)[:30]}", duration=3000)
             print(f"Auto-save error: {e}")
-                    
-                
-                
+
+    def _on_auto_save_done(self):
+        self._auto_save_running = False
+        self.drawing_area.show_status_overlay("File auto saved", duration=2000)
+        if self._auto_save_queued:
+            self._auto_save_queued = False
+            self._perform_auto_save()
+
+    def _on_auto_save_error(self, msg):
+        self._auto_save_running = False
+        self.drawing_area.show_status_overlay(f"Auto-save failed: {msg[:30]}", duration=3000)
+        print(f"Auto-save error: {msg}")
+        if self._auto_save_queued:
+            self._auto_save_queued = False
+            self._perform_auto_save()
+                           
     def open_canvas(self, file_path=None):
         if not file_path:
             file_path, _ = QFileDialog.getOpenFileName(
