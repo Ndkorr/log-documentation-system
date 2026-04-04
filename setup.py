@@ -12,6 +12,7 @@ from PyQt6.QtGui import QFont, QAction
 from gui import SetupWizard
 from main import LogApp
 
+package_data={"": ["assets/*.png"]},
 
 class NavigationPane(QFrame):
     fileDoubleClicked = pyqtSignal(str)
