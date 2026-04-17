@@ -7,7 +7,7 @@ from functools import partial
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QSizePolicy, QApplication, QScrollArea, QStackedLayout,
+    QFrame, QSizePolicy, QApplication, QScrollArea, QStackedLayout, QStackedWidget,
     QGraphicsOpacityEffect, QGraphicsDropShadowEffect, QColorDialog,
     QToolButton, QMenu, QDialog, QSlider, QListWidget, QListWidgetItem,
     QFileDialog, QMessageBox, QFontComboBox, QLineEdit, QTextEdit
@@ -48,6 +48,7 @@ TOOL_MENU = [
     },
     {
         "type": "category", "name": "colors", "icon": os.path.join(_ASSETS_DIR, "tool-colors.png"), "children": [
+            {"type": "tool", "name": "select", "icon": os.path.join(_ASSETS_DIR, "tool-colors-mouse.png"), "icon_size": 66},
             {"type": "tool", "name": "fill", "icon": os.path.join(_ASSETS_DIR, "tool-colors-fill.png"), "icon_size": 66},
             {"type": "tool", "name": "crop", "icon": os.path.join(_ASSETS_DIR, "tool-colors-crop.png"), "icon_size": 66},
             {"type": "tool", "name": "eraser", "icon": os.path.join(_ASSETS_DIR, "tool-colors-eraser.png"), "icon_size": 66},
@@ -56,10 +57,10 @@ TOOL_MENU = [
     },
     {
         "type": "category", "name": "label", "icon": os.path.join(_ASSETS_DIR, "tool-label.png"), "icon_size": 250, "children": [
+            {"type": "tool", "name": "adddescription", "icon": os.path.join(_ASSETS_DIR, "tool-label-description.png"), "icon_size": 80},
             {"type": "tool", "name": "label", "icon": os.path.join(_ASSETS_DIR, "tool-label-label.png"), "icon_size": 96},
             {"type": "tool", "name": "arrow", "icon": os.path.join(_ASSETS_DIR, "tool-label-arrows.png"), "icon_size": 96},
-            {"type": "tool", "name": "framewithlabel", "icon": os.path.join(_ASSETS_DIR, "tool-label-rectwithlabel.png"), "icon_size": 90},
-            {"type": "tool", "name": "roundframewithlabel", "icon": os.path.join(_ASSETS_DIR, "tool-label-roundedrectwithlabel.png"), "icon_size": 90},
+            {"type": "tool", "name": "framewithlabel", "icon": os.path.join(_ASSETS_DIR, "tool-label-rectwithlabel.png"), "icon_size": 90},            
         ]
     },
 ]
@@ -68,6 +69,30 @@ CUSTOM_BORDER_COLOR = "#ffffff"
 CUSTOM_OBJECT_COLOR = "#ffffff"
 _RECENT_FILES_PATH = Path.home() / ".lds-project" / "recent_files.json"
 
+_pointing_cursor_cache = None
+def _pointing_cursor():
+    global _pointing_cursor_cache
+    if _pointing_cursor_cache is None:
+        px = QPixmap(os.path.join(_ASSETS_DIR, "cursor-pointing.png"))
+        if not px.isNull():
+            px = px.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            _pointing_cursor_cache = QCursor(px, 25, 20)
+        else:
+            _pointing_cursor_cache = QCursor(Qt.CursorShape.PointingHandCursor)
+    return _pointing_cursor_cache
+
+_default_cursor_cache = None
+def _default_cursor():
+    global _default_cursor_cache
+    if _default_cursor_cache is None:
+        px = QPixmap(os.path.join(_ASSETS_DIR, "tool-colors-mouse.png"))
+        if not px.isNull():
+            px = px.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            _default_cursor_cache = QCursor(px, 2, 2)
+        else:
+            _default_cursor_cache = QCursor(Qt.CursorShape.ArrowCursor)
+    return _default_cursor_cache
+
 
 class SideMenuPanel(QWidget):
     space_added   = pyqtSignal()
@@ -75,6 +100,7 @@ class SideMenuPanel(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setCursor(_default_cursor())
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet("background: white; border-left: 1px solid #ddd;")
         self.setFixedWidth(275)
@@ -93,7 +119,7 @@ class SideMenuPanel(QWidget):
             btn = QPushButton(name)
             btn.setCheckable(True)
             btn.setFixedHeight(36)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setCursor(_pointing_cursor())
             tab_row.addWidget(btn)
             self._tabs[name] = btn
 
@@ -120,7 +146,7 @@ class SideMenuPanel(QWidget):
             lbl = QPushButton(item)
             lbl.setFlat(True)
             lbl.setFixedHeight(38)
-            lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            lbl.setCursor(_pointing_cursor())
             file_layout.addWidget(lbl)
             self.file_actions[item] = lbl
 
@@ -166,7 +192,7 @@ class SideMenuPanel(QWidget):
             lbl = QPushButton(item)
             lbl.setFlat(True)
             lbl.setFixedHeight(38)
-            lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            lbl.setCursor(_pointing_cursor())
             lbl.setStyleSheet("border: 1px;")
             file_layout.addWidget(lbl)
             self.file_actions[item] = lbl
@@ -189,7 +215,7 @@ class SideMenuPanel(QWidget):
             }
             QPushButton:hover { background: #e55a00; }
         """)
-        self.create_space_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.create_space_btn.setCursor(_pointing_cursor())
         self.create_space_btn.clicked.connect(self.space_added.emit)
         pages_layout.addWidget(self.create_space_btn)
 
@@ -242,12 +268,12 @@ class SideMenuPanel(QWidget):
             }
             QPushButton:hover { background: #e55a00; }
         """)
-        create_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        create_btn.setCursor(_pointing_cursor())
         self.create_checkpoint_btn = create_btn
         history_layout.addWidget(create_btn)
 
-        # File History header button (always visible, toggles expansion)
-        file_history_btn = QPushButton("File History ▶")
+        # File History header label
+        file_history_btn = QPushButton("File History")
         file_history_btn.setFlat(True)
         file_history_btn.setFixedHeight(32)
         file_history_btn.setStyleSheet("""
@@ -257,18 +283,16 @@ class SideMenuPanel(QWidget):
             }
             QPushButton:hover { color: #ff6600; }
         """)
-        file_history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        file_history_btn.setCursor(_pointing_cursor())
         self.file_history_btn = file_history_btn
-        self._history_expanded = False
         history_layout.addWidget(file_history_btn)
 
-        # Scroll area for checkpoints (collapsible)
+        # Scroll area for checkpoints (always visible, fills remaining space)
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; margin: 0 8px; }")
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setMaximumHeight(200)
 
         self.checkpoint_list_widget = QWidget()
         self.checkpoint_list_layout = QVBoxLayout(self.checkpoint_list_widget)
@@ -285,30 +309,10 @@ class SideMenuPanel(QWidget):
 
         scroll_area.setWidget(self.checkpoint_list_widget)
 
-        # Start collapsed via height=0 (stays in layout, animation controls size)
-        scroll_area.setMaximumHeight(0)
         self.checkpoint_scroll_area = scroll_area
-        history_layout.addWidget(scroll_area)
+        history_layout.addWidget(scroll_area, stretch=1)
 
-        history_layout.addStretch()
         self._stack.addWidget(history_page)
-
-        # Slide animation
-        self._history_anim = QPropertyAnimation(scroll_area, b"maximumHeight")
-        self._history_anim.setDuration(500)
-        self._history_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
-
-        # Connect File History button to toggle
-        def toggle_history_list():
-            expanding = not self._history_expanded
-            self._history_anim.stop()
-            self._history_anim.setStartValue(scroll_area.maximumHeight())
-            self._history_anim.setEndValue(200 if expanding else 0)
-            self.file_history_btn.setText(f"File History {'-' if expanding else '▶'}")
-            self._history_expanded = expanding
-            self._history_anim.start()
-
-        file_history_btn.clicked.connect(toggle_history_list)
 
         # Wire tabs
         for i, name in enumerate(["File", "Pages", "History"]):
@@ -409,7 +413,7 @@ class SideMenuPanel(QWidget):
             btn = QPushButton(name)
             btn.setFlat(True)
             btn.setFixedHeight(34)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setCursor(_pointing_cursor())
             btn.setStyleSheet(f"""
                 QPushButton {{ text-align: left; padding: 0 18px 0 28px;
                               border: none; font-size: 10pt; background: white; color: #555; }}
@@ -448,7 +452,7 @@ class SideMenuPanel(QWidget):
 
             header_btn = QPushButton(f"{arrow}  {space['name']}")
             header_btn.setFixedHeight(34)
-            header_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            header_btn.setCursor(_pointing_cursor())
             if is_active:
                 darker = QColor(accent).darker(115).name()
                 header_btn.setStyleSheet(f"""
@@ -494,7 +498,7 @@ class SideMenuPanel(QWidget):
                 item_widget.setStyleSheet(
                     f"background: {'#edf4ff' if is_active_page else '#f9f9f9'}; border-radius: 4px;"
                 )
-                item_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+                item_widget.setCursor(_pointing_cursor())
                 item_layout = QHBoxLayout(item_widget)
                 item_layout.setContentsMargins(6, 6, 6, 6)
                 item_layout.setSpacing(8)
@@ -591,7 +595,7 @@ class ColorButton(QPushButton):
             self.setStyleSheet(
                 f"border-radius: 14px; background: {self.color.name()}; border: 2px solid #ff6600;"
             )
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setCursor(_pointing_cursor())
         self.update()
 
     def leaveEvent(self, a0):
@@ -604,7 +608,7 @@ class ColorButton(QPushButton):
             self.setStyleSheet(
                 f"border-radius: 14px; background: {self.color.name()}; border: 2px solid #222;"
             )
-        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.setCursor(_default_cursor())
         self.update()
 
     def paintEvent(self, a0):
@@ -630,7 +634,7 @@ class DraggableBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(18)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setCursor(_pointing_cursor())
         self._dragging = False
         self._drag_pos = None
 
@@ -650,13 +654,15 @@ class DraggableBar(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self._dragging = True
             self._drag_pos = event.globalPosition().toPoint()
-            self._dialog_pos = self.parentWidget().pos()
+            # Get the top-level window (the dialog), not just the parent widget
+            self._dialog_pos = self.window().pos()
 
     def mouseMoveEvent(self, event):
         if self._dragging:
             delta = event.globalPosition().toPoint() - self._drag_pos
             new_pos = self._dialog_pos + delta
-            self.parentWidget().move(new_pos)
+            # Move the actual dialog window
+            self.window().move(new_pos)
 
     def mouseReleaseEvent(self, a0):
         self._dragging = False
@@ -669,7 +675,7 @@ class SlidingTextRow(QWidget):
         self.idx = idx
         self._selected = False
         self.setFixedHeight(34)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setCursor(_pointing_cursor())
 
         self.label = QLabel(text, self)
         self.label.setStyleSheet(
@@ -734,7 +740,7 @@ class VerticalScrollBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(32)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setCursor(_pointing_cursor())
         self._scroll_bar = None
         self._dragging = False
         self._drag_start_y = 0
@@ -802,6 +808,7 @@ class RestorePointsDialog(QDialog):
     
     def __init__(self, parent=None, drawing_area=None, shape_idx=None):
         super().__init__(parent)
+        self.setCursor(_default_cursor())
         self.drawing_area = drawing_area
         self.properties_dialog = parent
         self.shape_idx = shape_idx
@@ -894,7 +901,7 @@ class RestorePointsDialog(QDialog):
                 color: white;
             }
         """)
-        restore_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        restore_btn.setCursor(_pointing_cursor())
 
         def on_restore():
             list_idx = self._selected_row
@@ -937,7 +944,7 @@ class RestorePointsDialog(QDialog):
                 background: #ddd;
             }
         """)
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setCursor(_pointing_cursor())
         cancel_btn.clicked.connect(self.on_cancel)
 
         btn_row = QHBoxLayout()
@@ -976,6 +983,7 @@ class PropertiesDialog(QDialog):
         shape_idx=None
     ):
         super().__init__(parent)
+        self.setCursor(_default_cursor())
         self.drawing_area = drawing_area
         self.shape_idx = shape_idx
         # Parent the tooltip on UIMode (parent of DrawingArea), not on this dialog
@@ -1097,7 +1105,7 @@ class PropertiesDialog(QDialog):
         object_color_label = QLabel("Object Color")
         object_color_label.setStyleSheet("border: none;")
         layout.addWidget(object_color_label)
-        object_color_label.setVisible(shape_type != "line")
+        object_color_label.setVisible(shape_type not in ("line", "arrow"))
         object_color_container = QWidget()
         object_color_container.setStyleSheet("border: none;")
         object_color_row = QHBoxLayout(object_color_container)
@@ -1121,7 +1129,7 @@ class PropertiesDialog(QDialog):
                 btn.setChecked(True)
             elif not is_transp and color.lower() == fill_color.lower():
                 btn.setChecked(True)
-        object_color_container.setVisible(shape_type != "line")
+        object_color_container.setVisible(shape_type not in ("line", "arrow"))
         layout.addWidget(object_color_container)
 
         # Restore Point
@@ -1133,7 +1141,7 @@ class PropertiesDialog(QDialog):
             border: none;
             color: #222;
         """)
-        restore.setCursor(Qt.CursorShape.PointingHandCursor)
+        restore.setCursor(_pointing_cursor())
         restore.setOpenExternalLinks(False)
         layout.addWidget(restore)
 
@@ -1225,7 +1233,7 @@ class PropertiesDialog(QDialog):
                 color: #ff6600;
             }
             """)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setCursor(_pointing_cursor())
         layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
     def _on_border_color_selected(self, color_hex, button):
@@ -1365,7 +1373,7 @@ class ArcToolMenu(QWidget):
             btn.move(0, 0)
             btn.setVisible(False)
             self.buttons.append(btn)
-            self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            self.setCursor(_pointing_cursor())
     
     def update_tool_btn_border_2(self):
         color_hex = self.border_color
@@ -1514,7 +1522,7 @@ class ClickableLabel(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.clicked = None  # Assign a callback
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setCursor(_pointing_cursor())
         
 
     def mousePressEvent(self, event: QMouseEvent):
@@ -1538,7 +1546,7 @@ class ToolButton(QPushButton):
             background: white;
             color: black;
         """)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setCursor(_pointing_cursor())
     
     def mouseDoubleClickEvent(self, event):
         self.doubleClicked.emit()
@@ -1572,6 +1580,93 @@ class CustomToolTip(QLabel):
         self.setVisible(True)
         self.raise_()
         self._timer.start(duration)
+
+
+def _compute_group_bounds(children):
+    """Compute the union bounding rect of a list of child shape tuples.
+    Uses raw coordinates (no rotation) — suitable for painter transforms."""
+    if not children:
+        return QRect()
+    rects = []
+    for child in children:
+        tool = child[0]
+        if tool == "draw" and isinstance(child[1], list) and child[1]:
+            pts = child[1]
+            rects.append(QRect(
+                QPoint(min(p.x() for p in pts), min(p.y() for p in pts)),
+                QPoint(max(p.x() for p in pts), max(p.y() for p in pts))
+            ))
+        elif tool == "group":
+            rects.append(QRect(child[1], child[2]).normalized())
+        else:
+            rects.append(QRect(child[1], child[2]).normalized())
+    result = rects[0]
+    for r in rects[1:]:
+        result = result.united(r)
+    return result
+
+
+def _compute_group_visual_bounds(children):
+    """Compute the union bounding rect of a list of child shape tuples,
+    accounting for each child's rotation (visual/screen-space bounds)."""
+    if not children:
+        return QRect()
+    rects = []
+    for child in children:
+        rects.append(_shape_bounding_rect(child))
+    result = rects[0]
+    for r in rects[1:]:
+        result = result.united(r)
+    return result
+
+
+def _rotated_rect_bounds(rect, angle_degrees):
+    """Return the axis-aligned bounding QRect of a QRect rotated around its center."""
+    if not angle_degrees:
+        return rect
+    cx, cy = rect.center().x(), rect.center().y()
+    angle = math.radians(angle_degrees)
+    cos_a = math.cos(angle)
+    sin_a = math.sin(angle)
+    corners = [rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight()]
+    xs, ys = [], []
+    for p in corners:
+        x, y = p.x() - cx, p.y() - cy
+        xs.append(int(x * cos_a - y * sin_a + cx))
+        ys.append(int(x * sin_a + y * cos_a + cy))
+    return QRect(QPoint(min(xs), min(ys)), QPoint(max(xs), max(ys)))
+
+
+def _shape_bounding_rect(shape):
+    """Return the axis-aligned bounding QRect of a shape tuple, accounting for rotation."""
+    tool = shape[0]
+    if tool == "draw" and isinstance(shape[1], list) and shape[1]:
+        pts = shape[1]
+        rect = QRect(
+            QPoint(min(p.x() for p in pts), min(p.y() for p in pts)),
+            QPoint(max(p.x() for p in pts), max(p.y() for p in pts))
+        ).normalized()
+        rotation = 0
+        if len(shape) > 5 and isinstance(shape[5], (int, float)):
+            rotation = shape[5]
+        return _rotated_rect_bounds(rect, rotation) if rotation else rect
+    elif tool == "group":
+        children = shape[3] if isinstance(shape[3], list) else []
+        rect = _compute_group_visual_bounds(children)
+        group_rotation = 0
+        for item in shape[4:]:
+            if isinstance(item, (int, float)) and not isinstance(item, bool):
+                group_rotation = item
+                break
+        return _rotated_rect_bounds(rect, group_rotation) if group_rotation else rect
+    else:
+        rect = QRect(shape[1], shape[2]).normalized()
+        rotation = 0
+        for item in shape[4:]:
+            if isinstance(item, (int, float)) and not isinstance(item, bool):
+                rotation = item
+                break
+        return _rotated_rect_bounds(rect, rotation) if rotation else rect
 
 
 def _serialize_qpoint(p):
@@ -1609,7 +1704,19 @@ def _encode_qimage_b64(img: QImage) -> str:
 
 def _serialize_shape_for_thread(shape: tuple) -> dict:
     tool = shape[0]
-    if tool == "image":
+    if tool == "group":
+        children = shape[3]
+        d = {
+            "tool": "group",
+            "start": _serialize_qpoint(shape[1]),
+            "end": _serialize_qpoint(shape[2]),
+            "children": [_serialize_shape_for_thread(c) for c in children],
+            "extras": []
+        }
+        for item in shape[4:]:
+            d["extras"].append(_serialize_extra(item))
+        return d
+    elif tool == "image":
         d = {
             "tool": "image",
             "start": _serialize_qpoint(shape[1]),
@@ -1658,14 +1765,31 @@ def _serialize_page_state_for_thread(state) -> dict:
 
 def _finalize_page_for_json(page_dict: dict) -> dict:
     page_dict["eraser_mask"] = _encode_qimage_b64(page_dict.pop("eraser_mask_img"))
-    for shape in page_dict["shapes"]:
+    def _finalize_shape(shape):
         if "qimage" in shape:
             shape["pixmap"] = _encode_qimage_b64(shape.pop("qimage"))
+        if "children" in shape:
+            for child in shape["children"]:
+                _finalize_shape(child)
+    for shape in page_dict["shapes"]:
+        _finalize_shape(shape)
     return page_dict
 
 def _serialize_shape(shape: tuple) -> dict:
     tool = shape[0]
-    if tool == "image":
+    if tool == "group":
+        children = shape[3]
+        d = {
+            "tool": "group",
+            "start": _serialize_qpoint(shape[1]),
+            "end": _serialize_qpoint(shape[2]),
+            "children": [_serialize_shape(c) for c in children],
+            "extras": []
+        }
+        for item in shape[4:]:
+            d["extras"].append(_serialize_extra(item))
+        return d
+    elif tool == "image":
         d = {
                 "tool": "image",
                 "start": _serialize_qpoint(shape[1]),
@@ -1722,7 +1846,11 @@ def _deserialize_extra(d):
 
 def _deserialize_shape(d: dict) -> tuple:
     tool = d["tool"]
-    if tool == "image":
+    if tool == "group":
+        children = [_deserialize_shape(c) for c in d["children"]]
+        extras = [_deserialize_extra(e) for e in d.get("extras", [])]
+        return tuple(["group", QPoint(*d["start"]), QPoint(*d["end"]), children] + extras)
+    elif tool == "image":
         shape = [
             "image",
             QPoint(*d["start"]),
@@ -1785,16 +1913,9 @@ class _LabelTextOverlay(QWidget):
     HANDLE_MARGIN  = 8    # Extra margin so handles are not clipped
     BORDER_HIT     = 12   # px from edge that triggers move cursor
 
-    _RESIZE_CURSORS = [
-        Qt.CursorShape.SizeFDiagCursor,  # 0 TL
-        Qt.CursorShape.SizeVerCursor,    # 1 TM
-        Qt.CursorShape.SizeBDiagCursor,  # 2 TR
-        Qt.CursorShape.SizeHorCursor,    # 3 MR
-        Qt.CursorShape.SizeFDiagCursor,  # 4 BR
-        Qt.CursorShape.SizeVerCursor,    # 5 BM
-        Qt.CursorShape.SizeBDiagCursor,  # 6 BL
-        Qt.CursorShape.SizeHorCursor,    # 7 ML
-    ]
+    # _RESIZE_CURSORS is built in __init__ so QCursor/QPixmap are
+    # only created after QApplication exists.
+    _RESIZE_CURSORS = []
 
     def __init__(self, drawing_area, canvas_rect, text_edit, toolbar):
         super().__init__(drawing_area)
@@ -1805,6 +1926,25 @@ class _LabelTextOverlay(QWidget):
         self._drag_mode       = None          # None | ('move',) | ('resize', idx)
         self._drag_start_global = None
         self._drag_start_rect   = None
+
+        def _load_cursor(name, fallback):
+            px = QPixmap(os.path.join(_ASSETS_DIR, name))
+            if not px.isNull():
+                px = px.scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                return QCursor(px, 20, 20)
+            return QCursor(fallback)
+
+        self._RESIZE_CURSORS = [
+            _load_cursor("cursor-sizediagonalleft.png", Qt.CursorShape.SizeFDiagCursor),   # 0 TL
+            _load_cursor("cursor-sizevertical.png", Qt.CursorShape.SizeVerCursor),  # 1 TM
+            _load_cursor("cursor-sizediagonalright.png", Qt.CursorShape.SizeBDiagCursor),   # 2 TR
+            _load_cursor("cursor-sizehorizontal.png", Qt.CursorShape.SizeHorCursor),     # 3 MR
+            _load_cursor("cursor-sizediagonalleft.png", Qt.CursorShape.SizeFDiagCursor),   # 4 BR
+            _load_cursor("cursor-sizevertical.png", Qt.CursorShape.SizeVerCursor),  # 5 BM
+            _load_cursor("cursor-sizediagonalright.png", Qt.CursorShape.SizeBDiagCursor),   # 6 BL
+            _load_cursor("cursor-sizehorizontal.png", Qt.CursorShape.SizeHorCursor),     # 7 ML
+        ]
+        self._move_cursor = _load_cursor("cursor-sizemove.png", Qt.CursorShape.SizeAllCursor)
 
         self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -1879,7 +2019,7 @@ class _LabelTextOverlay(QWidget):
             if hit[0] == 'resize':
                 self.setCursor(self._RESIZE_CURSORS[hit[1]])
             elif hit[0] == 'move':
-                self.setCursor(Qt.CursorShape.SizeAllCursor)
+                self.setCursor(self._move_cursor)
             else:
                 self.unsetCursor()
             super().mouseMoveEvent(event)
@@ -1993,7 +2133,8 @@ class DrawingArea(QFrame):
         self.setStyleSheet("background: #e5e5e5; border: none;")
         self.setMinimumSize(800, 600)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.current_tool = None
+        self.setMouseTracking(True)
+        self.current_tool = "select"
         self.drawing = False
         self.start_point = None
         self.end_point = None
@@ -2002,6 +2143,7 @@ class DrawingArea(QFrame):
         self.preview_shape = None
         self.preview_start = None
         self.preview_end = None
+        self._placement_editing = False
 
         self._dragging_handle = None
         self._dragging_box = False
@@ -2056,6 +2198,7 @@ class DrawingArea(QFrame):
         self.shape_layers_overlay.shape_selected.connect(self.select_shape_by_index)
         # self.shape_layers_overlay.setVisible(False)
         self.selected_shape_index = None  # Track which shape is selected
+        self.hovered_shape_index = None  # Track which shape is hovered (select tool)
 
         self._edit_locked_color = None
 
@@ -2063,6 +2206,13 @@ class DrawingArea(QFrame):
         self._rotation_indicator_timer = QTimer(self)
         self._rotation_indicator_timer.setSingleShot(True)
         self._rotation_indicator_timer.timeout.connect(self.hide_rotation_indicator)
+
+        self._show_size_indicator = False
+        self._size_indicator_timer = QTimer(self)
+        self._size_indicator_timer.setSingleShot(True)
+        self._size_indicator_timer.timeout.connect(self._hide_size_indicator)
+        self._size_indicator_text = ""  # cached text for display after release
+        self._size_indicator_center = QPoint(0, 0)  # cached center
 
         self.cropping = False
         self.crop_preview_mode = False
@@ -2106,9 +2256,33 @@ class DrawingArea(QFrame):
         self._label_toolbar_min_width = 310
         self._label_edit_index = None
         self._label_edit_rotation = 0
+
+        # Add-description tool state
+        self._desc_overlay = None
+        self._desc_edit_shape_idx = None
+        self._desc_hovered_shape_idx = None
+        self._desc_cursor = None
         
         self._draw_shift_anchor = None
         self._draw_freehand_base = None
+
+        # Multi-select state (Ctrl+click on select tool)
+        self.selected_shape_indices = set()
+        self._multi_drag_active = False
+        self._multi_drag_start = None
+        self._multi_drag_origins = {}  # idx -> original shape data for undo
+
+        # Marquee (rubber-band) selection state
+        self._marquee_active = False
+        self._marquee_start = None
+        self._marquee_end = None
+
+        # Group resize state
+        self._group_dragging_handle = None
+        self._group_resize_origin_bounds = None
+        self._group_resize_origin_children = None
+        
+        self.custom_tooltip = CustomToolTip(self)
 
     # Snap-to-grid helpers
 
@@ -2314,6 +2488,77 @@ class DrawingArea(QFrame):
         ny = math.sin(rad) * dx + math.cos(rad) * dy + center.y()
         return QPoint(int(round(nx)), int(round(ny)))    
 
+    def _shape_at_point(self, canvas_pt):
+        """Return the index of the topmost shape under canvas_pt, or None.
+        Iterates in reverse so the topmost (last drawn) shape wins."""
+        for idx in reversed(range(len(self.shapes))):
+            shape = self.shapes[idx]
+            tool = shape[0]
+            start, end = shape[1], shape[2]
+            # Extract rotation
+            rotation = 0
+            if tool == "group":
+                # Hit-test against group bounding rect, accounting for rotation
+                children = shape[3] if isinstance(shape[3], list) else []
+                rect = _compute_group_visual_bounds(children) if children else QRect(start, end).normalized()
+                if rect and rect.isValid():
+                    group_rotation = 0
+                    for item in shape[4:]:
+                        if isinstance(item, (int, float)) and not isinstance(item, bool):
+                            group_rotation = item
+                            break
+                    test_pt = canvas_pt
+                    if group_rotation:
+                        test_pt = self._to_local(canvas_pt, group_rotation, rect.center())
+                    hit_rect = rect.adjusted(-6, -6, 6, 6)
+                    if hit_rect.contains(test_pt):
+                        return idx
+                continue
+            elif tool == "draw":
+                if len(shape) > 5 and isinstance(shape[5], (int, float)):
+                    rotation = shape[5]
+            else:
+                for item in shape[4:]:
+                    if isinstance(item, (int, float)) and not isinstance(item, bool):
+                        rotation = item
+
+            if tool == "draw" and isinstance(start, list) and len(start) > 1:
+                # Bounding box of freehand points with margin
+                draw_width = shape[4] if len(shape) > 4 and isinstance(shape[4], (int, float)) else 6
+                min_x = min(p.x() for p in start)
+                min_y = min(p.y() for p in start)
+                max_x = max(p.x() for p in start)
+                max_y = max(p.y() for p in start)
+                m = max(draw_width, 6)
+                hit_rect = QRect(QPoint(min_x - m, min_y - m), QPoint(max_x + m, max_y + m))
+                if hit_rect.contains(canvas_pt):
+                    return idx
+            elif tool in ("line", "arrow"):
+                # Distance from point to line segment
+                ax, ay = start.x(), start.y()
+                bx, by = end.x(), end.y()
+                dx_l, dy_l = bx - ax, by - ay
+                lensq = dx_l * dx_l + dy_l * dy_l
+                if lensq > 0:
+                    t_v = max(0.0, min(1.0, ((canvas_pt.x() - ax) * dx_l + (canvas_pt.y() - ay) * dy_l) / lensq))
+                    dist_sq = (ax + t_v * dx_l - canvas_pt.x()) ** 2 + (ay + t_v * dy_l - canvas_pt.y()) ** 2
+                else:
+                    dist_sq = (canvas_pt.x() - ax) ** 2 + (canvas_pt.y() - ay) ** 2
+                if dist_sq <= 100:  # ~10px tolerance
+                    return idx
+            else:
+                rect = QRect(start, end).normalized()
+                if rotation:
+                    # Transform click into shape's local coordinate space
+                    local_pt = self._to_local(canvas_pt, rotation, rect.center())
+                else:
+                    local_pt = canvas_pt
+                # Hit-test with small margin
+                hit_rect = rect.adjusted(-6, -6, 6, 6)
+                if hit_rect.contains(local_pt):
+                    return idx
+        return None
+
     def set_tool_size(self, tool_name, size):
         """Store tool size and update cursor if needed"""
         self.tool_sizes[tool_name] = size
@@ -2346,6 +2591,11 @@ class DrawingArea(QFrame):
         self._show_rotation_indicator = False
         self.update()
 
+    def _hide_size_indicator(self):
+        self._show_size_indicator = False
+        self.update()
+        self.update()
+
     def set_shape_color(self, color):
         self.shape_color = color
         self._edit_locked_color = color
@@ -2366,6 +2616,10 @@ class DrawingArea(QFrame):
             if getattr(self, '_text_edit_overlay', None) is not None:
                 event.accept()
                 return
+            # Block zoom while the description overlay is open
+            if getattr(self, '_desc_overlay', None) is not None:
+                event.accept()
+                return
             # Zoom
             if delta > 0:
                 self.zoom_by(10)
@@ -2374,12 +2628,20 @@ class DrawingArea(QFrame):
             self.show_zoom_overlay()
             event.accept()
         elif modifiers & Qt.KeyboardModifier.ShiftModifier:
+            # Block horizontal pan while description overlay is open
+            if getattr(self, '_desc_overlay', None) is not None:
+                event.accept()
+                return
             # Pan horizontally
             self.pan_offset += QPoint(delta // 2, 0)
             self.clamp_pan_offset()  # Ensure panning doesn't go out of bounds
             self.update()
             event.accept()
         else:
+            # Block vertical pan while description overlay is open
+            if getattr(self, '_desc_overlay', None) is not None:
+                event.accept()
+                return
             # Pan vertically
             self.pan_offset += QPoint(0, delta // 2)
             self.clamp_pan_offset() # Ensure panning doesn't go out of bounds
@@ -2404,10 +2666,16 @@ class DrawingArea(QFrame):
         self._zoom_overlay_timer.start(duration)    
 
     def set_tool(self, tool):
+        # Commit any open description overlay when switching away
+        if self.current_tool == "adddescription" and tool != "adddescription":
+            self._commit_description_overlay()
+            self._desc_hovered_shape_idx = None
         self.current_tool = tool
+        self.hovered_shape_index = None
+        self.selected_shape_indices.clear()
 
         if self.selected_shape_index is not None:
-            self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+            self.setCursor(_default_cursor())
             return
 
         if tool == "eraser":
@@ -2441,10 +2709,30 @@ class DrawingArea(QFrame):
             self._draw_cursor = QCursor(pixmap, size // 2, size // 2)
             self.setCursor(self._draw_cursor)
 
+        elif tool == "select":
+            # Load select/mouse icon as cursor
+            pixmap = QPixmap(os.path.join(_ASSETS_DIR, "tool-colors-mouse.png"))
+            if not pixmap.isNull():
+                cursor_pix = pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self._select_cursor = QCursor(cursor_pix, 2, 2)
+                self.setCursor(self._select_cursor)
+            else:
+                self._select_cursor = QCursor(Qt.CursorShape.ArrowCursor)
+                self.setCursor(self._select_cursor)
+
+        elif tool == "adddescription":
+            pixmap = QPixmap(os.path.join(_ASSETS_DIR, "tool-label-description.png"))
+            if not pixmap.isNull():
+                cursor_pix = pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self._desc_cursor = QCursor(cursor_pix, 2, 2)
+                self.setCursor(self._desc_cursor)
+            else:
+                self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
+
         elif tool:
             self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
         else:
-            self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+            self.setCursor(_default_cursor())
 
     def mousePressEvent(self, event):
         # Commit text overlay if user clicks anywhere outside the overlay
@@ -2455,6 +2743,21 @@ class DrawingArea(QFrame):
             click_pos = event.position().toPoint()
             if not self._text_edit_overlay.geometry().contains(click_pos):
                 self._commit_text_overlay()
+            return
+
+        # Handle adddescription tool clicks
+        if self.current_tool == "adddescription" and event.button() == Qt.MouseButton.LeftButton:
+            # If overlay is open and click is outside it, commit first
+            if self._desc_overlay is not None:
+                click_pos = event.position().toPoint()
+                if not self._desc_overlay.geometry().contains(click_pos):
+                    self._commit_description_overlay()
+                else:
+                    return  # Click is inside the overlay, let it handle it
+            canvas_pt = self.widget_to_canvas(event.position().toPoint())
+            hit_idx = self._shape_at_point(canvas_pt)
+            if hit_idx is not None:
+                self._show_description_overlay(hit_idx)
             return
 
         pt = self.widget_to_canvas(event.position().toPoint())
@@ -2506,7 +2809,7 @@ class DrawingArea(QFrame):
             if crop_rect.contains(pt):
                 self._dragging_box = True
                 self._drag_offset = pt - crop_rect.topLeft()
-                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                self.setCursor(_default_cursor())
                 return
 
         if self._free_rotating and self.selected_shape_index is not None:
@@ -2516,7 +2819,13 @@ class DrawingArea(QFrame):
             # Use preview coordinates if available (edit mode)
             start = self.preview_start if self.preview_start is not None else shape[1]
             end = self.preview_end if self.preview_end is not None else shape[2]
-            if shape[0] == "draw" and isinstance(start, list):
+            if shape[0] == "group":
+                # For groups, use the group bounds center (already set in start_free_rotate)
+                children = shape[3] if isinstance(shape[3], list) else []
+                g_rect = _compute_group_visual_bounds(children)
+                if g_rect and g_rect.isValid():
+                    self._rotation_center = g_rect.center()
+            elif shape[0] == "draw" and isinstance(start, list):
                 # For draw shapes, use bounding box center
                 points = start
                 min_x = min(p.x() for p in points)
@@ -2574,7 +2883,7 @@ class DrawingArea(QFrame):
                     self._orig_points = [QPoint(p) for p in points]
                     self._orig_bbox = QRect(rect)
                     self._drag_offset = pt - box_rect.topLeft()
-                    self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                    self.setCursor(_default_cursor())
                     self._pending_shape_action = "Move"
                     return
 
@@ -2588,8 +2897,8 @@ class DrawingArea(QFrame):
 
         # EDITING EXISTING SHAPE OR IMAGE
         if self.preview_shape and self.preview_start is not None and self.preview_end is not None:
-            # --- Line: endpoint-only editing (start/end handles, body move, commit) ---
-            if self.preview_shape == "line":
+            # --- Line/Arrow: endpoint-only editing (start/end handles, body move, commit) ---
+            if self.preview_shape in ("line", "arrow"):
                 if self.selected_shape_index is not None:
                     hit_size = max(20, self.HANDLE_SIZE * 3)
                     for h_idx, h_pt in enumerate([self.preview_start, self.preview_end]):
@@ -2610,7 +2919,7 @@ class DrawingArea(QFrame):
                     if dist_sq <= 100:
                         self._dragging_box = True
                         self._drag_offset = pt - self.preview_start
-                        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                        self.setCursor(_default_cursor())
                         self._pending_shape_action = "Move"
                         return
                 # Commit: save edited line or place new line
@@ -2681,6 +2990,8 @@ class DrawingArea(QFrame):
                 self.preview_rotation = 0
                 self.selected_shape_index = None
                 self._edit_locked_color = None
+                self._show_size_indicator = False
+                self._size_indicator_timer.stop()
                 self.update()
                 return
             rect = QRect(self.preview_start, self.preview_end).normalized()
@@ -2688,39 +2999,42 @@ class DrawingArea(QFrame):
             rotation = getattr(self, 'preview_rotation', 0)
             # Transform click into the shape's local (unrotated) coordinate space
             pt_local = self._to_local(pt, rotation, rect.center()) if rotation else pt
-            hit_size = max(20, self.HANDLE_SIZE * 3)  # increase from 6px to at least 20px
-            for idx, handle in enumerate(self.handle_points(box_rect)):
-                handle_rect = QRect(handle.x() - hit_size//2, handle.y() - hit_size//2, hit_size, hit_size)
-                if handle_rect.contains(pt_local):
-                    self._dragging_handle = idx
-                    self._drag_origin_center = rect.center()
-                    self.set_resize_cursor(idx)
-                    self._pending_shape_action = "Resize"
-                    # Store original rect for aspect-ratio constraint (Shift+resize)
-                    self._resize_orig_rect = QRect(rect)
-                    # Store the anchor corner's world position so resize won't move the shape
-                    if rotation:
-                        r = rect  # already normalized
-                        x1, y1, x2, y2 = r.left(), r.top(), r.right(), r.bottom()
-                        xm, ym = (x1+x2)//2, (y1+y2)//2
-                        _anchor_map = {
-                            0: QPoint(x2, y2), 1: QPoint(xm, y2), 2: QPoint(x1, y2),
-                            3: QPoint(x1, ym), 4: QPoint(x1, y1), 5: QPoint(xm, y1),
-                            6: QPoint(x2, y1), 7: QPoint(x2, ym)
-                        }
-                        ac = _anchor_map.get(idx)
-                        self._drag_anchor_world = self._from_local(ac, rotation, r.center()) if ac else None
-                    else:
-                        self._drag_anchor_world = None
+            # Only allow handle/box dragging when editing an existing shape
+            # (for new shapes, fall through to commit)
+            if self.selected_shape_index is not None:
+                hit_size = max(20, self.HANDLE_SIZE * 3)  # increase from 6px to at least 20px
+                for idx, handle in enumerate(self.handle_points(box_rect)):
+                    handle_rect = QRect(handle.x() - hit_size//2, handle.y() - hit_size//2, hit_size, hit_size)
+                    if handle_rect.contains(pt_local):
+                        self._dragging_handle = idx
+                        self._drag_origin_center = rect.center()
+                        self.set_resize_cursor(idx)
+                        self._pending_shape_action = "Resize"
+                        # Store original rect for aspect-ratio constraint (Shift+resize)
+                        self._resize_orig_rect = QRect(rect)
+                        # Store the anchor corner's world position so resize won't move the shape
+                        if rotation:
+                            r = rect  # already normalized
+                            x1, y1, x2, y2 = r.left(), r.top(), r.right(), r.bottom()
+                            xm, ym = (x1+x2)//2, (y1+y2)//2
+                            _anchor_map = {
+                                0: QPoint(x2, y2), 1: QPoint(xm, y2), 2: QPoint(x1, y2),
+                                3: QPoint(x1, ym), 4: QPoint(x1, y1), 5: QPoint(xm, y1),
+                                6: QPoint(x2, y1), 7: QPoint(x2, ym)
+                            }
+                            ac = _anchor_map.get(idx)
+                            self._drag_anchor_world = self._from_local(ac, rotation, r.center()) if ac else None
+                        else:
+                            self._drag_anchor_world = None
+                        return
+                    
+                # Check for moving
+                if box_rect.contains(pt_local):
+                    self._dragging_box = True
+                    self._drag_offset = pt - box_rect.topLeft()
+                    self.setCursor(_default_cursor())
+                    self._pending_shape_action = "Move"
                     return
-                
-            # Check for moving
-            if box_rect.contains(pt_local):
-                self._dragging_box = True
-                self._drag_offset = pt - box_rect.topLeft()
-                self.setCursor(Qt.CursorShape.ClosedHandCursor)
-                self._pending_shape_action = "Move"
-                return
             
             # Commit edit if click outside (only if editing an existing shape)
             if self.selected_shape_index is not None:
@@ -2822,6 +3136,8 @@ class DrawingArea(QFrame):
             self.selected_shape_index = None
 
             self._edit_locked_color = None
+            self._show_size_indicator = False
+            self._size_indicator_timer.stop()
             self.shape_deselected.emit()
             self.update()
             return
@@ -2867,9 +3183,112 @@ class DrawingArea(QFrame):
                 self.update()
             return
 
+        # SELECT TOOL: click on a shape to select it (enter edit mode)
+        if self.current_tool == "select" and event.button() == Qt.MouseButton.LeftButton:
+            ctrl_held = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+
+            # --- Single-selected group: click to resize handle, drag, or deselect ---
+            if (self.selected_shape_index is not None
+                    and not ctrl_held
+                    and 0 <= self.selected_shape_index < len(self.shapes)
+                    and self.shapes[self.selected_shape_index][0] == "group"
+                    and self.preview_shape is None):
+                grp = self.shapes[self.selected_shape_index]
+                g_rect = _compute_group_visual_bounds(grp[3] if isinstance(grp[3], list) else [])
+                if g_rect and g_rect.isValid():
+                    # Account for group rotation when hit-testing handles
+                    group_rotation = 0
+                    for item in grp[4:]:
+                        if isinstance(item, (int, float)) and not isinstance(item, bool):
+                            group_rotation = item
+                            break
+                    test_pt = pt
+                    if group_rotation:
+                        test_pt = self._to_local(pt, group_rotation, g_rect.center())
+                    # Check handle hit first for resize
+                    hit_size = max(20, self.HANDLE_SIZE * 3)
+                    for h_idx, handle in enumerate(self.handle_points(g_rect)):
+                        handle_rect = QRect(handle.x() - hit_size // 2, handle.y() - hit_size // 2, hit_size, hit_size)
+                        if handle_rect.contains(test_pt):
+                            self._group_dragging_handle = h_idx
+                            self._group_resize_origin_bounds = QRect(g_rect)
+                            self._group_resize_origin_children = [tuple(c) for c in grp[3]]
+                            self.set_resize_cursor(h_idx)
+                            self.push_undo()
+                            return
+                    if g_rect.adjusted(-8, -8, 8, 8).contains(test_pt):
+                        # Start dragging the group
+                        self._multi_drag_active = True
+                        self._multi_drag_start = pt
+                        self.selected_shape_indices = {self.selected_shape_index}
+                        self.push_undo()
+                        self.update()
+                        return
+                # Clicked outside group – deselect
+                self.selected_shape_index = None
+                self.shape_deselected.emit()
+                self.update()
+                return
+
+            # --- Multi-select drag: start moving all selected shapes ---
+            if self.selected_shape_indices and not ctrl_held and self.selected_shape_index is None:
+                hit_idx = self._shape_at_point(pt)
+                if hit_idx is not None and hit_idx in self.selected_shape_indices:
+                    # Start dragging multi-selection
+                    self._multi_drag_active = True
+                    self._multi_drag_start = pt
+                    self.push_undo()
+                    self.hovered_shape_index = None
+                    self.update()
+                    return
+                # Clicked outside multi-selection – clear it
+                if hit_idx is None:
+                    self.selected_shape_indices.clear()
+                    self.hovered_shape_index = None
+                    self.update()
+                    return
+                # Clicked on a non-selected shape – clear multi and single-select it
+                self.selected_shape_indices.clear()
+
+            # --- Ctrl+click: toggle multi-selection ---
+            if ctrl_held and self.selected_shape_index is None:
+                hit_idx = self._shape_at_point(pt)
+                if hit_idx is not None and not self.is_shape_locked(hit_idx):
+                    # Don't allow adding group shapes to multi-selection
+                    if self.shapes[hit_idx][0] == "group":
+                        return
+                    if hit_idx in self.selected_shape_indices:
+                        self.selected_shape_indices.discard(hit_idx)
+                    else:
+                        self.selected_shape_indices.add(hit_idx)
+                    self.hovered_shape_index = None
+                    self.preview_shape = None
+                    self.preview_start = None
+                    self.preview_end = None
+                    self.update()
+                    return
+                # Ctrl+click on empty – do nothing
+                return
+
+            if self.selected_shape_index is None and self.preview_shape is None:
+                hit_idx = self._shape_at_point(pt)
+                if hit_idx is not None and not self.is_shape_locked(hit_idx):
+                    self.hovered_shape_index = None
+                    self.selected_shape_indices.clear()
+                    self.select_shape_by_index(hit_idx)
+                    return
+                # Click on empty area – start marquee selection
+                self.hovered_shape_index = None
+                self.selected_shape_indices.clear()
+                self._marquee_active = True
+                self._marquee_start = pt
+                self._marquee_end = pt
+                self.update()
+                return
+
         # PLACING NEW SHAPE OR IMAGE
-        if (self.current_tool or (self.preview_shape == "image" and hasattr(self, "preview_pixmap"))) and event.button() == Qt.MouseButton.LeftButton:
-            if self.preview_start is not None and self.preview_end is not None:
+        if ((self.current_tool and self.current_tool != "select") or (self.preview_shape == "image" and hasattr(self, "preview_pixmap"))) and event.button() == Qt.MouseButton.LeftButton:
+            if self.preview_start is not None and self.preview_end is not None and self.selected_shape_index is not None:
                 rect = QRect(self.preview_start, self.preview_end).normalized()
                 box_rect = rect.adjusted(-margin, -margin, margin, margin)
                 for idx, handle in enumerate(self.handle_points(box_rect)):
@@ -2880,7 +3299,7 @@ class DrawingArea(QFrame):
                 if box_rect.contains(pt):
                     self._dragging_box = True
                     self._drag_offset = pt - box_rect.topLeft()
-                    self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                    self.setCursor(_default_cursor())
                     return
             if self.canvas_contains(pt):
                 if self.preview_shape is None:
@@ -2931,11 +3350,155 @@ class DrawingArea(QFrame):
                         self.preview_shape = None
                         self.preview_start = None
                         self.preview_end = None
+                self._show_size_indicator = False
+                self._size_indicator_timer.stop()
                 self.update()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         pt = self.widget_to_canvas(event.position().toPoint())
+
+        # Group handle resize
+        if self._group_dragging_handle is not None and self.selected_shape_index is not None:
+            idx = self.selected_shape_index
+            if 0 <= idx < len(self.shapes) and self.shapes[idx][0] == "group":
+                self.set_resize_cursor(self._group_dragging_handle)
+                orig = self._group_resize_origin_bounds
+                handle = self._group_dragging_handle
+                x1, y1, x2, y2 = orig.left(), orig.top(), orig.right(), orig.bottom()
+                if handle in (0, 6, 7):
+                    x1 = pt.x()
+                if handle in (2, 3, 4):
+                    x2 = pt.x()
+                if handle in (0, 1, 2):
+                    y1 = pt.y()
+                if handle in (4, 5, 6):
+                    y2 = pt.y()
+                new_rect = QRect(QPoint(x1, y1), QPoint(x2, y2)).normalized()
+                if new_rect.width() < 10:
+                    new_rect.setRight(new_rect.left() + 10)
+                if new_rect.height() < 10:
+                    new_rect.setBottom(new_rect.top() + 10)
+                # Shift held: constrain aspect ratio (corner handles only)
+                if (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) and handle in (0, 2, 4, 6):
+                    new_rect = self._apply_aspect_ratio_constraint(new_rect, orig, handle)
+                # Scale all children proportionally
+                ox, oy = orig.left(), orig.top()
+                ow, oh = max(orig.width(), 1), max(orig.height(), 1)
+                nx, ny = new_rect.left(), new_rect.top()
+                nw, nh = new_rect.width(), new_rect.height()
+                new_children = []
+                for child in self._group_resize_origin_children:
+                    ctool = child[0]
+                    if ctool == "draw" and isinstance(child[1], list):
+                        new_pts = [QPoint(int(nx + (p.x() - ox) * nw / ow),
+                                         int(ny + (p.y() - oy) * nh / oh)) for p in child[1]]
+                        new_children.append(tuple(["draw", new_pts] + list(child[2:])))
+                    else:
+                        s, e = child[1], child[2]
+                        new_s = QPoint(int(nx + (s.x() - ox) * nw / ow),
+                                       int(ny + (s.y() - oy) * nh / oh))
+                        new_e = QPoint(int(nx + (e.x() - ox) * nw / ow),
+                                       int(ny + (e.y() - oy) * nh / oh))
+                        new_children.append(tuple([ctool, new_s, new_e] + list(child[3:])))
+                shape = self.shapes[idx]
+                self.shapes[idx] = tuple(["group", new_rect.topLeft(), new_rect.bottomRight(), new_children] + list(shape[4:]))
+                self.update()
+                return
+
+        # Marquee selection drag
+        if self._marquee_active and self._marquee_start is not None:
+            self._marquee_end = pt
+            self.update()
+            return
+
+        # Multi-select drag: move all selected shapes
+        if self._multi_drag_active and self._multi_drag_start is not None:
+            delta = pt - self._multi_drag_start
+            self._multi_drag_start = pt
+            # Snap guides for multi-select / group drag
+            if self.selected_shape_indices:
+                # Compute union bounding rect of all selected shapes
+                union_rect = None
+                for m_idx in self.selected_shape_indices:
+                    if 0 <= m_idx < len(self.shapes):
+                        m_rect = _shape_bounding_rect(self.shapes[m_idx])
+                        if m_rect and m_rect.isValid():
+                            union_rect = m_rect if union_rect is None else union_rect.united(m_rect)
+                if union_rect and union_rect.isValid():
+                    new_rect = union_rect.translated(delta)
+                    if self.snap_to_grid:
+                        delta = self._snap_delta_to_grid(delta)
+                        self._active_guides = []
+                    else:
+                        # Exclude all selected shapes from alignment edges
+                        vs = set()
+                        hs = set()
+                        w, h = self.a4_size.width(), self.a4_size.height()
+                        vs.update([0, w // 2, w])
+                        hs.update([0, h // 2, h])
+                        for s_idx, shape in enumerate(self.shapes):
+                            if s_idx in self.selected_shape_indices:
+                                continue
+                            s_rect = _shape_bounding_rect(shape)
+                            if s_rect and s_rect.isValid():
+                                cx = (s_rect.left() + s_rect.right()) // 2
+                                cy = (s_rect.top() + s_rect.bottom()) // 2
+                                vs.update([s_rect.left(), cx, s_rect.right()])
+                                hs.update([s_rect.top(), cy, s_rect.bottom()])
+                        # Find snap
+                        guides = []
+                        dx_snap = 0
+                        dy_snap = 0
+                        threshold = 8
+                        sl, sr = new_rect.left(), new_rect.right()
+                        st, sb = new_rect.top(), new_rect.bottom()
+                        scx = (sl + sr) // 2
+                        scy = (st + sb) // 2
+                        best_vdist = threshold + 1
+                        best_vguide = 0
+                        for edge_x in vs:
+                            for sx in (sl, scx, sr):
+                                dist = abs(sx - edge_x)
+                                if dist < best_vdist:
+                                    best_vdist = dist
+                                    dx_snap = edge_x - sx
+                                    best_vguide = edge_x
+                        if best_vdist <= threshold:
+                            guides.append(("v", best_vguide))
+                        else:
+                            dx_snap = 0
+                        best_hdist = threshold + 1
+                        best_hguide = 0
+                        for edge_y in hs:
+                            for sy in (st, scy, sb):
+                                dist = abs(sy - edge_y)
+                                if dist < best_hdist:
+                                    best_hdist = dist
+                                    dy_snap = edge_y - sy
+                                    best_hguide = edge_y
+                        if best_hdist <= threshold:
+                            guides.append(("h", best_hguide))
+                        else:
+                            dy_snap = 0
+                        self._active_guides = guides
+                        delta = QPoint(delta.x() + dx_snap, delta.y() + dy_snap)
+            for idx in self.selected_shape_indices:
+                if idx < 0 or idx >= len(self.shapes):
+                    continue
+                shape = self.shapes[idx]
+                tool = shape[0]
+                if tool == "draw" and isinstance(shape[1], list):
+                    new_pts = [p + delta for p in shape[1]]
+                    self.shapes[idx] = tuple(["draw", new_pts] + list(shape[2:]))
+                elif tool == "group":
+                    self._move_group_shape(idx, delta)
+                else:
+                    new_start = shape[1] + delta
+                    new_end = shape[2] + delta
+                    self.shapes[idx] = tuple([tool, new_start, new_end] + list(shape[3:]))
+            self.update()
+            return
 
         if self.crop_preview_mode and self._crop_dragging_handle is not None:
             self.set_resize_cursor(self._crop_dragging_handle)
@@ -2971,7 +3534,7 @@ class DrawingArea(QFrame):
             self.update()
             return
         elif self.crop_preview_mode and self._dragging_box:
-            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.setCursor(_default_cursor())
             delta = pt - self._drag_offset
             if not hasattr(self, '_original_crop_rect'):
                 # Store original rectangle dimensions on first move
@@ -2993,8 +3556,8 @@ class DrawingArea(QFrame):
             self.update()
             return
 
-        # Hide rotation indicator if user moves/resizes
-        if self._show_rotation_indicator:
+        # Hide rotation indicator if user moves/resizes (only with button held)
+        if self._show_rotation_indicator and event.buttons() != Qt.MouseButton.NoButton:
             self.hide_rotation_indicator()
         pt = self.widget_to_canvas(event.position().toPoint())
         margin = 8
@@ -3079,8 +3642,8 @@ class DrawingArea(QFrame):
             return
 
         if self._dragging_handle is not None:
-            # --- Line: drag start (0) or end (1) endpoint directly ---
-            if self.preview_shape == "line":
+            # --- Line/Arrow: drag start (0) or end (1) endpoint directly ---
+            if self.preview_shape in ("line", "arrow"):
                 if self.snap_to_grid:
                     pt = self._snap_to_grid(pt)
                 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
@@ -3091,6 +3654,8 @@ class DrawingArea(QFrame):
                 else:
                     self.preview_end = pt
                 self.setCursor(Qt.CursorShape.CrossCursor)
+                self._show_size_indicator = True
+                self._size_indicator_timer.stop()
                 self.update()
                 return
             rotation = getattr(self, 'preview_rotation', 0)
@@ -3189,13 +3754,40 @@ class DrawingArea(QFrame):
                     )
                     self.preview_start = constrained.topLeft()
                     self.preview_end = constrained.bottomRight()
+            self._show_size_indicator = True
+            self._size_indicator_timer.stop()
             self.update()
             return
 
         if self._free_rotating and self.selected_shape_index is not None:
+            if not (event.buttons() & Qt.MouseButton.LeftButton):
+                return
             idx = self.selected_shape_index
             shape = self.shapes[idx]
-            if shape[0] == "draw" and isinstance(shape[1], list):
+            if shape[0] == "group" and hasattr(self, '_group_rotate_origin_children'):
+                center = self._rotation_center
+                dx = pt.x() - center.x()
+                dy = pt.y() - center.y()
+                angle = math.degrees(math.atan2(dy, dx))
+                delta_angle = angle - self._rotation_start_angle
+                new_rotation = (self._rotation_initial + delta_angle) % 360
+                # Update group rotation angle (don't transform children)
+                children = shape[3] if isinstance(shape[3], list) else []
+                extras = list(shape[4:])
+                # Find and update rotation in extras, or append it
+                rot_found = False
+                for ei, item in enumerate(extras):
+                    if isinstance(item, (int, float)) and not isinstance(item, bool):
+                        extras[ei] = new_rotation
+                        rot_found = True
+                        break
+                if not rot_found:
+                    extras.append(new_rotation)
+                self.shapes[idx] = tuple(["group", shape[1], shape[2], children] + extras)
+                self.preview_rotation = new_rotation
+                self.update()
+                return
+            elif shape[0] == "draw" and isinstance(shape[1], list):
                 points = self._orig_points if hasattr(self, "_orig_points") and self._orig_points else shape[1]
                 min_x = min(p.x() for p in points)
                 min_y = min(p.y() for p in points)
@@ -3218,6 +3810,7 @@ class DrawingArea(QFrame):
                 self.preview_bbox = QRect(QPoint(min_x, min_y), QPoint(max_x, max_y)).normalized()
                 self.preview_rotation = new_rotation
                 self.update()
+                return
             else:
                 # Free rotate for other shapes
                 # For non-draw shapes, only update preview_rotation
@@ -3239,11 +3832,11 @@ class DrawingArea(QFrame):
                 return
 
         elif self._dragging_box:
-            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.setCursor(_default_cursor())
             pt = self.widget_to_canvas(event.position().toPoint())
             margin = 8
-            # --- Line: translate both endpoints preserving direction ---
-            if self.preview_shape == "line" and self.preview_start is not None and self.preview_end is not None:
+            # --- Line/Arrow: translate both endpoints preserving direction ---
+            if self.preview_shape in ("line", "arrow") and self.preview_start is not None and self.preview_end is not None:
                 new_start = pt - self._drag_offset
                 if self.snap_to_grid:
                     new_start = self._snap_to_grid(new_start)
@@ -3280,8 +3873,8 @@ class DrawingArea(QFrame):
             # Only run this if not drawing or editing a "draw" shape
             if self.current_tool != "draw" and self.preview_shape != "draw":
                 if self.preview_start is not None and self.preview_end is not None:
-                    if self.preview_shape == "line":
-                        # Show endpoint cross or body hand cursor for line
+                    if self.preview_shape in ("line", "arrow"):
+                        # Show endpoint cross or body hand cursor for line/arrow
                         _hs2 = max(20, self.HANDLE_SIZE * 3)
                         _near_ep = any(
                             QRect(h.x() - _hs2 // 2, h.y() - _hs2 // 2, _hs2, _hs2).contains(pt)
@@ -3300,11 +3893,11 @@ class DrawingArea(QFrame):
                             else:
                                 _dsq = (pt.x() - _ax) ** 2 + (pt.y() - _ay) ** 2
                             if _dsq <= 100 and self.selected_shape_index is not None:
-                                self.setCursor(Qt.CursorShape.OpenHandCursor)
-                            elif self.current_tool:
+                                self.setCursor(_default_cursor())
+                            elif self.current_tool and self.current_tool != "select":
                                 self.setCursor(Qt.CursorShape.CrossCursor)
                             else:
-                                self.setCursor(Qt.CursorShape.ArrowCursor)
+                                self.setCursor(_default_cursor())
                     else:
                         rect = QRect(self.preview_start, self.preview_end).normalized()
                         box_rect = rect.adjusted(-margin, -margin, margin, margin)
@@ -3321,11 +3914,11 @@ class DrawingArea(QFrame):
                                 break
                         else:
                             if box_rect.contains(pt):
-                                self.setCursor(Qt.CursorShape.OpenHandCursor)
-                            elif self.current_tool:
+                                self.setCursor(_default_cursor())
+                            elif self.current_tool and self.current_tool != "select":
                                 self.setCursor(Qt.CursorShape.CrossCursor)
                             else:
-                                self.setCursor(Qt.CursorShape.ArrowCursor)
+                                self.setCursor(_default_cursor())
 
         if self.current_tool == "draw" and getattr(self, "drawing", False):
             shift_held = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
@@ -3362,17 +3955,87 @@ class DrawingArea(QFrame):
             self.update()
             return
 
+        # Hover detection for select tool (no button pressed, no active editing)
+        if (self.current_tool == "select"
+                and self.selected_shape_index is None
+                and self.preview_shape is None
+                and not self._free_rotating
+                and not self.crop_preview_mode
+                and not getattr(self, '_erasing', False)
+                and not getattr(self, 'drawing', False)):
+            old_hover = self.hovered_shape_index
+            self.hovered_shape_index = self._shape_at_point(pt)
+            if self.hovered_shape_index != old_hover:
+                self.update()
+            return
+
+        # Hover detection for adddescription tool
+        if (self.current_tool == "adddescription"
+                and self._desc_overlay is None):
+            old_hover = self._desc_hovered_shape_idx
+            self._desc_hovered_shape_idx = self._shape_at_point(pt)
+            if self._desc_hovered_shape_idx != old_hover:
+                self.update()
+            return
+
         # Only update placement preview for active tool drawing (not selected-shape editing)
-        if self.preview_shape and self.current_tool is not None and self.selected_shape_index is None:
+        if self.preview_shape and self.current_tool is not None and self.current_tool != "select" and self.selected_shape_index is None:
             pt = self.widget_to_canvas(event.position().toPoint())
             if self.snap_to_grid:
                 pt = self._snap_to_grid(pt)
-            if self.current_tool == "line" and (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) and self.preview_start is not None:
+            if self.current_tool in ("line", "arrow") and (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) and self.preview_start is not None:
                 pt = self._snap_line_angle(self.preview_start, pt)
             self.preview_end = pt
+            self._show_size_indicator = True
+            self._size_indicator_timer.stop()
             self.update()
 
     def mouseReleaseEvent(self, event):
+
+        # End group handle resize
+        if self._group_dragging_handle is not None:
+            self._group_dragging_handle = None
+            self._group_resize_origin_bounds = None
+            self._group_resize_origin_children = None
+            self.setCursor(_default_cursor())
+            self.update()
+            return
+
+        # End marquee selection
+        if self._marquee_active:
+            self._marquee_active = False
+            if self._marquee_start is not None and self._marquee_end is not None:
+                sel_rect = QRect(self._marquee_start, self._marquee_end).normalized()
+                if sel_rect.width() > 3 or sel_rect.height() > 3:
+                    hits = set()
+                    for idx, shape in enumerate(self.shapes):
+                        if self.is_shape_locked(idx):
+                            continue
+                        s_rect = _shape_bounding_rect(shape)
+                        if s_rect and s_rect.isValid() and sel_rect.intersects(s_rect):
+                            hits.add(idx)
+                    if len(hits) == 1:
+                        only = next(iter(hits))
+                        self.select_shape_by_index(only)
+                    elif len(hits) > 1:
+                        self.selected_shape_indices = hits
+            self._marquee_start = None
+            self._marquee_end = None
+            self.update()
+            return
+
+        # End multi-select drag
+        if self._multi_drag_active:
+            self._multi_drag_active = False
+            self._multi_drag_start = None
+            self._active_guides = []
+            # If we were dragging a single group via multi-drag, keep it single-selected
+            if (len(self.selected_shape_indices) == 1
+                    and self.selected_shape_index is not None
+                    and self.selected_shape_index in self.selected_shape_indices):
+                self.selected_shape_indices.clear()
+            self.update()
+            return
 
         if self.current_tool == "label" and self._labeling and event.button() == Qt.MouseButton.LeftButton:
             self._labeling = False
@@ -3397,7 +4060,15 @@ class DrawingArea(QFrame):
                 self.push_shape_restore(idx, "Free Rotate")
                 self.push_undo()
                 shape = self.shapes[idx]
-                if self.preview_shape == "draw" and isinstance(self.preview_start, list):
+                if shape[0] == "group":
+                    # Group rotation angle was updated in-place during mouseMoveEvent
+                    if hasattr(self, '_group_rotate_origin_children'):
+                        del self._group_rotate_origin_children
+                    self._show_rotation_indicator = True
+                    self._rotation_indicator_timer.start(1800)
+                    self.update()
+                    return
+                elif self.preview_shape == "draw" and isinstance(self.preview_start, list):
                     old_shape = self.shapes[idx]
                     draw_radius = old_shape[4] if len(old_shape) > 4 and isinstance(old_shape[4], (int, float)) else self.draw_radius
                     draw_color = old_shape[3] if len(old_shape) > 3 and isinstance(old_shape[3], QColor) else self.shape_color
@@ -3439,6 +4110,10 @@ class DrawingArea(QFrame):
 
             self.update()
             return
+
+        # Show size indicator briefly after resize release
+        if self._dragging_handle is not None and self._show_size_indicator:
+            self._size_indicator_timer.start(1200)
 
         # Commit overset move/resize for non-draw shape edits so label stays in view after drag
         if (self._dragging_box or self._dragging_handle) and self.selected_shape_index is not None:
@@ -3500,14 +4175,14 @@ class DrawingArea(QFrame):
                 delattr(self, '_start_drag_point')
 
             if self.selected_shape_index is not None:
-                # After editing an existing shape, use Arrow cursor for further editing
-                self.setCursor(Qt.CursorShape.ArrowCursor)
+                # After editing an existing shape, use default cursor for further editing
+                self.setCursor(_default_cursor())
             else:
                 # After placing a new freehand, keep draw cursor if tool is still active
                 if self.current_tool == "draw":
                     self.setCursor(self._draw_cursor)
                 else:
-                    self.setCursor(Qt.CursorShape.ArrowCursor)
+                    self.setCursor(_default_cursor())
             self.update()
             return
 
@@ -3520,10 +4195,14 @@ class DrawingArea(QFrame):
                 self.setCursor(QCursor(cursor_pix, size // 2, size // 2))
             else:
                 self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
+        elif self.current_tool == "select":
+            self.setCursor(_default_cursor())
+        elif self.current_tool == "adddescription" and self._desc_cursor is not None:
+            self.setCursor(self._desc_cursor)
         elif self.current_tool:
             self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
         else:
-            self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+            self.setCursor(_default_cursor())
 
         if self.current_tool == "draw" and getattr(self, "drawing", False):
             self.drawing = False
@@ -3552,7 +4231,7 @@ class DrawingArea(QFrame):
                 delattr(self, '_original_crop_rect')
             if hasattr(self, '_start_drag_point'):
                 delattr(self, '_start_drag_point')
-            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.setCursor(_default_cursor())
             self.update()
             return
 
@@ -3563,7 +4242,7 @@ class DrawingArea(QFrame):
                 delattr(self, '_original_crop_rect')
             if hasattr(self, '_start_drag_point'):
                 delattr(self, '_start_drag_point')
-            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.setCursor(_default_cursor())
             self.update()
             return
 
@@ -3590,17 +4269,194 @@ class DrawingArea(QFrame):
         # idx: 0-7 for 8 handles (corners and edges)
         # Map to appropriate resize cursors
         cursors = [
-            Qt.CursorShape.SizeFDiagCursor,   # Top-left
-            Qt.CursorShape.SizeVerCursor,     # Top-middle
-            Qt.CursorShape.SizeBDiagCursor,   # Top-right
-            Qt.CursorShape.SizeHorCursor,     # Right-middle
-            Qt.CursorShape.SizeFDiagCursor,   # Bottom-right
-            Qt.CursorShape.SizeVerCursor,     # Bottom-middle
-            Qt.CursorShape.SizeBDiagCursor,   # Bottom-left
-            Qt.CursorShape.SizeHorCursor,     # Left-middle
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizediagonalleft.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),   # Top-left
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizevertical.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),    # Top-middle
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizediagonalright.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),   # Top-right
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizehorizontal.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),     # Right-middle
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizediagonalleft.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),   # Bottom-right
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizevertical.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),    # Bottom-middle
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizediagonalright.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),   # Bottom-left
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizehorizontal.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),     # Left-middle
         ]
         if 0 <= idx < len(cursors):
             self.setCursor(cursors[idx])
+
+    def _paint_single_shape(self, painter, shape):
+        """Draw a single shape tuple using *painter*. Used for group children."""
+        tool, start, end, data = shape[:4]
+        rotation = 0
+        draw_width = 3
+        if tool == "draw":
+            if len(shape) > 4 and isinstance(shape[4], (int, float)):
+                draw_width = shape[4]
+            if len(shape) > 5 and isinstance(shape[5], (int, float)):
+                rotation = shape[5]
+        else:
+            for item in shape[4:]:
+                if isinstance(item, (int, float)) and not isinstance(item, bool):
+                    rotation = item
+            border_weight = 2
+            border_radius = None
+            for item in shape[4:]:
+                if isinstance(item, dict) and "border_weight" in item:
+                    border_weight = item["border_weight"]
+                if isinstance(item, dict) and "border_radius" in item:
+                    border_radius = item["border_radius"]
+
+        painter.save()
+
+        if tool == "group":
+            children = data if isinstance(data, list) else []
+            # Apply group rotation if present
+            group_rotation = 0
+            for item in shape[4:]:
+                if isinstance(item, (int, float)) and not isinstance(item, bool):
+                    group_rotation = item
+                    break
+            if group_rotation:
+                g_rect = _compute_group_visual_bounds(children)
+                if g_rect and g_rect.isValid():
+                    painter.translate(g_rect.center())
+                    painter.rotate(group_rotation)
+                    painter.translate(-g_rect.center())
+            for child in children:
+                self._paint_single_shape(painter, child)
+            painter.restore()
+            return
+
+        if tool == "image" and isinstance(data, QPixmap):
+            rect = QRect(start, end).normalized()
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            if rotation and rect is not None:
+                painter.translate(rect.center())
+                painter.rotate(rotation)
+                painter.translate(-rect.center())
+            painter.drawPixmap(rect, data)
+        else:
+            color = data if isinstance(data, QColor) else QColor("#000000")
+            fill_color = None
+            if len(shape) > 4 and isinstance(shape[4], QColor):
+                fill_color = shape[4]
+            if tool == "draw":
+                points = start
+                if not isinstance(points, list) or len(points) < 2:
+                    painter.restore()
+                    return
+                painter.setPen(QPen(color, draw_width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+                painter.drawPolyline(*points)
+            else:
+                if tool == "line":
+                    if color.alpha() > 0 and border_weight and border_weight > 0:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QPen(color, border_weight if border_weight is not None else 3))
+                        if rotation:
+                            mid = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
+                            painter.translate(mid)
+                            painter.rotate(rotation)
+                            painter.translate(-mid)
+                        painter.drawLine(start, end)
+                elif tool == "arrow":
+                    if color.alpha() > 0 and border_weight and border_weight > 0:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        bw = border_weight if border_weight is not None else 3
+                        painter.setPen(QPen(color, bw))
+                        if rotation:
+                            mid = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
+                            painter.translate(mid)
+                            painter.rotate(rotation)
+                            painter.translate(-mid)
+                        import math
+                        dx = end.x() - start.x()
+                        dy = end.y() - start.y()
+                        length = math.hypot(dx, dy)
+                        if length > 0:
+                            ux, uy = dx / length, dy / length
+                            head_len = max(12, bw * 4)
+                            line_end = QPoint(int(end.x() - head_len * ux), int(end.y() - head_len * uy))
+                            painter.drawLine(start, line_end)
+                            angle = math.radians(25)
+                            lx = end.x() - head_len * (ux * math.cos(angle) - uy * math.sin(angle))
+                            ly = end.y() - head_len * (uy * math.cos(angle) + ux * math.sin(angle))
+                            rx = end.x() - head_len * (ux * math.cos(angle) + uy * math.sin(angle))
+                            ry = end.y() - head_len * (uy * math.cos(angle) - ux * math.sin(angle))
+                            painter.setBrush(QBrush(color))
+                            painter.setPen(QPen(color, bw))
+                            painter.drawPolygon(end, QPoint(int(lx), int(ly)), QPoint(int(rx), int(ry)))
+                        else:
+                            painter.drawLine(start, end)
+                else:
+                    rect = QRect(start, end).normalized()
+                    if rotation and rect is not None:
+                        painter.translate(rect.center())
+                        painter.rotate(rotation)
+                        painter.translate(-rect.center())
+                    if fill_color:
+                        painter.setBrush(QBrush(fill_color))
+                        painter.setPen(Qt.PenStyle.NoPen)
+                        self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight(), border_radius=border_radius)
+                    if color.alpha() > 0 and border_weight and border_weight > 0:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QPen(color, border_weight if border_weight is not None else 3))
+                        self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight(), line_width=border_weight, border_radius=border_radius)
+                if tool == "label":
+                    lbl_text = ""
+                    lbl_font_size = 14
+                    lbl_bold = False
+                    lbl_italic = False
+                    lbl_underline = False
+                    lbl_font_family = getattr(self, "_label_font_family", "Arial")
+                    lbl_align = "left"
+                    for _item in shape[4:]:
+                        if isinstance(_item, str):
+                            lbl_text = _item
+                        elif isinstance(_item, dict) and "font_size" in _item:
+                            lbl_font_size = _item.get("font_size", lbl_font_size)
+                            lbl_bold = _item.get("font_bold", False)
+                            lbl_italic = _item.get("font_italic", False)
+                            lbl_underline = _item.get("font_underline", False)
+                            lbl_font_family = _item.get("font_family", lbl_font_family)
+                            lbl_align = _item.get("text_align", lbl_align)
+                    if lbl_text:
+                        try:
+                            from PyQt6.QtGui import QTextDocument
+                            text_draw_rect = rect.adjusted(4, 4, -4, -4)
+                            lbl_font = QFont(lbl_font_family, lbl_font_size)
+                            lbl_font.setBold(lbl_bold)
+                            lbl_font.setItalic(lbl_italic)
+                            lbl_font.setUnderline(lbl_underline)
+                            doc = QTextDocument()
+                            doc.setDefaultFont(lbl_font)
+                            is_html = isinstance(lbl_text, str) and ("<" in lbl_text and ">" in lbl_text and any(k in lbl_text.lower() for k in ("<span", "<p", "<div", "<br", "<b", "<i", "<u", "style=", "<!doctype", "<html")))
+                            if is_html:
+                                doc.setHtml(lbl_text)
+                            else:
+                                safe_text = (lbl_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>"))
+                                doc.setHtml(f'<div style="color:{color.name()}; font-family:{lbl_font_family}; font-size:{lbl_font_size}pt; text-align:{lbl_align};">{safe_text}</div>')
+                            doc.setTextWidth(float(text_draw_rect.width()))
+                            painter.save()
+                            painter.translate(text_draw_rect.left(), text_draw_rect.top())
+                            doc.drawContents(painter, QRectF(0, 0, text_draw_rect.width(), text_draw_rect.height()))
+                            painter.restore()
+                        except Exception:
+                            painter.setPen(QPen(color))
+                            lbl_font = QFont(lbl_font_family, lbl_font_size)
+                            lbl_font.setBold(lbl_bold)
+                            lbl_font.setItalic(lbl_italic)
+                            lbl_font.setUnderline(lbl_underline)
+                            painter.setFont(lbl_font)
+                            text_draw_rect = rect.adjusted(4, 4, -4, -4)
+                            align_map = {
+                                "left": Qt.AlignmentFlag.AlignLeft,
+                                "center": Qt.AlignmentFlag.AlignHCenter,
+                                "right": Qt.AlignmentFlag.AlignRight,
+                            }
+                            a_flag = align_map.get(lbl_align, Qt.AlignmentFlag.AlignLeft)
+                            painter.drawText(
+                                text_draw_rect,
+                                a_flag | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                                lbl_text,
+                            )
+        painter.restore()
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -3669,6 +4525,25 @@ class DrawingArea(QFrame):
                 continue
             painter.save()
 
+            if tool == "group":
+                # Draw all children of the group, applying group rotation
+                children = data if isinstance(data, list) else []
+                group_rotation = 0
+                for item in shape[4:]:
+                    if isinstance(item, (int, float)) and not isinstance(item, bool):
+                        group_rotation = item
+                        break
+                if group_rotation:
+                    g_rect = _compute_group_visual_bounds(children)
+                    if g_rect and g_rect.isValid():
+                        painter.translate(g_rect.center())
+                        painter.rotate(group_rotation)
+                        painter.translate(-g_rect.center())
+                for child in children:
+                    self._paint_single_shape(painter, child)
+                painter.restore()
+                continue
+
             if tool == "image" and isinstance(data, QPixmap):
                 rect = QRect(start, end).normalized()
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -3691,11 +4566,48 @@ class DrawingArea(QFrame):
                     painter.drawPolyline(*points)
                 else:
                     if tool == "line":
-                        # Draw line directly with original endpoints to preserve direction
+                        # Draw line with rotation applied around midpoint
                         if color.alpha() > 0 and border_weight and border_weight > 0:
                             painter.setBrush(Qt.BrushStyle.NoBrush)
                             painter.setPen(QPen(color, border_weight if border_weight is not None else 3))
+                            if rotation:
+                                mid = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
+                                painter.translate(mid)
+                                painter.rotate(rotation)
+                                painter.translate(-mid)
                             painter.drawLine(start, end)
+                    elif tool == "arrow":
+                        # Draw arrow: line + arrowhead at end point
+                        if color.alpha() > 0 and border_weight and border_weight > 0:
+                            painter.setBrush(Qt.BrushStyle.NoBrush)
+                            bw = border_weight if border_weight is not None else 3
+                            painter.setPen(QPen(color, bw))
+                            if rotation:
+                                mid = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
+                                painter.translate(mid)
+                                painter.rotate(rotation)
+                                painter.translate(-mid)
+                            # Arrowhead
+                            import math
+                            dx = end.x() - start.x()
+                            dy = end.y() - start.y()
+                            length = math.hypot(dx, dy)
+                            if length > 0:
+                                ux, uy = dx / length, dy / length
+                                head_len = max(12, bw * 4)
+                                # Shorten line to arrowhead base so thick stroke doesn't poke through
+                                line_end = QPoint(int(end.x() - head_len * ux), int(end.y() - head_len * uy))
+                                painter.drawLine(start, line_end)
+                                angle = math.radians(25)
+                                lx = end.x() - head_len * (ux * math.cos(angle) - uy * math.sin(angle))
+                                ly = end.y() - head_len * (uy * math.cos(angle) + ux * math.sin(angle))
+                                rx = end.x() - head_len * (ux * math.cos(angle) + uy * math.sin(angle))
+                                ry = end.y() - head_len * (uy * math.cos(angle) - ux * math.sin(angle))
+                                painter.setBrush(QBrush(color))
+                                painter.setPen(QPen(color, bw))
+                                painter.drawPolygon(end, QPoint(int(lx), int(ly)), QPoint(int(rx), int(ry)))
+                            else:
+                                painter.drawLine(start, end)
                     else:
                         rect = QRect(start, end).normalized()
                         if rotation and rect is not None:
@@ -3782,6 +4694,218 @@ class DrawingArea(QFrame):
                                 )
             painter.restore()
 
+        # Draw description hover tooltip for adddescription tool
+        if (self.current_tool == "adddescription"
+                and self._desc_hovered_shape_idx is not None
+                and 0 <= self._desc_hovered_shape_idx < len(self.shapes)):
+            d_idx = self._desc_hovered_shape_idx
+            d_shape = self.shapes[d_idx]
+            d_tool = d_shape[0]
+            d_start, d_end = d_shape[1], d_shape[2]
+
+            # Extract rotation from shape extras
+            d_rotation = 0
+            if d_tool == "draw":
+                if len(d_shape) > 5 and isinstance(d_shape[5], (int, float)) and not isinstance(d_shape[5], bool):
+                    d_rotation = d_shape[5]
+            else:
+                for _item in d_shape[4:]:
+                    if isinstance(_item, (int, float)) and not isinstance(_item, bool):
+                        d_rotation = _item
+                        break
+
+            # Draw orange hover outline (rotation-aware)
+            painter.save()
+            hover_pen = QPen(QColor("#ff6600"), 3, Qt.PenStyle.SolidLine)
+            painter.setPen(hover_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            if d_tool == "group":
+                children = d_shape[3] if isinstance(d_shape[3], list) else []
+                g_rect = _compute_group_visual_bounds(children)
+                if g_rect and g_rect.isValid():
+                    if d_rotation:
+                        _gc = QPointF(g_rect.center())
+                        painter.translate(_gc)
+                        painter.rotate(d_rotation)
+                        painter.translate(-_gc)
+                    painter.drawRect(g_rect)
+            elif d_tool == "draw" and isinstance(d_start, list) and len(d_start) > 1:
+                painter.drawPolyline(*d_start)
+            else:
+                d_rect = QRect(d_start, d_end).normalized()
+                if d_rotation:
+                    _dc = QPointF(d_rect.center())
+                    painter.translate(_dc)
+                    painter.rotate(d_rotation)
+                    painter.translate(-_dc)
+                painter.drawRect(d_rect)
+            painter.restore()
+
+            # Draw description tooltip if shape has one
+            desc = self._get_shape_description(d_shape)
+            if desc is not None:
+                painter.save()
+                # Compute visual (rotation-aware) bounds for tooltip positioning
+                if d_tool == "group":
+                    children = d_shape[3] if isinstance(d_shape[3], list) else []
+                    sb = _compute_group_visual_bounds(children)
+                    if not sb or not sb.isValid():
+                        sb = QRect(d_start, d_end).normalized()
+                    if d_rotation:
+                        sb = _rotated_rect_bounds(sb, d_rotation)
+                elif d_tool == "draw" and isinstance(d_start, list) and d_start:
+                    xs = [p.x() for p in d_start]
+                    ys = [p.y() for p in d_start]
+                    sb = QRect(QPoint(min(xs), min(ys)), QPoint(max(xs), max(ys)))
+                else:
+                    _base = QRect(d_start, d_end).normalized()
+                    sb = _rotated_rect_bounds(_base, d_rotation) if d_rotation else _base
+
+                restore_count = self._get_shape_restore_count(d_idx)
+                timestamp = desc.get("timestamp", "")
+                note_text = desc.get("text", "")
+
+                NOTE_WIDTH = 260
+
+                font = QFont("Arial", 10)
+                painter.setFont(font)
+                fm = painter.fontMetrics()
+                line_h = fm.height() + 2
+
+                # Build fixed header lines
+                header_lines = []
+                if timestamp:
+                    header_lines.append(f"[{timestamp}] Last updated")
+                if d_tool not in ("group", "image", "draw"):
+                    header_lines.append(f"Restore Points: {restore_count}")
+                header_lines.append("Note:")
+
+                header_h = line_h * len(header_lines)
+
+                # Measure note text with word wrap to get actual height
+                _wrap_flags = Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextWrapAnywhere
+                if note_text:
+                    note_measure_rect = QRect(0, 0, NOTE_WIDTH, 9999)
+                    note_bound = fm.boundingRect(
+                        note_measure_rect,
+                        _wrap_flags,
+                        note_text
+                    )
+                    note_h = note_bound.height() + 4
+                else:
+                    note_h = 0
+
+                max_w = max(
+                    (max(fm.horizontalAdvance(l) for l in header_lines) if header_lines else 0),
+                    NOTE_WIDTH
+                ) + 16
+                tooltip_h = header_h + note_h + 8
+
+                tx = sb.right() + 12
+                ty = sb.top()
+
+                # Draw background
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(255, 255, 255, 230))
+                painter.drawRoundedRect(QRectF(tx - 4, ty - 4, max_w + 8, tooltip_h + 8), 6, 6)
+
+                # Draw header lines
+                painter.setPen(QColor("#cc0000"))
+                for i, line in enumerate(header_lines):
+                    painter.drawText(int(tx), int(ty + (i + 1) * line_h), line)
+
+                # Draw note text with word wrap (breaks at spaces, or mid-word for long tokens)
+                if note_text:
+                    note_draw_rect = QRect(
+                        int(tx), int(ty + header_h + 4),
+                        NOTE_WIDTH, note_h + 4
+                    )
+                    painter.drawText(note_draw_rect, _wrap_flags, note_text)
+                painter.restore()
+
+        # Draw hover outline for the shape under the cursor (select tool)
+        if (self.hovered_shape_index is not None
+                and self.selected_shape_index is None
+                and self.preview_shape is None
+                and 0 <= self.hovered_shape_index < len(self.shapes)):
+            h_shape = self.shapes[self.hovered_shape_index]
+            h_tool = h_shape[0]
+            h_start, h_end = h_shape[1], h_shape[2]
+            h_rotation = 0
+            if h_tool == "draw":
+                if len(h_shape) > 5 and isinstance(h_shape[5], (int, float)):
+                    h_rotation = h_shape[5]
+            else:
+                for item in h_shape[4:]:
+                    if isinstance(item, (int, float)) and not isinstance(item, bool):
+                        h_rotation = item
+            painter.save()
+            hover_pen = QPen(QColor("#ff6600"), 3, Qt.PenStyle.SolidLine)
+            painter.setPen(hover_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            if h_tool == "group":
+                children = h_shape[3] if isinstance(h_shape[3], list) else []
+                g_rect = _compute_group_visual_bounds(children)
+                if g_rect and g_rect.isValid():
+                    group_rotation = 0
+                    for item in h_shape[4:]:
+                        if isinstance(item, (int, float)) and not isinstance(item, bool):
+                            group_rotation = item
+                            break
+                    if group_rotation:
+                        painter.translate(g_rect.center())
+                        painter.rotate(group_rotation)
+                        painter.translate(-g_rect.center())
+                    painter.drawRect(g_rect)
+            elif h_tool == "draw" and isinstance(h_start, list) and len(h_start) > 1:
+                painter.drawPolyline(*h_start)
+            elif h_tool == "line":
+                if h_rotation:
+                    h_mid = QPointF((h_start.x() + h_end.x()) / 2, (h_start.y() + h_end.y()) / 2)
+                    painter.translate(h_mid)
+                    painter.rotate(h_rotation)
+                    painter.translate(-h_mid)
+                painter.drawLine(h_start, h_end)
+            elif h_tool == "arrow":
+                if h_rotation:
+                    h_mid = QPointF((h_start.x() + h_end.x()) / 2, (h_start.y() + h_end.y()) / 2)
+                    painter.translate(h_mid)
+                    painter.rotate(h_rotation)
+                    painter.translate(-h_mid)
+                # Arrowhead outline
+                import math
+                dx = h_end.x() - h_start.x()
+                dy = h_end.y() - h_start.y()
+                length = math.hypot(dx, dy)
+                if length > 0:
+                    ux, uy = dx / length, dy / length
+                    head_len = 12
+                    line_end = QPoint(int(h_end.x() - head_len * ux), int(h_end.y() - head_len * uy))
+                    painter.drawLine(h_start, line_end)
+                    angle = math.radians(25)
+                    lx = h_end.x() - head_len * (ux * math.cos(angle) - uy * math.sin(angle))
+                    ly = h_end.y() - head_len * (uy * math.cos(angle) + ux * math.sin(angle))
+                    rx = h_end.x() - head_len * (ux * math.cos(angle) + uy * math.sin(angle))
+                    ry = h_end.y() - head_len * (uy * math.cos(angle) - ux * math.sin(angle))
+                    painter.drawPolygon(h_end, QPoint(int(lx), int(ly)), QPoint(int(rx), int(ry)))
+                else:
+                    painter.drawLine(h_start, h_end)
+            else:
+                h_rect = QRect(h_start, h_end).normalized()
+                if h_rotation:
+                    painter.translate(h_rect.center())
+                    painter.rotate(h_rotation)
+                    painter.translate(-h_rect.center())
+                if h_tool == "image":
+                    painter.drawRect(h_rect)
+                else:
+                    border_radius = None
+                    for item in h_shape[4:]:
+                        if isinstance(item, dict) and "border_radius" in item:
+                            border_radius = item["border_radius"]
+                    self.draw_shape(painter, h_tool, h_rect.topLeft(), h_rect.bottomRight(), line_width=3, border_radius=border_radius)
+            painter.restore()
+
         if self.current_tool == "draw" and getattr(self, "drawing", False):
             if hasattr(self, "freehand_points") and len(self.freehand_points) > 1:
                 painter.setPen(QPen(self.shape_color, self.draw_radius, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
@@ -3846,7 +4970,7 @@ class DrawingArea(QFrame):
                     painter.drawRect(pt.x() - self.HANDLE_SIZE//2, pt.y() - self.HANDLE_SIZE//2, self.HANDLE_SIZE, self.HANDLE_SIZE)
             # Only show bounding box/handles if NOT freehand draw
             elif self.preview_shape != "draw" and not self._free_rotating:
-                if self.preview_shape != "line":
+                if self.preview_shape not in ("line", "arrow"):
                     box_pen = QPen(QColor("#0078d7"), 2, Qt.PenStyle.DashLine)
                     painter.setPen(box_pen)
                     self.draw_bounding_box_and_handles(painter, box_rect)
@@ -3941,6 +5065,35 @@ class DrawingArea(QFrame):
                     painter.setBrush(QBrush(QColor("#ff6600")))
                     painter.setPen(QPen(QColor("#ffffff"), 2))
                     painter.drawEllipse(QPointF(endpt), 6, 6)
+            elif self.preview_shape == "arrow" and self.preview_start is not None and self.preview_end is not None:
+                # Draw arrow preview: line + arrowhead
+                preview_pen = QPen(QColor("#ff6600"), 3, Qt.PenStyle.DashLine)
+                painter.setPen(preview_pen)
+                # Arrowhead
+                import math
+                dx = self.preview_end.x() - self.preview_start.x()
+                dy = self.preview_end.y() - self.preview_start.y()
+                length = math.hypot(dx, dy)
+                if length > 0:
+                    ux, uy = dx / length, dy / length
+                    head_len = 12
+                    line_end = QPoint(int(self.preview_end.x() - head_len * ux), int(self.preview_end.y() - head_len * uy))
+                    painter.drawLine(self.preview_start, line_end)
+                    angle = math.radians(25)
+                    lx = self.preview_end.x() - head_len * (ux * math.cos(angle) - uy * math.sin(angle))
+                    ly = self.preview_end.y() - head_len * (uy * math.cos(angle) + ux * math.sin(angle))
+                    rx = self.preview_end.x() - head_len * (ux * math.cos(angle) + uy * math.sin(angle))
+                    ry = self.preview_end.y() - head_len * (uy * math.cos(angle) - ux * math.sin(angle))
+                    painter.setBrush(QBrush(QColor("#ff6600")))
+                    painter.setPen(QPen(QColor("#ff6600"), 2))
+                    painter.drawPolygon(self.preview_end, QPoint(int(lx), int(ly)), QPoint(int(rx), int(ry)))
+                else:
+                    painter.drawLine(self.preview_start, self.preview_end)
+                # Orange endpoint handles
+                for endpt in [self.preview_start, self.preview_end]:
+                    painter.setBrush(QBrush(QColor("#ff6600")))
+                    painter.setPen(QPen(QColor("#ffffff"), 2))
+                    painter.drawEllipse(QPointF(endpt), 6, 6)
             elif self.preview_shape is not None and self.preview_shape != "label" and rect is not None:
                 preview_pen = QPen(QColor("#ff6600"), 3, Qt.PenStyle.DashLine)
                 painter.setPen(preview_pen)
@@ -3965,12 +5118,57 @@ class DrawingArea(QFrame):
                 painter.save()
                 highlight_pen = QPen(QColor("#ff6600"), 4, Qt.PenStyle.DashLine)
                 painter.setPen(highlight_pen)
-                if tool == "draw" and isinstance(start, list) and len(start) > 1:
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                if tool == "group":
+                    # Highlight group with resize handles, accounting for rotation
+                    children = data if isinstance(data, list) else []
+                    g_rect = _compute_group_visual_bounds(children)
+                    if g_rect and g_rect.isValid():
+                        group_rotation = 0
+                        sel_shape = self.shapes[self.selected_shape_index]
+                        for item in sel_shape[4:]:
+                            if isinstance(item, (int, float)) and not isinstance(item, bool):
+                                group_rotation = item
+                                break
+                        if group_rotation:
+                            painter.translate(g_rect.center())
+                            painter.rotate(group_rotation)
+                            painter.translate(-g_rect.center())
+                        self.draw_bounding_box_and_handles(painter, g_rect)
+                elif tool == "draw" and isinstance(start, list) and len(start) > 1:
                     # Draw the polyline directly
                     painter.drawPolyline(*start)
                 else:
                     if tool == "line":
+                        if rotation:
+                            mid = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
+                            painter.translate(mid)
+                            painter.rotate(rotation)
+                            painter.translate(-mid)
                         painter.drawLine(start, end)
+                    elif tool == "arrow":
+                        if rotation:
+                            mid = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
+                            painter.translate(mid)
+                            painter.rotate(rotation)
+                            painter.translate(-mid)
+                        import math
+                        dx = end.x() - start.x()
+                        dy = end.y() - start.y()
+                        length = math.hypot(dx, dy)
+                        if length > 0:
+                            ux, uy = dx / length, dy / length
+                            head_len = 12
+                            line_end = QPoint(int(end.x() - head_len * ux), int(end.y() - head_len * uy))
+                            painter.drawLine(start, line_end)
+                            angle = math.radians(25)
+                            lx = end.x() - head_len * (ux * math.cos(angle) - uy * math.sin(angle))
+                            ly = end.y() - head_len * (uy * math.cos(angle) + ux * math.sin(angle))
+                            rx = end.x() - head_len * (ux * math.cos(angle) + uy * math.sin(angle))
+                            ry = end.y() - head_len * (uy * math.cos(angle) - ux * math.sin(angle))
+                            painter.drawPolygon(end, QPoint(int(lx), int(ly)), QPoint(int(rx), int(ry)))
+                        else:
+                            painter.drawLine(start, end)
                     else:
                         rect = QRect(start, end).normalized()
                         if rotation:
@@ -3982,6 +5180,36 @@ class DrawingArea(QFrame):
                         else:
                             self.draw_shape(painter, tool, rect.topLeft(), rect.bottomRight())
                 painter.restore()
+
+        # Draw marquee selection rectangle
+        if self._marquee_active and self._marquee_start is not None and self._marquee_end is not None:
+            painter.save()
+            sel_rect = QRect(self._marquee_start, self._marquee_end).normalized()
+            painter.setPen(QPen(QColor("#0078d7"), 1, Qt.PenStyle.DashLine))
+            painter.setBrush(QColor(0, 120, 215, 30))
+            painter.drawRect(sel_rect)
+            painter.restore()
+
+        # Highlight multi-selected shapes (Ctrl+click)
+        if self.selected_shape_indices and self.preview_shape is None:
+            painter.save()
+            multi_pen = QPen(QColor("#ff6600"), 3, Qt.PenStyle.DashLine)
+            painter.setPen(multi_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            union_rect = None
+            for m_idx in self.selected_shape_indices:
+                if 0 <= m_idx < len(self.shapes):
+                    m_shape = self.shapes[m_idx]
+                    m_rect = _shape_bounding_rect(m_shape)
+                    if m_rect and m_rect.isValid():
+                        if union_rect is None:
+                            union_rect = QRect(m_rect)
+                        else:
+                            union_rect = union_rect.united(m_rect)
+            # Draw the union bounding box
+            if union_rect and union_rect.isValid():
+                painter.drawRect(union_rect.adjusted(-4, -4, 4, 4))
+            painter.restore()
 
         # Draw alignment guide lines
         if self._active_guides:
@@ -3996,13 +5224,62 @@ class DrawingArea(QFrame):
 
         painter.restore()
 
+        # Size indicator during resize or initial placement
+        if self._show_size_indicator:
+            painter.save()
+            if self.preview_start is not None and self.preview_end is not None:
+                if self.preview_shape == "draw" and isinstance(self.preview_start, list) and self.preview_start:
+                    min_x = min(p.x() for p in self.preview_start)
+                    min_y = min(p.y() for p in self.preview_start)
+                    max_x = max(p.x() for p in self.preview_start)
+                    max_y = max(p.y() for p in self.preview_start)
+                    w = max_x - min_x
+                    h = max_y - min_y
+                    center = QPoint((min_x + max_x) // 2, (min_y + max_y) // 2)
+                    self._size_indicator_text = f"{w} x {h} px"
+                elif self.preview_shape in ("line", "arrow"):
+                    dx = self.preview_end.x() - self.preview_start.x()
+                    dy = self.preview_end.y() - self.preview_start.y()
+                    length = int(round((dx * dx + dy * dy) ** 0.5))
+                    center = QPoint(
+                        (self.preview_start.x() + self.preview_end.x()) // 2,
+                        (self.preview_start.y() + self.preview_end.y()) // 2
+                    )
+                    self._size_indicator_text = f"{length} px"
+                else:
+                    w = abs(self.preview_end.x() - self.preview_start.x())
+                    h = abs(self.preview_end.y() - self.preview_start.y())
+                    center = QPoint(
+                        (self.preview_start.x() + self.preview_end.x()) // 2,
+                        (self.preview_start.y() + self.preview_end.y()) // 2
+                    )
+                    self._size_indicator_text = f"{w} x {h} px"
+                self._size_indicator_center = center
+            text = self._size_indicator_text
+            center = self._size_indicator_center
+            if text:
+                painter.setPen(QPen(QColor("#ff6600"), 2))
+                painter.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                text_rect = painter.fontMetrics().boundingRect(text)
+                pos = center + QPoint(0, -40)
+                painter.drawText(pos.x() - text_rect.width() // 2, pos.y(), text)
+            painter.restore()
+
         # Degree indicator during free rotate
         if (getattr(self, "_free_rotating", False) and hasattr(self, "preview_rotation")) or self._show_rotation_indicator:
             painter.save()
             # Find a good spot: near the shape center or mouse
             if self.selected_shape_index is not None:
                 shape = self.shapes[self.selected_shape_index]
-                if shape[0] == "draw" and isinstance(self.preview_start, list) and self.preview_start:
+                if shape[0] == "group":
+                    # Use rotation center computed from group bounds
+                    center = getattr(self, "_rotation_center", None)
+                    if center is None:
+                        children = shape[3] if isinstance(shape[3], list) else []
+                        g_rect = _compute_group_visual_bounds(children)
+                        center = g_rect.center() if g_rect and g_rect.isValid() else QPoint(0, 0)
+                elif shape[0] == "draw" and isinstance(self.preview_start, list) and self.preview_start:
                     min_x = min(p.x() for p in self.preview_start)
                     min_y = min(p.y() for p in self.preview_start)
                     max_x = max(p.x() for p in self.preview_start)
@@ -4046,7 +5323,7 @@ class DrawingArea(QFrame):
         self.crop_start = None
         self.crop_end = None
         self._crop_dragging_handle = None
-        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.setCursor(_default_cursor())
         self.update()
 
     def handle_points(self, rect):
@@ -4064,7 +5341,7 @@ class DrawingArea(QFrame):
             if painter.pen().style() == Qt.PenStyle.NoPen:
                 pass  # Preserve NoPen for fill-only drawing
             else:
-                line_width = self.tool_sizes.get('shapes' if tool not in ['line'] else 'line', 2)
+                line_width = self.tool_sizes.get('shapes' if tool not in ['line', 'arrow'] else 'line', 2)
                 painter.setPen(QPen(painter.pen().color(), line_width))
         else:
             painter.setPen(QPen(painter.pen().color(), line_width))
@@ -4084,6 +5361,26 @@ class DrawingArea(QFrame):
                 painter.drawRect(rect)
         elif tool == "line":
             painter.drawLine(start, end)
+        elif tool == "arrow":
+            import math
+            dx = end.x() - start.x()
+            dy = end.y() - start.y()
+            length = math.hypot(dx, dy)
+            if length > 0:
+                ux, uy = dx / length, dy / length
+                head_len = max(12, (line_width or 2) * 4)
+                # Shorten line to arrowhead base so thick stroke doesn't poke through
+                line_end = QPoint(int(end.x() - head_len * ux), int(end.y() - head_len * uy))
+                painter.drawLine(start, line_end)
+                angle = math.radians(25)
+                lx = end.x() - head_len * (ux * math.cos(angle) - uy * math.sin(angle))
+                ly = end.y() - head_len * (uy * math.cos(angle) + ux * math.sin(angle))
+                rx = end.x() - head_len * (ux * math.cos(angle) + uy * math.sin(angle))
+                ry = end.y() - head_len * (uy * math.cos(angle) - ux * math.sin(angle))
+                painter.setBrush(QBrush(painter.pen().color()))
+                painter.drawPolygon(end, QPoint(int(lx), int(ly)), QPoint(int(rx), int(ry)))
+            else:
+                painter.drawLine(start, end)
         elif tool == "triangle":
             x1, y1 = rect.left(), rect.top()
             x2, y2 = rect.right(), rect.bottom()
@@ -4178,7 +5475,7 @@ class DrawingArea(QFrame):
 
         # Font family selector
         font_combo = QFontComboBox(toolbar)
-        font_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        font_combo.setCursor(_pointing_cursor())
         font_combo.setFixedHeight(23)
         font_combo.setFixedWidth(100)
         font_combo.setStyleSheet(
@@ -4196,7 +5493,7 @@ class DrawingArea(QFrame):
         checked_text_color = "#ffffff" if accent_hex_lower in ("#000000", "black") else "#000000"
 
         bold_btn = QPushButton("B", toolbar)
-        bold_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        bold_btn.setCursor(_pointing_cursor())
         bold_btn.setCheckable(True)
         bold_btn.setChecked(getattr(self, "_label_font_bold", False))
         bold_btn.setFixedSize(24, 22)
@@ -4208,7 +5505,7 @@ class DrawingArea(QFrame):
         tb_layout.addWidget(bold_btn)
 
         italic_btn = QPushButton("I", toolbar)
-        italic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        italic_btn.setCursor(_pointing_cursor())
         italic_btn.setCheckable(True)
         italic_btn.setChecked(getattr(self, "_label_font_italic", False))
         italic_btn.setFixedSize(24, 22)
@@ -4221,7 +5518,7 @@ class DrawingArea(QFrame):
         
         # Underline button
         underline_btn = QPushButton("U", toolbar)
-        underline_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        underline_btn.setCursor(_pointing_cursor())
         underline_btn.setCheckable(True)
         underline_btn.setChecked(getattr(self, "_label_font_underline", False))
         underline_btn.setFixedSize(24, 22)
@@ -4239,7 +5536,7 @@ class DrawingArea(QFrame):
 
         # Alignment toggle button (cycles: Left -> Center -> Right)
         align_btn = QPushButton("L", toolbar)
-        align_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        align_btn.setCursor(_pointing_cursor())
 
         align_btn.setFixedSize(24, 22)
         align_style = (
@@ -4300,7 +5597,7 @@ class DrawingArea(QFrame):
         # Text color button — shows a colored square, opens color picker on click
         color_btn = QPushButton(toolbar)
         color_btn.setFixedSize(24, 22)
-        color_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        color_btn.setCursor(_pointing_cursor())
 
         def _update_color_btn_appearance():
             c = getattr(self, "_label_font_color", QColor("#000000"))
@@ -5361,14 +6658,40 @@ class DrawingArea(QFrame):
             return
 
 
-        # Delete key: Delete selected shape
+        # Delete key: Delete selected shape(s)
         if event.key() == Qt.Key.Key_Delete:
-            self.delete_selected_shape()
+            if self.selected_shape_indices:
+                self.push_undo()
+                for i in sorted(self.selected_shape_indices, reverse=True):
+                    if 0 <= i < len(self.shapes) and not self.is_shape_locked(i):
+                        self.shapes.pop(i)
+                self.selected_shape_indices.clear()
+                self.selected_shape_index = None
+                self.shape_layers_overlay.update_shapes(self.shapes)
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Deleted")
+                self.shape_deselected.emit()
+                self.update()
+            else:
+                self.delete_selected_shape()
             return
 
         if event.key() == Qt.Key.Key_Escape:
+            if self.selected_shape_indices:
+                self.selected_shape_indices.clear()
+                self.update()
+                return
             if self.crop_preview_mode:
                 self.cancel_crop()
+                return
+            # Cancel new shape placement on Escape (no existing shape selected)
+            if self.preview_shape is not None and self.selected_shape_index is None:
+                self.preview_shape = None
+                self.preview_start = None
+                self.preview_end = None
+                self._show_size_indicator = False
+                self._size_indicator_timer.stop()
+                self.update()
                 return
             # Deselect locked shape on Escape
             if self.selected_shape_index is not None and self.preview_shape is None:
@@ -5430,7 +6753,11 @@ class DrawingArea(QFrame):
                     self.push_undo()
                     shape = self.shapes[idx]
                     tool = shape[0]
-                    if tool == "draw":
+                    if tool == "group":
+                        self._move_group_shape(idx, delta)
+                        self.update()
+                        return
+                    elif tool == "draw":
                         current_points = self.preview_start if isinstance(self.preview_start, list) else shape[1]
                         if not self.snap_to_grid:
                             xs = [p.x() for p in current_points]
@@ -5515,7 +6842,7 @@ class DrawingArea(QFrame):
             self.preview_start = None
             self.preview_end = None
             self.shape_layers_overlay.setVisible(False)
-            self.current_tool = None
+            self.current_tool = "select"
             self._edit_locked_color = None
             self.shape_deselected.emit()
             self.update()
@@ -5529,13 +6856,13 @@ class DrawingArea(QFrame):
             self.preview_end = None
             self.preview_rotation = 0
             self.shape_layers_overlay.setVisible(False)
-            self.current_tool = None
+            self.current_tool = "select"
             self._edit_locked_color = None
             self.update()
             return
         self.selected_shape_index = idx
         self.shape_layers_overlay.setVisible(False)
-        self.current_tool = None
+        self.current_tool = "select"
         shape = self.shapes[idx]
         tool, start, end, data = shape[:4]
 
@@ -5604,12 +6931,20 @@ class DrawingArea(QFrame):
                 self._edit_locked_color = data if isinstance(data, QColor) else QColor("#000000")
                 self._show_text_overlay(canvas_rect, existing_text=text)
             else:
-                self.preview_shape = tool
-                self.preview_start = start
-                self.preview_end = end
-                self.preview_rotation = rotation
-                self.preview_pixmap = data if tool == "image" else None
-                self._edit_locked_color = data if isinstance(data, QColor) else QColor("#000000")
+                if tool == "group":
+                    # Groups are selected but not edited with preview/handles
+                    self.preview_shape = None
+                    self.preview_start = None
+                    self.preview_end = None
+                    self.preview_rotation = 0
+                    self._edit_locked_color = None
+                else:
+                    self.preview_shape = tool
+                    self.preview_start = start
+                    self.preview_end = end
+                    self.preview_rotation = rotation
+                    self.preview_pixmap = data if tool == "image" else None
+                    self._edit_locked_color = data if isinstance(data, QColor) else QColor("#000000")
 
         # PATCH END 
         self.shape_selected_for_edit.emit()
@@ -5692,6 +7027,24 @@ class DrawingArea(QFrame):
                 copy_action.triggered.connect(self.copy_selected_shape_to_clipboard)
         menu.addAction(copy_action)
         
+        # Group / Ungroup
+        # Show "Group" when multi-select has 2+ shapes
+        if len(self.selected_shape_indices) >= 2:
+            group_action = QAction("Group", self)
+            def do_group():
+                self._group_selected_shapes()
+            group_action.triggered.connect(do_group)
+            menu.addAction(group_action)
+        # Show "Ungroup" when single-selected shape is a group
+        elif (self.selected_shape_index is not None
+              and 0 <= self.selected_shape_index < len(self.shapes)
+              and self.shapes[self.selected_shape_index][0] == "group"):
+            ungroup_action = QAction("Ungroup", self)
+            def do_ungroup():
+                self._ungroup_selected_shape()
+            ungroup_action.triggered.connect(do_ungroup)
+            menu.addAction(ungroup_action)
+        
         # Duplicate
         duplicate_action = QAction("Duplicate", self)
         can_duplicate = (
@@ -5712,7 +7065,7 @@ class DrawingArea(QFrame):
         can_rotate = (
             self.selected_shape_index is not None
             and 0 <= self.selected_shape_index < len(self.shapes)
-            and self.shapes[self.selected_shape_index][0] not in ["image", "draw", "label"]
+            and self.shapes[self.selected_shape_index][0] not in ["image", "draw", "label", "group"]
             and not self.is_shape_locked(self.selected_shape_index)
         )
         rotate_action.setEnabled(can_rotate)
@@ -5744,6 +7097,7 @@ class DrawingArea(QFrame):
             delete_action.triggered.connect(self.delete_selected_shape)
         menu.addAction(delete_action)
 
+
         menu.addSeparator()
 
         # Properties
@@ -5751,7 +7105,7 @@ class DrawingArea(QFrame):
         can_properties = (
             self.selected_shape_index is not None
             and 0 <= self.selected_shape_index < len(self.shapes)
-            and self.shapes[self.selected_shape_index][0] not in ["image", "draw"]
+            and self.shapes[self.selected_shape_index][0] not in ["image", "draw", "group"]
             and not self.is_shape_locked(self.selected_shape_index)
         )
         properties_action.setEnabled(can_properties)
@@ -5951,8 +7305,24 @@ class DrawingArea(QFrame):
             elif shape[0] != "draw" and len(shape) > 4 and isinstance(shape[4], (int, float)) and not isinstance(shape[4], bool):
                 rotation = shape[4]
             self.preview_rotation = rotation
+            # For group shapes, use painter rotation (don't transform children)
+            if shape[0] == "group":
+                children = shape[3] if isinstance(shape[3], list) else []
+                g_rect = _compute_group_visual_bounds(children)
+                if g_rect and g_rect.isValid():
+                    self._rotation_center = g_rect.center()
+                    self._group_rotate_origin_children = True  # flag only
+                    self._rotation_start_angle = 0
+                    # Extract current group rotation from extras
+                    group_rotation = 0
+                    for item in shape[4:]:
+                        if isinstance(item, (int, float)) and not isinstance(item, bool):
+                            group_rotation = item
+                            break
+                    self._rotation_initial = group_rotation
+                    self.preview_rotation = group_rotation
             # For "draw" shapes, rotate preview points if rotation is not zero
-            if shape[0] == "draw":
+            elif shape[0] == "draw":
                 # Use preview points if available
                 points = [QPoint(p) for p in self.preview_start] if self.preview_start is not None else [QPoint(p) for p in shape[1]]
                 if rotation:
@@ -6000,6 +7370,116 @@ class DrawingArea(QFrame):
         preview_start = self.preview_start if self.preview_start is not None else start
         preview_end = self.preview_end if self.preview_end is not None else end
 
+        if tool == "group":
+            # Rotate all children 90° around the group center
+            children = color if isinstance(color, list) else []
+            g_rect = _compute_group_visual_bounds(children)
+            if g_rect and g_rect.isValid():
+                center = g_rect.center()
+                angle = 90
+                cos_a = math.cos(math.radians(angle))
+                sin_a = math.sin(math.radians(angle))
+                new_children = []
+                for child in children:
+                    ctool = child[0]
+                    if ctool == "draw" and isinstance(child[1], list):
+                        # Draw: physically rotate points (no painter rotation)
+                        new_pts = []
+                        for p in child[1]:
+                            x, y = p.x() - center.x(), p.y() - center.y()
+                            rx = x * cos_a - y * sin_a + center.x()
+                            ry = x * sin_a + y * cos_a + center.y()
+                            new_pts.append(QPoint(int(rx), int(ry)))
+                        new_children.append(tuple(["draw", new_pts] + list(child[2:])))
+                    elif ctool == "image":
+                        # Image: orbit center + add 90° to rotation
+                        cs, ce = child[1], child[2]
+                        crect = QRect(cs, ce).normalized()
+                        old_cx, old_cy = crect.center().x(), crect.center().y()
+                        rx = (old_cx - center.x()) * cos_a - (old_cy - center.y()) * sin_a + center.x()
+                        ry = (old_cx - center.x()) * sin_a + (old_cy - center.y()) * cos_a + center.y()
+                        dx, dy = int(rx - old_cx), int(ry - old_cy)
+                        new_s = QPoint(cs.x() + dx, cs.y() + dy)
+                        new_e = QPoint(ce.x() + dx, ce.y() + dy)
+                        pixmap = child[3]
+                        child_rot = 0
+                        if len(child) > 4 and isinstance(child[4], (int, float)):
+                            child_rot = child[4]
+                        new_rot = (child_rot + 90) % 360
+                        parts = [ctool, new_s, new_e, pixmap]
+                        if new_rot:
+                            parts.append(new_rot)
+                        new_children.append(tuple(parts))
+                    elif ctool in ("line", "arrow"):
+                        # Line/Arrow: orbit midpoint + add 90° to rotation
+                        cs, ce = child[1], child[2]
+                        mid_x = (cs.x() + ce.x()) / 2
+                        mid_y = (cs.y() + ce.y()) / 2
+                        new_mid_x = (mid_x - center.x()) * cos_a - (mid_y - center.y()) * sin_a + center.x()
+                        new_mid_y = (mid_x - center.x()) * sin_a + (mid_y - center.y()) * cos_a + center.y()
+                        dx, dy = int(new_mid_x - mid_x), int(new_mid_y - mid_y)
+                        new_s = QPoint(cs.x() + dx, cs.y() + dy)
+                        new_e = QPoint(ce.x() + dx, ce.y() + dy)
+                        extras = list(child[3:])
+                        child_rot = 0
+                        rot_idx = None
+                        for ei, item in enumerate(extras):
+                            if isinstance(item, (int, float)) and not isinstance(item, bool):
+                                child_rot = item
+                                rot_idx = ei
+                                break
+                        new_rot = (child_rot + 90) % 360
+                        if rot_idx is not None:
+                            extras[rot_idx] = new_rot
+                        elif new_rot:
+                            insert_pos = 0
+                            for ei, item in enumerate(extras):
+                                if isinstance(item, QColor):
+                                    insert_pos = ei + 1
+                                else:
+                                    break
+                            extras.insert(insert_pos, new_rot)
+                        new_children.append(tuple([ctool, new_s, new_e] + extras))
+                    else:
+                        # Rect, circle, triangle, label, etc.: orbit center + add 90° to rotation
+                        cs, ce = child[1], child[2]
+                        crect = QRect(cs, ce).normalized()
+                        old_cx, old_cy = crect.center().x(), crect.center().y()
+                        rx = (old_cx - center.x()) * cos_a - (old_cy - center.y()) * sin_a + center.x()
+                        ry = (old_cx - center.x()) * sin_a + (old_cy - center.y()) * cos_a + center.y()
+                        dx, dy = int(rx - old_cx), int(ry - old_cy)
+                        new_s = QPoint(cs.x() + dx, cs.y() + dy)
+                        new_e = QPoint(ce.x() + dx, ce.y() + dy)
+                        extras = list(child[3:])
+                        child_rot = 0
+                        rot_idx = None
+                        for ei, item in enumerate(extras):
+                            if isinstance(item, (int, float)) and not isinstance(item, bool):
+                                child_rot = item
+                                rot_idx = ei
+                                break
+                        new_rot = (child_rot + 90) % 360
+                        if rot_idx is not None:
+                            extras[rot_idx] = new_rot
+                        elif new_rot:
+                            insert_pos = 0
+                            for ei, item in enumerate(extras):
+                                if isinstance(item, QColor):
+                                    insert_pos = ei + 1
+                                else:
+                                    break
+                            extras.insert(insert_pos, new_rot)
+                        new_children.append(tuple([ctool, new_s, new_e] + extras))
+                new_bounds = _compute_group_visual_bounds(new_children)
+                self.shapes[idx] = tuple(["group", new_bounds.topLeft(), new_bounds.bottomRight(), new_children] + list(shape[4:]))
+            self.shape_layers_overlay.update_shapes(self.shapes)
+            self.shape_layers_overlay.selected_idx = idx
+            self.shape_layers_overlay.refresh()
+            if callable(self.tooltip_callback):
+                self.tooltip_callback("Rotated 90°")
+            self.update()
+            return
+
         if tool == "draw" and isinstance(start, list) and len(start) > 1:
             # For freehand, rotate points for preview
             min_x = min(p.x() for p in start)
@@ -6038,8 +7518,6 @@ class DrawingArea(QFrame):
             self.preview_rotation = (rotation + 90) % 360
             self._pending_rotation_commit = 90
 
-            # Swap width/height for 90-degree rotation
-            new_rect = QRect(center.x() - rect.height() // 2, center.y() - rect.width() // 2, rect.height(), rect.width())
             old_shape = self.shapes[idx]
             tool, _, _, color = old_shape[:4]
 
@@ -6058,7 +7536,14 @@ class DrawingArea(QFrame):
                 elif isinstance(item, dict):
                     extra_dicts.append(item)
 
-            new_shape = [tool, new_rect.topLeft(), new_rect.bottomRight(), color]
+            if tool in ("line", "arrow"):
+                # Lines/arrows store rotation as a painter transform around the midpoint.
+                # Keep the original endpoints unchanged and only update the rotation field.
+                new_shape = [tool, preview_start, preview_end, color]
+            else:
+                # Swap width/height for 90-degree rotation of rectangular shapes
+                new_rect = QRect(center.x() - rect.height() // 2, center.y() - rect.width() // 2, rect.height(), rect.width())
+                new_shape = [tool, new_rect.topLeft(), new_rect.bottomRight(), color]
             if fill_color is not None:
                 new_shape.append(fill_color)
             new_shape.append((rotation + 90) % 360)
@@ -6091,6 +7576,20 @@ class DrawingArea(QFrame):
         try:
             shape_dict = json.loads(text)
             tool = shape_dict.get("tool")
+
+            # Groups: deserialize full shape, offset, and commit directly
+            if tool == "group" and "children" in shape_dict:
+                group_shape = _deserialize_shape(shape_dict)
+                offset = QPoint(20, 20)
+                moved = self._offset_shape(group_shape, offset)
+                self.shapes.append(moved)
+                self.selected_shape_index = len(self.shapes) - 1
+                self.preview_shape = None
+                self.shape_layers_overlay.update_shapes(self.shapes)
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Pasted")
+                self.update()
+                return
 
             # Use the copied shape's original color
             color = QColor(shape_dict.get("color", "#000000"))
@@ -6191,7 +7690,12 @@ class DrawingArea(QFrame):
     def _is_shape_json(self, text):
         try:
             shape = json.loads(text)
-            if not isinstance(shape, dict) or "tool" not in shape or "color" not in shape:
+            if not isinstance(shape, dict) or "tool" not in shape:
+                return False
+            # Group shapes use _serialize_shape format (children, extras)
+            if shape["tool"] == "group" and "children" in shape:
+                return True
+            if "color" not in shape:
                 return False
             # Accept either start/end or points for freehand
             if ("start" in shape and "end" in shape) or ("points" in shape):
@@ -6204,6 +7708,15 @@ class DrawingArea(QFrame):
         if self.selected_shape_index is not None and 0 <= self.selected_shape_index < len(self.shapes):
             shape = self.shapes[self.selected_shape_index]
             tool, start, end, data = shape[:4]
+
+            # Groups use the full _serialize_shape format
+            if tool == "group":
+                shape_dict = _serialize_shape(shape)
+                clipboard = QApplication.clipboard()
+                clipboard.setText(json.dumps(shape_dict))
+                if callable(self.tooltip_callback):
+                    self.tooltip_callback("Copied")
+                return
 
             shape_dict = {
                 "tool": tool,
@@ -6278,12 +7791,195 @@ class DrawingArea(QFrame):
             self.shape_deselected.emit()
             self.update()
 
+    def _group_selected_shapes(self):
+        """Group all shapes in selected_shape_indices into a single group shape."""
+        indices = sorted(self.selected_shape_indices)
+        if len(indices) < 2:
+            return
+        # Don't group if any selected shape is already a group
+        if any(self.shapes[i][0] == "group" for i in indices if 0 <= i < len(self.shapes)):
+            return
+        self.push_undo()
+        children = [self.shapes[i] for i in indices]
+        bounds = _compute_group_visual_bounds(children)
+        if bounds is None:
+            return
+        group_shape = ("group", bounds.topLeft(), bounds.bottomRight(), children)
+        # Remove originals in reverse order to keep indices stable
+        for i in reversed(indices):
+            self.shapes.pop(i)
+        self.shapes.append(group_shape)
+        self.selected_shape_indices.clear()
+        self.selected_shape_index = len(self.shapes) - 1
+        self.preview_shape = None
+        self.preview_start = None
+        self.preview_end = None
+        self.shape_layers_overlay.update_shapes(self.shapes)
+        if callable(self.tooltip_callback):
+            self.tooltip_callback("Grouped")
+        self.update()
+
+    def _ungroup_selected_shape(self):
+        """Ungroup the currently selected group shape back into individual shapes."""
+        idx = self.selected_shape_index
+        if idx is None or idx >= len(self.shapes):
+            return
+        if self.is_shape_locked(idx):
+            return
+        shape = self.shapes[idx]
+        if shape[0] != "group":
+            return
+        self.push_undo()
+        children = shape[3] if isinstance(shape[3], list) else []
+        # Extract group rotation
+        group_rotation = 0
+        for item in shape[4:]:
+            if isinstance(item, (int, float)) and not isinstance(item, bool):
+                group_rotation = item
+                break
+        # If the group was rotated, preserve visual appearance:
+        # orbit each child's center to its visual position, and add group
+        # rotation to the child's own rotation (no start/end distortion).
+        if group_rotation and children:
+            g_rect = _compute_group_visual_bounds(children)
+            if g_rect and g_rect.isValid():
+                gc = g_rect.center()
+                angle = math.radians(group_rotation)
+                cos_a, sin_a = math.cos(angle), math.sin(angle)
+                baked = []
+                for child in children:
+                    ctool = child[0]
+                    if ctool == "draw" and isinstance(child[1], list):
+                        # Draw: rotate every point around the group center
+                        # (rendering does NOT apply rotation transform for draw)
+                        pts = child[1]
+                        new_pts = [
+                            QPoint(
+                                int((p.x() - gc.x()) * cos_a - (p.y() - gc.y()) * sin_a + gc.x()),
+                                int((p.x() - gc.x()) * sin_a + (p.y() - gc.y()) * cos_a + gc.y()),
+                            )
+                            for p in pts
+                        ]
+                        parts = list(child)
+                        parts[1] = new_pts
+                        baked.append(tuple(parts))
+                    elif ctool in ("line", "arrow"):
+                        # Line/Arrow: orbit midpoint + additive rotation
+                        # (rendering DOES apply rotation for line/arrow)
+                        cs, ce = child[1], child[2]
+                        mid_x = (cs.x() + ce.x()) / 2
+                        mid_y = (cs.y() + ce.y()) / 2
+                        new_mid_x = (mid_x - gc.x()) * cos_a - (mid_y - gc.y()) * sin_a + gc.x()
+                        new_mid_y = (mid_x - gc.x()) * sin_a + (mid_y - gc.y()) * cos_a + gc.y()
+                        dx, dy = int(new_mid_x - mid_x), int(new_mid_y - mid_y)
+                        new_s = QPoint(cs.x() + dx, cs.y() + dy)
+                        new_e = QPoint(ce.x() + dx, ce.y() + dy)
+                        extras = list(child[3:])
+                        child_rot = 0
+                        rot_idx = None
+                        for ei, item in enumerate(extras):
+                            if isinstance(item, (int, float)) and not isinstance(item, bool):
+                                child_rot = item
+                                rot_idx = ei
+                                break
+                        new_rot = (child_rot + group_rotation) % 360
+                        if rot_idx is not None:
+                            extras[rot_idx] = new_rot
+                        elif new_rot:
+                            insert_pos = 0
+                            for ei, item in enumerate(extras):
+                                if isinstance(item, QColor):
+                                    insert_pos = ei + 1
+                                else:
+                                    break
+                            extras.insert(insert_pos, new_rot)
+                        baked.append(tuple([ctool, new_s, new_e] + extras))
+                    elif ctool == "image":
+                        # Image: orbit center + additive rotation
+                        # (rendering DOES apply rotation for images)
+                        cs, ce = child[1], child[2]
+                        crect = QRect(cs, ce).normalized()
+                        old_cx, old_cy = crect.center().x(), crect.center().y()
+                        rx = (old_cx - gc.x()) * cos_a - (old_cy - gc.y()) * sin_a + gc.x()
+                        ry = (old_cx - gc.x()) * sin_a + (old_cy - gc.y()) * cos_a + gc.y()
+                        dx, dy = int(rx - old_cx), int(ry - old_cy)
+                        new_s = QPoint(cs.x() + dx, cs.y() + dy)
+                        new_e = QPoint(ce.x() + dx, ce.y() + dy)
+                        # Image tuple: ("image", start, end, pixmap, [rotation])
+                        pixmap = child[3]
+                        child_rot = 0
+                        if len(child) > 4 and isinstance(child[4], (int, float)):
+                            child_rot = child[4]
+                        new_rot = (child_rot + group_rotation) % 360
+                        parts = [ctool, new_s, new_e, pixmap]
+                        if new_rot:
+                            parts.append(new_rot)
+                        baked.append(tuple(parts))
+                    else:
+                        # Rect, circle, triangle, label, etc.: orbit center + additive rotation
+                        cs, ce = child[1], child[2]
+                        crect = QRect(cs, ce).normalized()
+                        old_cx = crect.center().x()
+                        old_cy = crect.center().y()
+                        rx = (old_cx - gc.x()) * cos_a - (old_cy - gc.y()) * sin_a + gc.x()
+                        ry = (old_cx - gc.x()) * sin_a + (old_cy - gc.y()) * cos_a + gc.y()
+                        dx = int(rx - old_cx)
+                        dy = int(ry - old_cy)
+                        new_s = QPoint(cs.x() + dx, cs.y() + dy)
+                        new_e = QPoint(ce.x() + dx, ce.y() + dy)
+                        # Add group rotation to child's own rotation
+                        child_rot = 0
+                        extras = list(child[3:])
+                        rot_idx = None
+                        for ei, item in enumerate(extras):
+                            if isinstance(item, (int, float)) and not isinstance(item, bool):
+                                child_rot = item
+                                rot_idx = ei
+                                break
+                        new_rot = (child_rot + group_rotation) % 360
+                        if rot_idx is not None:
+                            extras[rot_idx] = new_rot
+                        elif new_rot:
+                            # Insert rotation after color entries
+                            insert_pos = 0
+                            for ei, item in enumerate(extras):
+                                if isinstance(item, QColor):
+                                    insert_pos = ei + 1
+                                else:
+                                    break
+                            extras.insert(insert_pos, new_rot)
+                        baked.append(tuple([ctool, new_s, new_e] + extras))
+                children = baked
+        self.shapes.pop(idx)
+        insert_at = idx
+        for child in children:
+            self.shapes.insert(insert_at, child)
+            insert_at += 1
+        self.selected_shape_index = None
+        self.selected_shape_indices.clear()
+        self.shape_layers_overlay.update_shapes(self.shapes)
+        if callable(self.tooltip_callback):
+            self.tooltip_callback("Ungrouped")
+        self.shape_deselected.emit()
+        self.update()
+
     def push_undo(self):
         # Custom copy to avoid deepcopying QPixmap
         new_shapes = []
         for shape in self.shapes:
             tool, start, end, data = shape[:4]
-            if tool == "image":
+            if tool == "group":
+                children_copy = [self._copy_single_shape(c) for c in data]
+                new_group = ["group", QPoint(start), QPoint(end), children_copy]
+                for item in shape[4:]:
+                    if isinstance(item, QColor):
+                        new_group.append(QColor(item))
+                    elif isinstance(item, dict):
+                        new_group.append(dict(item))
+                    else:
+                        new_group.append(item)
+                new_shapes.append(tuple(new_group))
+            elif tool == "image":
                 # QPixmap: shallow copy reference; preserve extras (e.g. rotation)
                 new_img = [tool, QPoint(start), QPoint(end), data]
                 for item in shape[4:]:
@@ -6328,6 +8024,7 @@ class DrawingArea(QFrame):
             self.eraser_strokes = [list(s) for s in eraser_strokes]
 
             self.selected_shape_index = None
+            self.selected_shape_indices.clear()
             self.preview_shape = None
             self.preview_start = None
             self.preview_end = None
@@ -6342,6 +8039,7 @@ class DrawingArea(QFrame):
             self.eraser_mask = eraser_mask
             self.eraser_strokes = [list(s) for s in eraser_strokes]
             self.selected_shape_index = None
+            self.selected_shape_indices.clear()
             self.preview_shape = None
             self.preview_start = None
             self.preview_end = None
@@ -6351,7 +8049,18 @@ class DrawingArea(QFrame):
     def _copy_single_shape(self, shape):
         tool = shape[0]
         start, end, data = shape[1], shape[2], shape[3]
-        if tool == "image":
+        if tool == "group":
+            children_copy = [self._copy_single_shape(c) for c in data]
+            new_group = ["group", QPoint(start), QPoint(end), children_copy]
+            for item in shape[4:]:
+                if isinstance(item, QColor):
+                    new_group.append(QColor(item))
+                elif isinstance(item, dict):
+                    new_group.append(dict(item))
+                else:
+                    new_group.append(item)
+            return tuple(new_group)
+        elif tool == "image":
             # Preserve extras (e.g. rotation at shape[4]); pixmap is ref-copied
             new_img = [tool, QPoint(start), QPoint(end), data]
             for item in shape[4:]:
@@ -6375,6 +8084,21 @@ class DrawingArea(QFrame):
                 else:
                     new_shape.append(item)
             return tuple(new_shape)
+
+    def _offset_shape(self, shape, offset):
+        """Return a deep copy of shape with all coordinates shifted by offset."""
+        new = self._copy_single_shape(shape)
+        tool = new[0]
+        if tool == "group":
+            children = [self._offset_shape(c, offset) for c in new[3]]
+            return tuple([tool, QPoint(new[1]) + offset, QPoint(new[2]) + offset, children] + list(new[4:]))
+        elif tool == "draw" and isinstance(new[1], list):
+            pts = [p + offset for p in new[1]]
+            return tuple([tool, pts] + list(new[2:]))
+        elif tool == "image":
+            return tuple([tool, QPoint(new[1]) + offset, QPoint(new[2]) + offset] + list(new[3:]))
+        else:
+            return tuple([tool, QPoint(new[1]) + offset, QPoint(new[2]) + offset] + list(new[3:]))
         
     def duplicate_selected_object(self):
         if self.selected_shape_index is None and self.preview_shape is not None:
@@ -6426,7 +8150,21 @@ class DrawingArea(QFrame):
         offset = QPoint(20, 20)
         tool = new_shape[0]
     
-        if tool == "draw":
+        if tool == "group":
+            # Groups: offset and commit directly (no preview mode needed)
+            moved = self._offset_shape(new_shape, offset)
+            self.push_undo()
+            self.shapes.append(moved)
+            self.selected_shape_index = len(self.shapes) - 1
+            self.preview_shape = None
+            self.preview_start = None
+            self.preview_end = None
+            self.shape_layers_overlay.update_shapes(self.shapes)
+            if callable(self.tooltip_callback):
+                self.tooltip_callback("Duplicated")
+            self.update()
+            return
+        elif tool == "draw":
             pts = [p + offset for p in new_shape[1]]
             draw_radius = new_shape[4] if len(new_shape) > 4 and isinstance(new_shape[4], (int, float)) else self.draw_radius
             rotation = new_shape[5] if len(new_shape) > 5 and isinstance(new_shape[5], (int, float)) else 0
@@ -6541,6 +8279,187 @@ class DrawingArea(QFrame):
         if len(self.shape_history) > 100:
             self.shape_history.pop(0)
 
+    def _get_shape_description(self, shape):
+        """Extract description dict from shape extras, or None."""
+        for item in shape[4:] if len(shape) > 4 else []:
+            if isinstance(item, dict) and "description" in item:
+                return item["description"]
+        return None
+
+    def _get_shape_restore_count(self, shape_idx):
+        """Count restore point entries for a given shape index."""
+        return sum(1 for e in self.shape_history if e["shape_idx"] == shape_idx)
+
+    def _show_description_overlay(self, shape_idx):
+        """Show an inline description editor overlay next to the shape."""
+        self._cancel_description_overlay()
+        if shape_idx is None or shape_idx < 0 or shape_idx >= len(self.shapes):
+            return
+
+        shape = self.shapes[shape_idx]
+        tool = shape[0]
+        start, end = shape[1], shape[2]
+
+        # Compute shape bounding rect in canvas coords
+        if tool == "group":
+            children = shape[3] if isinstance(shape[3], list) else []
+            sb = _compute_group_visual_bounds(children)
+            if not sb or not sb.isValid():
+                sb = QRect(start, end).normalized()
+        elif tool == "draw" and isinstance(start, list) and start:
+            xs = [p.x() for p in start]
+            ys = [p.y() for p in start]
+            sb = QRect(QPoint(min(xs), min(ys)), QPoint(max(xs), max(ys)))
+        else:
+            sb = QRect(start, end).normalized()
+
+        # Convert to widget coords and position overlay to the right
+        tl_w = self.canvas_to_widget(QPoint(sb.right() + 10, sb.top()))
+
+        existing_desc = self._get_shape_description(shape)
+        existing_note = existing_desc.get("text", "") if existing_desc else ""
+        restore_count = self._get_shape_restore_count(shape_idx)
+        is_group = (tool == "group")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%SH")
+
+        overlay = QWidget(self)
+        overlay.setStyleSheet(
+            "background: white; border: 2px solid #cc0000; border-radius: 8px;"
+        )
+        overlay_layout = QVBoxLayout(overlay)
+        overlay_layout.setContentsMargins(12, 10, 12, 10)
+        overlay_layout.setSpacing(4)
+
+        ts_label = QLabel(f"[{timestamp}] Last updated")
+        ts_label.setStyleSheet("color: #cc0000; font-size: 10pt; font-weight: bold; border: none;")
+        overlay_layout.addWidget(ts_label)
+
+        if not is_group and shape[0] != "image" and shape[0] != "draw":
+            rp_label = QLabel(f"Restore Points: {restore_count}")
+            rp_label.setStyleSheet("color: #cc0000; font-size: 10pt; border: none;")
+            overlay_layout.addWidget(rp_label)
+
+        note_label = QLabel("Note:")
+        note_label.setStyleSheet("color: #cc0000; font-size: 10pt; font-weight: bold; border: none;")
+        overlay_layout.addWidget(note_label)
+
+        note_edit = QTextEdit()
+        note_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        note_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        note_edit.setPlainText(existing_note)
+        note_edit.setStyleSheet(
+            "border: 1px solid #ccc; border-radius: 4px; padding: 4px; font-size: 10pt;"
+        )
+        note_edit.setFixedHeight(80)
+        overlay_layout.addWidget(note_edit)
+
+        remove_btn = QPushButton("Remove Description")
+        remove_btn.setStyleSheet("""
+            QPushButton {
+                background: #f0f0f0; color: #cc0000; border: 1px solid #ccc;
+                border-radius: 4px; padding: 4px 8px; font-size: 9pt;
+            }
+            QPushButton:hover { background: #cc0000; color: white; border-color: #cc0000; }
+        """)
+        remove_btn.setCursor(_pointing_cursor())
+
+        def _remove_description():
+            idx = shape_idx
+            if idx is not None and 0 <= idx < len(self.shapes):
+                self.push_undo()
+                shape = self.shapes[idx]
+                new_shape = [item for i, item in enumerate(shape)
+                             if not (i >= 4 and isinstance(item, dict) and "description" in item)]
+                self.shapes[idx] = tuple(new_shape)
+            self._destroy_desc_overlay()
+            if self.current_tool == "adddescription" and self._desc_cursor is not None:
+                self.setCursor(self._desc_cursor)
+                QTimer.singleShot(0, self._restore_desc_cursor)
+
+        remove_btn.clicked.connect(_remove_description)
+        overlay_layout.addWidget(remove_btn)
+
+        overlay.setFixedWidth(280)
+        overlay.adjustSize()
+        overlay.move(tl_w)
+        overlay.show()
+        overlay.raise_()
+        note_edit.setFocus()
+
+        self._desc_overlay = overlay
+        self._desc_edit_shape_idx = shape_idx
+        self._desc_note_edit = note_edit
+        self._desc_timestamp = timestamp
+
+    def _commit_description_overlay(self):
+        """Save the description from the overlay into the shape tuple."""
+        if self._desc_overlay is None:
+            return
+        idx = self._desc_edit_shape_idx
+        note_text = self._desc_note_edit.toPlainText().strip()
+        timestamp = self._desc_timestamp
+
+        if idx is not None and 0 <= idx < len(self.shapes):
+            self.push_undo()
+            shape = self.shapes[idx]
+            new_shape = list(shape)
+
+            # Find and replace existing description dict, or append new one
+            desc_dict_idx = None
+            for i in range(4, len(new_shape)):
+                if isinstance(new_shape[i], dict) and "description" in new_shape[i]:
+                    desc_dict_idx = i
+                    break
+
+            desc_data = {"description": {"text": note_text, "timestamp": timestamp}}
+            if desc_dict_idx is not None:
+                new_shape[desc_dict_idx] = desc_data
+            else:
+                # Insert before the lock bool if present
+                if new_shape and isinstance(new_shape[-1], bool):
+                    new_shape.insert(len(new_shape) - 1, desc_data)
+                else:
+                    new_shape.append(desc_data)
+
+            self.shapes[idx] = tuple(new_shape)
+
+        self._destroy_desc_overlay()
+
+        # Restore the adddescription cursor after Qt finishes processing
+        # the widget destruction / focus events.
+        if self.current_tool == "adddescription" and self._desc_cursor is not None:
+            self.setCursor(self._desc_cursor)
+            QTimer.singleShot(0, self._restore_desc_cursor)
+
+    def _cancel_description_overlay(self):
+        """Close the description overlay without saving."""
+        self._destroy_desc_overlay()
+
+        # Restore the adddescription cursor after Qt finishes processing
+        if self.current_tool == "adddescription" and self._desc_cursor is not None:
+            self.setCursor(self._desc_cursor)
+            QTimer.singleShot(0, self._restore_desc_cursor)
+
+    def _restore_desc_cursor(self):
+        """Deferred cursor restore – runs after Qt processes pending events."""
+        if self.current_tool == "adddescription" and self._desc_cursor is not None:
+            self.setCursor(self._desc_cursor)
+
+    def _destroy_desc_overlay(self):
+        if self._desc_overlay is not None:
+            # Take focus away from the QTextEdit before destroying, so Qt
+            # does not asynchronously recalculate the cursor after deleteLater.
+            if self._desc_note_edit is not None:
+                self._desc_note_edit.clearFocus()
+            self.setFocus()
+            self._desc_overlay.hide()
+            self._desc_overlay.setParent(None)
+            self._desc_overlay.deleteLater()
+            self._desc_overlay = None
+        self._desc_edit_shape_idx = None
+        self._desc_note_edit = None
+        self._desc_timestamp = None
+
     def erase_at_point(self, pt):
 
         radius = self.eraser_radius
@@ -6569,6 +8488,68 @@ class DrawingArea(QFrame):
                 continue
             shape = self.shapes[idx]
             tool = shape[0]
+
+            # GROUP: rasterize via _paint_single_shape then erase into the image
+            if tool == "group":
+                vis_rect = _shape_bounding_rect(shape)
+                if not circle_intersects_rect(pt, radius, vis_rect):
+                    continue
+
+                # Extract group rotation
+                rotation = 0
+                for item in shape[4:]:
+                    if isinstance(item, (int, float)) and not isinstance(item, bool):
+                        rotation = item
+                        break
+
+                # Check cache first (ongoing erase strokes reuse the same image)
+                img = self._image_erase_cache.get(idx)
+                if img is None:
+                    # Rasterize the group into a QImage at 1:1 scale
+                    pad = 2
+                    img_w = max(1, vis_rect.width() + 2 * pad)
+                    img_h = max(1, vis_rect.height() + 2 * pad)
+                    img = QImage(img_w, img_h, QImage.Format.Format_ARGB32_Premultiplied)
+                    img.fill(0)
+                    painter_img = QPainter(img)
+                    painter_img.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    painter_img.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                    painter_img.translate(-vis_rect.left() + pad, -vis_rect.top() + pad)
+                    self._paint_single_shape(painter_img, shape)
+                    painter_img.end()
+                    self._image_erase_cache[idx] = img
+
+                # Map canvas eraser point into image coords
+                pad = 2
+                img_w, img_h = img.width(), img.height()
+                local_fx = pt.x() - vis_rect.left() + pad
+                local_fy = pt.y() - vis_rect.top() + pad
+                radius_px = radius
+
+                lx = max(0, min(int(round(local_fx)), img_w - 1))
+                ly = max(0, min(int(round(local_fy)), img_h - 1))
+
+                img_painter = QPainter(img)
+                img_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                img_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+                img_painter.setPen(Qt.PenStyle.NoPen)
+                img_painter.setBrush(QColor(0, 0, 0, 0))
+                img_painter.drawEllipse(QPoint(lx, ly), radius_px, radius_px)
+                img_painter.end()
+
+                self._image_erase_cache[idx] = img
+                new_pix = QPixmap.fromImage(img)
+
+                pad_disp = pad
+                new_start = QPoint(max(0, vis_rect.left() - pad_disp), max(0, vis_rect.top() - pad_disp))
+                new_end = QPoint(
+                    min(self.a4_size.width(), vis_rect.right() + pad_disp),
+                    min(self.a4_size.height(), vis_rect.bottom() + pad_disp)
+                )
+                new_shape = ("image", new_start, new_end, new_pix)
+                self.shapes[idx] = new_shape
+                erased_any = True
+                continue
 
             # FREEHAND polyline: same splitting logic (preserve behavior)
             if tool == "draw" and isinstance(shape[1], list):
@@ -6746,7 +8727,7 @@ class DrawingArea(QFrame):
                 local_rect = QRect(0, 0, disp_w, disp_h)
                 # For line tool, preserve the original direction; normalizing the rect loses which endpoint
                 # is "start" vs "end" (e.g. a bottom-left→top-right line would be flipped).
-                if tool == "line":
+                if tool in ("line", "arrow"):
                     _local_start = QPoint(start.x() - rect.left(), start.y() - rect.top())
                     _local_end   = QPoint(end.x()   - rect.left(), end.y()   - rect.top())
                 else:
@@ -6906,7 +8887,7 @@ class DrawingArea(QFrame):
                     point_near_line(tri[1], tri[2]) or
                     point_near_line(tri[2], tri[0])
                 )
-            elif tool == "line":
+            elif tool in ("line", "arrow"):
                 x0, y0 = start.x(), start.y()
                 x1_, y1_ = end.x(), end.y()
                 dx, dy = x1_ - x0, y1_ - y0
@@ -6931,7 +8912,7 @@ class DrawingArea(QFrame):
                 return (
                     near_line(rect.topLeft(), rect.bottomRight()) or
                     near_line(rect.bottomLeft(), rect.topRight())
-                )
+                )                
             return False
 
         # Iterate top-down
@@ -6940,6 +8921,15 @@ class DrawingArea(QFrame):
                 continue
             shape = self.shapes[idx]
             tool = shape[0]
+
+            # GROUPS: cannot fill directly — show tooltip
+            if tool == "group":
+                vis_rect = _shape_bounding_rect(shape)
+                if vis_rect.contains(pt):
+                    self.custom_tooltip.show_tooltip("Cannot fill grouped objects — ungroup first", 2500)
+                    return
+                continue
+
             start, end = shape[1], shape[2]
 
             # Parse existing properties robustly: border_color, optional fill_color, optional rotation
@@ -6962,6 +8952,7 @@ class DrawingArea(QFrame):
             if tool == "image":
                 rect = QRect(start, end).normalized()
                 if rect.contains(pt):
+                    self.custom_tooltip.show_tooltip("Cannot fill object type: image", 2500)
                     # Do nothing for images
                     return
 
@@ -7039,6 +9030,13 @@ class DrawingArea(QFrame):
         for shape in self.shapes:
             tool, start, end, *rest = shape
 
+            if tool == "group":
+                # Use the full-featured painter for groups (handles children + rotation)
+                grp_rect = _shape_bounding_rect(shape)
+                if crop_rect.intersects(grp_rect):
+                    self._paint_single_shape(painter, shape)
+                continue
+
             if tool == "draw" and isinstance(start, list):
                 # Check if any points are in the crop area
                 clipped_points = [p for p in start if crop_rect.contains(p)]
@@ -7090,8 +9088,8 @@ class DrawingArea(QFrame):
 
                     # For line tool, preserve the original direction; normalizing the rect loses
                     # which endpoint is "start" vs "end" (e.g. bottom-left→top-right lines get flipped).
-                    _draw_start = start if tool == "line" else rect.topLeft()
-                    _draw_end   = end   if tool == "line" else rect.bottomRight()
+                    _draw_start = start if tool in ("line", "arrow") else rect.topLeft()
+                    _draw_end   = end   if tool in ("line", "arrow") else rect.bottomRight()
 
                     # Draw fill first if present
                     if fill_color:
@@ -7195,6 +9193,10 @@ class DrawingArea(QFrame):
                 elif not any(crop_rect.contains(p) for p in start):
                     # None of the points are inside — keep as-is
                     shapes_to_keep.append(shape)
+            elif tool == "group":
+                grp_rect = _shape_bounding_rect(shape)
+                if not crop_rect.intersects(grp_rect):
+                    shapes_to_keep.append(shape)
             elif tool == "image" and len(rest) > 0:
                 rect = QRect(start, end).normalized()
                 # Keep if doesn't intersect crop area
@@ -7236,15 +9238,15 @@ class DrawingArea(QFrame):
 
         self.eraser_mask = new_eraser_mask
 
-        # Create the moveable selection as an image
-        self.preview_shape = "image"
-        self.preview_pixmap = cropped_pixmap
-        self.preview_start = crop_rect.topLeft()
-        self.preview_end = crop_rect.bottomRight()
-        self.preview_rotation = 0
+        # Commit the cropped region directly as an image shape (no edit-before-placing)
+        new_img_shape = ("image", crop_rect.topLeft(), crop_rect.bottomRight(), cropped_pixmap)
+        self.shapes.append(new_img_shape)
+        self.shape_layers_overlay.update_shapes(self.shapes)
         self.selected_shape_index = None
 
         # Clear crop state
+        self.preview_shape = None
+        self.preview_pixmap = None
         self.crop_preview_mode = False
         self.cropping = False
         self.crop_start = None
@@ -7441,6 +9443,26 @@ class DrawingArea(QFrame):
     def points_close(self, p1, p2, tolerance=5):
         return (p1 - p2).manhattanLength() < tolerance
 
+    def _move_group_shape(self, idx, delta):
+        """Move a group shape and all its children by delta."""
+        shape = self.shapes[idx]
+        if shape[0] != "group":
+            return
+        children = shape[3]
+        new_children = []
+        for child in children:
+            ctool = child[0]
+            if ctool == "draw" and isinstance(child[1], list):
+                new_pts = [p + delta for p in child[1]]
+                new_children.append(tuple(["draw", new_pts] + list(child[2:])))
+            else:
+                new_start = child[1] + delta
+                new_end = child[2] + delta
+                new_children.append(tuple([ctool, new_start, new_end] + list(child[3:])))
+        new_start = shape[1] + delta
+        new_end = shape[2] + delta
+        self.shapes[idx] = tuple(["group", new_start, new_end, new_children] + list(shape[4:]))
+
     def _snap_line_angle(self, start: QPoint, end: QPoint) -> QPoint:
         """Snap `end` so the angle from `start` to `end` is a multiple of 45 degrees."""
         dx = end.x() - start.x()
@@ -7557,6 +9579,7 @@ class ShapeLayersOverlay(QWidget):
         self.setStyleSheet("background: none;")
         self.setVisible(False)
         self.drawing_area = drawing_area
+        self.shapes = []
         self.current_index = 0
         self.selected_idx = None
         self._auto_scroll_timer = QTimer(self)
@@ -7581,6 +9604,7 @@ class ShapeLayersOverlay(QWidget):
 
         self.main_layout.addWidget(self.right_arrow)
         self.installEventFilter(self)
+        self.setCursor(_default_cursor())
 
     def update_shapes(self, shapes):
         self.shapes = shapes
@@ -7630,6 +9654,24 @@ class ShapeLayersOverlay(QWidget):
                             painter.drawPolygon(*points)
                         elif tool == "line":
                             painter.drawLine(rect.bottomLeft(), rect.topRight())
+                        elif tool == "arrow":
+                            painter.drawLine(rect.bottomLeft(), rect.topRight())
+                            # Small arrowhead
+                            import math
+                            tr = rect.topRight()
+                            bl = rect.bottomLeft()
+                            dx = tr.x() - bl.x()
+                            dy = tr.y() - bl.y()
+                            length = math.hypot(dx, dy)
+                            if length > 0:
+                                ux, uy = dx / length, dy / length
+                                hl = min(6, length * 0.3)
+                                a = math.radians(25)
+                                lx = tr.x() - hl * (ux * math.cos(a) - uy * math.sin(a))
+                                ly = tr.y() - hl * (uy * math.cos(a) + ux * math.sin(a))
+                                rx = tr.x() - hl * (ux * math.cos(a) + uy * math.sin(a))
+                                ry = tr.y() - hl * (uy * math.cos(a) - ux * math.sin(a))
+                                painter.drawPolygon(tr, QPoint(int(lx), int(ly)), QPoint(int(rx), int(ry)))
                         elif tool == "cross":
                             painter.drawLine(rect.topLeft(), rect.bottomRight())
                             painter.drawLine(rect.bottomLeft(), rect.topRight())
@@ -7731,10 +9773,25 @@ class ShapeLayersOverlay(QWidget):
                                         a_flag | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
                                         lbl_text,
                                     )
+                        elif tool == "group":
+                            # Draw a folder/stack icon for groups
+                            painter.setPen(QPen(QColor("#555"), 2))
+                            painter.setBrush(QBrush(QColor("#ddd")))
+                            # Back rect (offset)
+                            painter.drawRect(rect.adjusted(4, 0, 0, -4))
+                            # Front rect
+                            painter.setBrush(QBrush(QColor("#eee")))
+                            painter.drawRect(rect.adjusted(0, 4, -4, 0))
+                            # Badge with count
+                            children = data if isinstance(data, list) else []
+                            count_text = str(len(children))
+                            painter.setPen(QPen(QColor("#333")))
+                            painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
+                            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, count_text)
                 finally:
                     painter.end()
                 shape_widget.icon.setPixmap(pix)
-                shape_widget.label.setText(f"Object {idx+1}")
+                shape_widget.label.setText(f"Group ({len(data) if isinstance(data, list) else 0})" if tool == "group" else f"Object {idx+1}")
                 shape_widget.idx = idx
                 shape_widget.setEnabled(True)
                 shape_widget.setStyleSheet("background: none;")
@@ -7893,6 +9950,7 @@ class PageBar(QWidget):
 
     def __init__(self, parent=None, accent="#ff6600"):
         super().__init__(parent)
+        self.setCursor(_default_cursor())
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMouseTracking(True)
         self._accent     = accent
@@ -7946,7 +10004,7 @@ class PageBar(QWidget):
 
         self._add_btn = QPushButton("+")
         self._add_btn.setFixedSize(28, 28)
-        self._add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._add_btn.setCursor(_pointing_cursor())
         self._add_btn.setStyleSheet(self._add_btn_ss())
         self._add_btn.clicked.connect(self._on_add)
         outer.addWidget(self._exp_widget)
@@ -8025,7 +10083,7 @@ class PageBar(QWidget):
             btn.setFixedHeight(30)
             btn.setMinimumWidth(fm.horizontalAdvance(name) + 24)
             btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setCursor(_pointing_cursor())
             btn.setStyleSheet(self._page_btn_ss(i == self._current))
             btn.clicked.connect(lambda checked, idx=i: self._on_page_selected(idx))
             self._page_layout.addWidget(btn)
@@ -8210,6 +10268,7 @@ class UIMode(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setCursor(_default_cursor())
 
         screen = QApplication.primaryScreen()
         if screen:
@@ -8226,7 +10285,7 @@ class UIMode(QWidget):
         self.current_canvas_file = None  # Track the current file path
         self._checkpoint_preview_dialogs = {}
         
-        self.selected_tool = None
+        self.selected_tool = "select"
         self._first_ribbon_init = True
         
         self.setWindowTitle("Log Documentation System - Log Mode")
@@ -8255,6 +10314,7 @@ class UIMode(QWidget):
 
         # Tool Ribbon (with scroll for more tools)
         ribbon_widget = QWidget()
+        ribbon_widget.setCursor(_default_cursor())
         ribbon_layout = QVBoxLayout(ribbon_widget)
         ribbon_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         ribbon_layout.setContentsMargins(0, 0, 0, 0)
@@ -8293,6 +10353,7 @@ class UIMode(QWidget):
         self.ribbon_tools_layout = QVBoxLayout(self.ribbon_tools_container)
         self.ribbon_tools_layout.setContentsMargins(0, 0, 0, 0)
         self.ribbon_tools_layout.setSpacing(44)
+        self.ribbon_tools_layout
         ribbon_layout.addWidget(self.ribbon_tools_container, alignment=Qt.AlignmentFlag.AlignTop)
     
         self.quick_prop = ClickableLabel()
@@ -8340,6 +10401,8 @@ class UIMode(QWidget):
                     update_quick_prop_icon()
                     self.drawing_area.set_shape_color(color)
                     self.update_tool_btn_border()
+                    self._side_menu.set_accent_color(color)
+                    self.page_bar.set_accent(color)
                     self.drawing_area.update()
                 return
 
@@ -8483,6 +10546,7 @@ class UIMode(QWidget):
         # Top bar (custom, only shows controls on hover)
         self.top_bar = QWidget()
         self.top_bar.setFixedHeight(48)
+        self.top_bar.setCursor(_default_cursor())
         self.top_bar.setStyleSheet("background: white;")
         top_bar_layout = QHBoxLayout(self.top_bar)
         top_bar_layout.setContentsMargins(0, 0, 0, 0)
@@ -8524,7 +10588,7 @@ class UIMode(QWidget):
         self.menu_btn.setFixedSize(42, 42)
         self.menu_btn.setParent(self)
         self.menu_btn.setStyleSheet("background: none; border: none; font-size: 42pt;")
-        self.menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.menu_btn.setCursor(_pointing_cursor())
         self.menu_btn.clicked.connect(self.toggle_side_menu)
         self.menu_btn.show()
 
@@ -8567,6 +10631,8 @@ class UIMode(QWidget):
         self._side_menu.file_actions["Open"].clicked.connect(self.open_canvas)
         # Hotkeys Button Action
         self._side_menu.file_actions["Hotkeys"].clicked.connect(self.show_hotkeys_dialog)
+        # Settings Button Action
+        self._side_menu.file_actions["Settings"].clicked.connect(self.show_settings_dialog)
         # Connect Exit action
         self._side_menu.file_actions["Exit"].clicked.connect(self.close)
         
@@ -8601,7 +10667,7 @@ class UIMode(QWidget):
         
         self.tool_btn.setIconSize(QSize(68, 68)) 
         self.update_tool_btn_border()
-        self.tool_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.tool_btn.setCursor(_pointing_cursor())
         # Add shadow effect
 
         self.tool_btn.show()
@@ -8630,7 +10696,9 @@ class UIMode(QWidget):
         except TypeError:
             pass
         self.tool_btn.clicked.connect(on_tool_btn_clicked)
-        self.set_tool_category(TOOL_MENU[0])
+        self.set_tool_category(TOOL_MENU[1])
+        # Select the "select" tool by default on startup
+        QTimer.singleShot(0, lambda: self.select_tool("select"))
         
         self._auto_save_timer = QTimer(self)
         self._auto_save_timer.timeout.connect(self._auto_save_tick)
@@ -8759,10 +10827,11 @@ class UIMode(QWidget):
             "crop": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "eraser": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "draw": "font-size: 32pt; color: #222; border: none; background: transparent;",
+            "select": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "label": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "arrow": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "framewithlabel": "font-size: 52pt; color: #222; border: none; background: transparent;",
-            "roundframewithlabel": "font-size: 32pt; color: #222; border: none; background: transparent;",
+            "adddescription": "font-size: 32pt; color: #222; border: none; background: transparent;",
         }
         pretty_names = {
             "circle": "Circle",
@@ -8775,10 +10844,11 @@ class UIMode(QWidget):
             "crop": "Crop",
             "eraser": "Eraser",
             "draw": "Draw",
+            "select": "Select",
             "label": "Label",
             "arrow": "Arrow",
             "framewithlabel": "Frame with Label",
-            "roundframewithlabel": "Clock",
+            "adddescription": "Add object description",
         }
         for tool in category["children"]:
             btn = ToolButton("")
@@ -8906,10 +10976,11 @@ class UIMode(QWidget):
             "crop": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "eraser": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "draw": "font-size: 32pt; color: #222; border: none; background: transparent;",
+            "select": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "label": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "arrow": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "framewithlabel": "font-size: 52pt; color: #222; border: none; background: transparent;",
-            "roundframewithlabel": "font-size: 32pt; color: #222; border: none; background: transparent;",
+            "adddescription": "font-size: 32pt; color: #222; border: none; background: transparent;",
         }
         # Deselect all
         for name, btn in getattr(self, "category_tool_buttons", {}).items():
@@ -8930,7 +11001,7 @@ class UIMode(QWidget):
         self.drawing_area.set_tool(tool)
 
     def deselect_tool(self):
-        self.selected_tool = None
+        self.selected_tool = "select"
         style_map = {
             "circle": "font-size: 30pt; color: #222; border: none; background: transparent; font-weight: bold;",
             "rect": "font-size: 58pt; color: #222; border: none; background: transparent;",
@@ -8942,16 +11013,17 @@ class UIMode(QWidget):
             "crop": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "eraser": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "draw": "font-size: 32pt; color: #222; border: none; background: transparent;",
+            "select": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "label": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "arrow": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "framewithlabel": "font-size: 52pt; color: #222; border: none; background: transparent;",
-            "roundframewithlabel": "font-size: 32pt; color: #222; border: none; background: transparent;",
+            "adddescription": "font-size: 32pt; color: #222; border: none; background: transparent;",
         }
         for name, btn in getattr(self, "category_tool_buttons", {}).items():
             btn.setChecked(False)
             btn.setStyleSheet(style_map.get(name, "font-size: 28pt; color: #222; border: none; background: transparent; font-weight: bold;"))
         if self.drawing_area.selected_shape_index is None:
-            self.drawing_area.set_tool(None)
+            self.drawing_area.set_tool("select")
         
 
     def eventFilter(self, obj, event):
@@ -9125,8 +11197,8 @@ class UIMode(QWidget):
                 self.drawing_area.preview_end = None
                 self.drawing_area.selected_shape_index = None
                 self.drawing_area.update()
-            # Deselect tool if one is selected
-            if self.selected_tool is not None:
+            # Reset to select tool
+            if self.selected_tool != "select":
                 self.deselect_tool()
             # Optionally, close arc menu if open
             if hasattr(self, "arc_menu") and self.arc_menu.isVisible():
@@ -9172,11 +11244,17 @@ class UIMode(QWidget):
                     cursor_pix = pixmap.scaled(size, size)
                     self.drawing_area.setCursor(QCursor(cursor_pix, size // 2, size // 2))
     
+    def show_settings_dialog(self):
+        """Open the Settings dialog with Profile, Interface, and About tabs"""
+        dialog = SettingsDialog(self)
+        dialog.exec()
+    
     def show_hotkeys_dialog(self):
         accent = self.current_shape_color.name()
         darker = self.current_shape_color.darker(120).name()
 
         dialog = QDialog(self)
+        dialog.setCursor(_default_cursor())
         dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dialog.setModal(True)
         dialog.setFixedSize(380, 480)
@@ -9219,6 +11297,7 @@ class UIMode(QWidget):
                 ("Double-click eraser", "Adjust tool size"),
                 ("Double-click draw",  "Adjust tool size"),
                 ("Shift + Drawing",   "Draw straight lines"),
+                ("Ctrl + Select",     "Select multiple objects"),
             ]),
             ("Label Editing", [
                 ("Ctrl + B",        "Make the text bold"),
@@ -9293,7 +11372,7 @@ class UIMode(QWidget):
             }}
             QPushButton:hover {{ background: {darker}; }}
         """)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setCursor(_pointing_cursor())
         close_btn.clicked.connect(dialog.accept)
 
         btn_row = QHBoxLayout()
@@ -9353,6 +11432,8 @@ class UIMode(QWidget):
                     painter.end()
                 self.quick_prop.setPixmap(colored)
             self.update_tool_btn_border()
+            self._side_menu.set_accent_color(self.current_shape_color)
+            self.page_bar.set_accent(self.current_shape_color)
 
     def _restore_color_after_deselect(self):
         """Adopt the shape's border color as the new global color on deselect."""
@@ -9360,6 +11441,8 @@ class UIMode(QWidget):
         # Keep current_shape_color as-is (shape's border color becomes the new global color)
         self.drawing_area.set_shape_color(self.current_shape_color)
         self.update_tool_btn_border()
+        self._side_menu.set_accent_color(self.current_shape_color)
+        self.page_bar.set_accent(self.current_shape_color)
 
 
     def show_tool_size_dialog(self, tool_name, current_size, min_size=1, max_size=64):
@@ -9696,6 +11779,7 @@ class UIMode(QWidget):
         darker = self.current_shape_color.darker(120).name()
 
         dialog = QDialog(self)
+        dialog.setCursor(_default_cursor())
         dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dialog.setModal(True)
         dialog.setFixedSize(320, 210)
@@ -9738,7 +11822,7 @@ class UIMode(QWidget):
             }}
             QPushButton:hover {{ background: {darker}; }}
         """)
-        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ok_btn.setCursor(_pointing_cursor())
 
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setFixedHeight(34)
@@ -9746,7 +11830,7 @@ class UIMode(QWidget):
             QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
             QPushButton:hover { background: #ddd; }
         """)
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setCursor(_pointing_cursor())
 
         btn_row.addWidget(ok_btn)
         btn_row.addWidget(cancel_btn)
@@ -9956,6 +12040,7 @@ class UIMode(QWidget):
         accent = self.current_shape_color.name()
 
         dialog = QDialog(self)
+        dialog.setCursor(_default_cursor())
         dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dialog.setModal(True)
         dialog.setFixedSize(320, 185)
@@ -9991,7 +12076,7 @@ class UIMode(QWidget):
             }}
             QPushButton:hover {{ background: #aa1a00; }}
         """)
-        yes_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        yes_btn.setCursor(_pointing_cursor())
 
         no_btn = QPushButton("Cancel")
         no_btn.setFixedHeight(34)
@@ -9999,7 +12084,7 @@ class UIMode(QWidget):
             QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
             QPushButton:hover { background: #ddd; }
         """)
-        no_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        no_btn.setCursor(_pointing_cursor())
 
         yes_btn.clicked.connect(dialog.accept)
         no_btn.clicked.connect(dialog.reject)
@@ -10026,6 +12111,7 @@ class UIMode(QWidget):
         darker = self.current_shape_color.darker(120).name()
 
         dialog = QDialog(self)
+        dialog.setCursor(_default_cursor())
         dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dialog.setModal(True)
         dialog.setFixedSize(320, 185)
@@ -10061,7 +12147,7 @@ class UIMode(QWidget):
             }}
             QPushButton:hover {{ background: {darker}; }}
         """)
-        yes_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        yes_btn.setCursor(_pointing_cursor())
 
         no_btn = QPushButton("Cancel")
         no_btn.setFixedHeight(34)
@@ -10069,7 +12155,7 @@ class UIMode(QWidget):
             QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
             QPushButton:hover { background: #ddd; }
         """)
-        no_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        no_btn.setCursor(_pointing_cursor())
 
         yes_btn.clicked.connect(dialog.accept)
         no_btn.clicked.connect(dialog.reject)
@@ -10156,7 +12242,7 @@ class UIMode(QWidget):
             item_widget = QWidget()
             item_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             item_widget.setStyleSheet("background: #f9f9f9; border-radius: 4px;")
-            item_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+            item_widget.setCursor(_pointing_cursor())
             item_layout = QHBoxLayout(item_widget)
             item_layout.setContentsMargins(6, 6, 6, 6)
             item_layout.setSpacing(8)
@@ -10328,6 +12414,7 @@ class UIMode(QWidget):
         darker = self.current_shape_color.darker(120).name()
 
         dialog = QDialog(self)
+        dialog.setCursor(_default_cursor())
         dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dialog.setModal(True)
         dialog.setFixedSize(320, 210)
@@ -10370,7 +12457,7 @@ class UIMode(QWidget):
             }}
             QPushButton:hover {{ background: {darker}; }}
         """)
-        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ok_btn.setCursor(_pointing_cursor())
 
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setFixedHeight(34)
@@ -10378,7 +12465,7 @@ class UIMode(QWidget):
             QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
             QPushButton:hover { background: #ddd; }
         """)
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setCursor(_pointing_cursor())
 
         def on_create():
             name = input_field.text().strip()
@@ -10529,6 +12616,7 @@ class UIMode(QWidget):
 
         page_name = pages[page_idx]["name"]
         dialog = QDialog(self)
+        dialog.setCursor(_default_cursor())
         dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dialog.setModal(True)
         dialog.setFixedSize(320, 185)
@@ -10556,14 +12644,14 @@ class UIMode(QWidget):
                 font-weight: bold; border-radius: 6px; font-size: 11pt; padding: 0 20px; }
             QPushButton:hover { background: #aa1a00; }
         """)
-        yes_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        yes_btn.setCursor(_pointing_cursor())
         no_btn = QPushButton("Cancel")
         no_btn.setFixedHeight(34)
         no_btn.setStyleSheet("""
             QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
             QPushButton:hover { background: #ddd; }
         """)
-        no_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        no_btn.setCursor(_pointing_cursor())
         yes_btn.clicked.connect(dialog.accept)
         no_btn.clicked.connect(dialog.reject)
         btn_row.addWidget(yes_btn)
@@ -10609,6 +12697,7 @@ class UIMode(QWidget):
         darker = self.current_shape_color.darker(120).name()
 
         dialog = QDialog(self)
+        dialog.setCursor(_default_cursor())
         dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dialog.setModal(True)
         dialog.setFixedSize(320, 210)
@@ -10651,7 +12740,7 @@ class UIMode(QWidget):
             }}
             QPushButton:hover {{ background: {darker}; }}
         """)
-        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ok_btn.setCursor(_pointing_cursor())
 
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setFixedHeight(34)
@@ -10659,7 +12748,7 @@ class UIMode(QWidget):
             QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
             QPushButton:hover { background: #ddd; }
         """)
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setCursor(_pointing_cursor())
 
         def on_rename():
             name = input_field.text().strip()
@@ -10704,6 +12793,7 @@ class UIMode(QWidget):
         darker = self.current_shape_color.darker(120).name()
 
         dialog = QDialog(self)
+        dialog.setCursor(_default_cursor())
         dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dialog.setModal(True)
         dialog.setFixedSize(320, 240)
@@ -10746,7 +12836,7 @@ class UIMode(QWidget):
             }}
             QPushButton:hover {{ background: {darker}; }}
         """)
-        rename_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        rename_btn.setCursor(_pointing_cursor())
 
         delete_btn = QPushButton("Delete")
         delete_btn.setFixedHeight(34)
@@ -10755,7 +12845,7 @@ class UIMode(QWidget):
                 background: #cc2200; font-weight: bold; font-size: 11pt; }
             QPushButton:hover { background: #aa1a00; }
         """)
-        delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        delete_btn.setCursor(_pointing_cursor())
 
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setFixedHeight(34)
@@ -10763,7 +12853,7 @@ class UIMode(QWidget):
             QPushButton { border: none; color: #222; padding: 0 12px; border-radius: 6px; background: #f0f0f0; }
             QPushButton:hover { background: #ddd; }
         """)
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setCursor(_pointing_cursor())
 
         _result = [None]
 
@@ -10813,6 +12903,7 @@ class UIMode(QWidget):
         space_name = self._spaces[space_idx]["name"]
         page_count = len(self._spaces[space_idx]["pages"])
         dialog = QDialog(self)
+        dialog.setCursor(_default_cursor())
         dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dialog.setModal(True)
         dialog.setFixedSize(320, 185)
@@ -10840,14 +12931,14 @@ class UIMode(QWidget):
                 font-weight: bold; border-radius: 6px; font-size: 11pt; padding: 0 20px; }
             QPushButton:hover { background: #aa1a00; }
         """)
-        yes_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        yes_btn.setCursor(_pointing_cursor())
         no_btn = QPushButton("Cancel")
         no_btn.setFixedHeight(34)
         no_btn.setStyleSheet("""
             QPushButton { border: none; color: #222; padding: 0 16px; border-radius: 6px; background: #f0f0f0; }
             QPushButton:hover { background: #ddd; }
         """)
-        no_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        no_btn.setCursor(_pointing_cursor())
         yes_btn.clicked.connect(dialog.accept)
         no_btn.clicked.connect(dialog.reject)
         btn_row.addWidget(yes_btn)
@@ -10868,6 +12959,7 @@ class UIMode(QWidget):
 class CheckpointPreviewDialog(QDialog):
     def __init__(self, parent=None, checkpoint_id=None, meta=None, png_path=None, on_rename=None, accent="#ff6600"):
         super().__init__(parent)
+        self.setCursor(_default_cursor())
         self._checkpoint_id = checkpoint_id
         self._on_rename = on_rename
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
@@ -10937,7 +13029,7 @@ class CheckpointPreviewDialog(QDialog):
             QPushButton {{ border: none; color: #222; padding: 4px 18px; border-radius: 6px; background: #f0f0f0; }}
             QPushButton:hover {{ background: {accent}; color: white; }}
         """)
-        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_btn.setCursor(_pointing_cursor())
 
         close_btn = QPushButton("Close")
         close_btn.setFixedHeight(32)
@@ -10945,7 +13037,7 @@ class CheckpointPreviewDialog(QDialog):
             QPushButton { border: none; color: #222; padding: 4px 18px; border-radius: 6px; background: #f0f0f0; }
             QPushButton:hover { background: #ddd; }
         """)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setCursor(_pointing_cursor())
 
         def on_save():
             new_name = self._title_edit.text().strip()
@@ -11034,6 +13126,7 @@ class _SpaceHeaderFilter(QObject):
 class DrawSizeDialog(QDialog):
     def __init__(self, parent, current_value):
         super().__init__(parent)
+        self.setCursor(_default_cursor())
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setModal(True)
@@ -11077,6 +13170,7 @@ class DrawSizeDialog(QDialog):
 class EraserSizeDialog(QDialog):
     def __init__(self, parent, current_value):
         super().__init__(parent)
+        self.setCursor(_default_cursor())
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setModal(True)
@@ -11193,6 +13287,7 @@ class CustomSlider(QWidget):
 class GenericSizeDialog(QDialog):
     def __init__(self, parent, current_value, min_value=1, max_value=64, title="Adjust Draw Size"):
         super().__init__(parent)
+        self.setCursor(_default_cursor())
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setModal(True)
@@ -11241,7 +13336,7 @@ class GenericSizeDialog(QDialog):
                 padding: 3px 13px;
             }
         """)
-        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ok_btn.setCursor(_pointing_cursor())
         ok_btn.clicked.connect(self.accept)
         container_layout.addWidget(ok_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         
@@ -11249,6 +13344,320 @@ class GenericSizeDialog(QDialog):
 
     def getValue(self):
         return self.slider.getValue()
+
+
+class SettingsDialog(QDialog):
+    """Settings dialog with tabbed interface (Profile, Interface, About) - tabs positioned outside frame"""
+    
+    TAB_WIDTH = 90
+    TAB_HEIGHT = 40
+    FRAME_X = 80  # Frame starts after tabs
+    FRAME_WIDTH = 420
+    FRAME_HEIGHT = 450
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCursor(_default_cursor())
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setModal(True)
+        # Expanded size to accommodate tabs on the left
+        self.setFixedSize(500, 450)
+        self.setStyleSheet("background: transparent;")
+        
+        # Background widget (positioned to the right of tabs)
+        self.bg_widget = QWidget(self)
+        self.bg_widget.setStyleSheet("""
+            background: white;
+            border-radius: 16px;
+            border: 2px solid #222;
+        """)
+        self.bg_widget.setGeometry(self.FRAME_X, 0, self.FRAME_WIDTH, self.FRAME_HEIGHT)
+        self.bg_widget.lower()
+        
+        # Tab buttons - positioned outside on the left
+        self.tab_buttons = {}
+        self.tabs = ["Profile", "Interface", "About"]
+        self.current_tab = "Profile"
+        
+        tab_y = 30
+        for i, tab_name in enumerate(self.tabs):
+            btn = QPushButton(tab_name)
+            btn.setGeometry(-5, tab_y, self.TAB_WIDTH, self.TAB_HEIGHT)
+            btn.setParent(self)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: #f0f0f0;
+                    border: none;
+                    border-right: none;
+                    font-size: 10pt;
+                    font-weight: bold;
+                    color: #666;
+                    padding: 0px;
+                    margin: 0px;
+                }
+                QPushButton:hover {
+                    background: #e8e8e8;
+                    color: #222;
+                }
+            """)
+            btn.setCursor(_pointing_cursor())
+            btn.clicked.connect(partial(self._switch_tab, tab_name))
+            self.tab_buttons[tab_name] = btn
+            tab_y += self.TAB_HEIGHT
+        
+        # Draggable header (inside the frame)
+        self.draggable_bar = DraggableBar(self)
+        self.draggable_bar.setGeometry(
+            self.FRAME_X + 16, 24, 
+            self.FRAME_WIDTH - 32, 18
+        )
+        self.draggable_bar.raise_()
+        
+        # Stacked widget for tab content (positioned inside the frame)
+        self.stacked_widget = QStackedWidget(self)
+        self.stacked_widget.setGeometry(
+            self.FRAME_X + 16, 70,
+            self.FRAME_WIDTH - 32, self.FRAME_HEIGHT - 130
+        )
+        self.stacked_widget.setStyleSheet("background: white; border: none;")
+        
+        # Profile Tab
+        profile_widget = self._create_profile_tab()
+        self.stacked_widget.addWidget(profile_widget)
+        
+        # Interface Tab
+        interface_widget = self._create_interface_tab()
+        self.stacked_widget.addWidget(interface_widget)
+        
+        # About Tab
+        about_widget = self._create_about_tab()
+        self.stacked_widget.addWidget(about_widget)
+        
+        # Set first tab as active (after stacked_widget is created)
+        self._switch_tab("Profile")
+        
+        # Close button at bottom right (inside the frame)
+        close_btn = QPushButton("Close")
+        close_btn.setGeometry(
+            self.FRAME_X + self.FRAME_WIDTH - 96, 
+            self.FRAME_HEIGHT - 40,
+            80, 28
+        )
+        close_btn.setParent(self)
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background: #ff6600;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-weight: bold;
+                padding: 8px;
+                font-size: 10pt;
+            }
+            QPushButton:hover {
+                background: #e55a00;
+            }
+        """)
+        close_btn.setCursor(_pointing_cursor())
+        close_btn.clicked.connect(self.accept)
+        close_btn.raise_()
+    
+    def _switch_tab(self, tab_name):
+        """Switch between tabs with visual feedback"""
+        self.current_tab = tab_name
+        
+        # Update button styles
+        for name, btn in self.tab_buttons.items():
+            if name == tab_name:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: white;
+                        border: 2px solid #222;
+                        border-right: none;
+                        border-radius: 8px 0px 0px 8px;
+                        font-size: 10pt;
+                        font-weight: bold;
+                        color: #ff6600;
+                        padding: 0px;
+                        margin: 0px;
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: #f0f0f0;
+                        border: 2px solid #222;
+                        border-right: none;
+                        border-radius: 8px 0px 0px 8px;
+                        font-size: 10pt;
+                        font-weight: bold;
+                        color: #666;
+                        padding: 0px;
+                        margin: 0px;
+                    }
+                    QPushButton:hover {
+                        background: #e8e8e8;
+                        color: #222;
+                    }
+                """)
+        
+        # Switch stacked widget page
+        idx = self.tabs.index(tab_name)
+        self.stacked_widget.setCurrentIndex(idx)
+    
+    def _create_profile_tab(self):
+        """Create Profile tab content"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+        
+        # Name
+        name_label = QLabel("Name")
+        name_label.setStyleSheet("font-weight: bold; color: #222;")
+        layout.addWidget(name_label)
+        name_input = QLineEdit()
+        name_input.setPlaceholderText("Enter your name")
+        name_input.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                font-size: 10pt;
+            }
+        """)
+        layout.addWidget(name_input)
+        
+        # Status
+        status_label = QLabel("Status")
+        status_label.setStyleSheet("font-weight: bold; color: #222; margin-top: 8px;")
+        layout.addWidget(status_label)
+        status_input = QLineEdit()
+        status_input.setPlaceholderText("Current status")
+        status_input.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                font-size: 10pt;
+            }
+        """)
+        layout.addWidget(status_input)
+        
+        # Connected projects
+        projects_label = QLabel("Connected Projects")
+        projects_label.setStyleSheet("font-weight: bold; color: #222; margin-top: 8px;")
+        layout.addWidget(projects_label)
+        
+        projects = ["Connect ldsd", "Connect ldsd", "Connect ldsd", "On this project"]
+        for project in projects:
+            proj_item = QLabel(f"• {project}")
+            proj_item.setStyleSheet("color: #666; font-size: 10pt; margin-left: 8px;")
+            layout.addWidget(proj_item)
+        
+        layout.addStretch()
+        return widget
+    
+    def _create_interface_tab(self):
+        """Create Interface tab content"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+        
+        settings = [
+            ("Page Setup", "Configure document layout"),
+            ("Snap to grid", "Align shapes to grid"),
+            ("Grid Guidelines", "Display grid lines"),
+            ("Auto-save timer", "Sets auto-save frequency"),
+            ("Encrypt Project", "Enable project encryption"),
+            ("Dark Mode", "Use dark theme"),
+        ]
+        
+        for setting_name, setting_desc in settings:
+            item_layout = QHBoxLayout()
+            item_layout.setSpacing(8)
+            
+            label = QLabel(setting_name)
+            label.setStyleSheet("font-weight: bold; color: #222;")
+            item_layout.addWidget(label)
+            
+            desc = QLabel(setting_desc)
+            desc.setStyleSheet("color: #999; font-size: 9pt;")
+            item_layout.addWidget(desc)
+            
+            # Checkbox or toggle (you can customize this)
+            if setting_name in ["Dark Mode", "Snap to grid", "Grid Guidelines", "Encrypt Project"]:
+                toggle = QPushButton()
+                toggle.setFixedSize(32, 20)
+                toggle.setCheckable(True)
+                toggle.setStyleSheet("""
+                    QPushButton {
+                        background: #ddd;
+                        border: none;
+                        border-radius: 10px;
+                    }
+                    QPushButton:checked {
+                        background: #ff6600;
+                    }
+                """)
+                item_layout.addStretch()
+                item_layout.addWidget(toggle)
+            else:
+                item_layout.addStretch()
+            
+            layout.addLayout(item_layout)
+        
+        layout.addStretch()
+        return widget
+    
+    def _create_about_tab(self):
+        """Create About tab content"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        title = QLabel("LDS - UI MODE")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 16pt; font-weight: bold; color: #222;")
+        layout.addWidget(title)
+        
+        author = QLabel("by mathewsa")
+        author.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        author.setStyleSheet("font-size: 11pt; color: #666; margin-top: 8px;")
+        layout.addWidget(author)
+        
+        desc = QLabel(
+            "3rd developed log documentation system type.\n"
+            "Style your user interface and provide any note\n"
+            "to track your progress."
+        )
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc.setStyleSheet("color: #888; font-size: 10pt; margin-top: 16px; line-height: 1.5;")
+        layout.addWidget(desc)
+        
+        link = QPushButton("For more info on how to use the application click here")
+        link.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #ff6600;
+                font-size: 10pt;
+                text-decoration: underline;
+            }
+            QPushButton:hover {
+                color: #ff8800;
+            }
+        """)
+        link.setCursor(_pointing_cursor())
+        link.clicked.connect(lambda: print("Open help/documentation"))
+        layout.addWidget(link)
+        
+        layout.addStretch()
+        return widget
 
 
 if __name__ == "__main__":
