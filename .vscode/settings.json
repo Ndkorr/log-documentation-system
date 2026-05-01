@@ -20,5 +20,6 @@
     "editor.defaultFormatter": null,
     "[javascript]": {
         "editor.defaultFormatter": "esbenp.prettier-vscode"
-    }
+    },
+    "github.copilot.chat.newWorkspaceCreation.enabled": false
 }

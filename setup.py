@@ -1,16 +1,17 @@
-import sys
+﻿import sys
 import os
 import json
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QFileDialog, QMessageBox, QMenu, QDialog, QComboBox, QLineEdit,
     QGraphicsDropShadowEffect, QFrame, QListWidget, QListWidgetItem, QToolButton,
-    QGraphicsBlurEffect
+    QGraphicsBlurEffect, QMessageBox
 )
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QSettings, QPropertyAnimation, QEasingCurve, QEvent, QRect
 from PyQt6.QtGui import QFont, QAction
 from gui import SetupWizard
 from main import LogApp
+import shutil
 
 package_data={"": ["assets/*.png"]},
 
@@ -32,6 +33,7 @@ class NavigationPane(QFrame):
         layout.addWidget(label)
         
         self.list_widget = QListWidget()
+        self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         item_font = QFont("Arial", 14)
         self.list_widget.setFont(item_font)
         self.list_widget.setSpacing(10)
@@ -330,7 +332,53 @@ class WelcomeWindow(QMainWindow):
             config_path = os.path.join(config_folder, "user_config.json")
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(setup_data, f, indent=4)
-            setup_data["file_path"] = None
+
+            # Determine file extension based on log type
+            if setup_data["log_type"] == "Debugging":
+                extension = "ldsd"
+            else:  # General or default
+                extension = "ldsg"
+
+            # Show dialog to get filename from user
+            from main import FileNameDialog
+            file_dialog = FileNameDialog(extension, self)
+            if file_dialog.exec() == QDialog.DialogCode.Accepted:
+                filename = file_dialog.get_filename()
+                if filename:
+                    # Create the file path and create the file
+                    file_path = os.path.join(folder, f"{filename}.{extension}")
+                    # Create an empty log file
+                    try:
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            pass  # Initialize with empty log array
+                        setup_data["file_path"] = file_path
+                    except Exception as e:
+                        QMessageBox.critical(self, "Error", f"Failed to create file: {e}")
+                        # Clean up the config folder if file creation failed
+                        try:
+                            import shutil
+                            shutil.rmtree(config_folder)
+                        except Exception:
+                            pass
+                        return
+                else:
+                    QMessageBox.warning(self, "Warning", "Please enter a valid filename.")
+                    # Clean up the config folder if filename is invalid
+                    try:
+                        import shutil
+                        shutil.rmtree(config_folder)
+                    except Exception:
+                        pass
+                    return
+            else:
+                # User cancelled the filename dialog - delete the config folder
+                try:
+                    import shutil
+                    shutil.rmtree(config_folder)
+                except Exception:
+                    pass
+                return
+
             self.launch_main_app(setup_data)
 
     def open_project(self):
@@ -380,6 +428,13 @@ class WelcomeWindow(QMainWindow):
         from main import LogApp  # Import your LogApp class
 
         file_path = setup_data.get("file_path", None)
+        if file_path and not os.path.exists(file_path):
+            QMessageBox.warning(
+                self,
+                "File Not Found",
+                f"Log file was not found:\n{file_path}"
+            )
+            return
         # Create LogApp with mode and file_path parameters.
         self.main_window = LogApp(
             log_mode=setup_data.get("log_type", "General"), file_path=file_path
@@ -453,3 +508,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

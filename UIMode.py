@@ -13351,7 +13351,8 @@ class SettingsDialog(QDialog):
     
     TAB_WIDTH = 90
     TAB_HEIGHT = 40
-    FRAME_X = 80  # Frame starts after tabs
+    BUTTON_OFFSET = 8  # Space needed on left for button overflow
+    FRAME_X = 88  # Frame starts after tabs (adjusted for button overflow)
     FRAME_WIDTH = 420
     FRAME_HEIGHT = 450
     
@@ -13361,8 +13362,8 @@ class SettingsDialog(QDialog):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setModal(True)
-        # Expanded size to accommodate tabs on the left
-        self.setFixedSize(500, 450)
+        # Expanded size to accommodate tabs on the left with overflow space
+        self.setFixedSize(508, 450)  # Added 8px to width for button overflow
         self.setStyleSheet("background: transparent;")
         
         # Background widget (positioned to the right of tabs)
@@ -13381,19 +13382,24 @@ class SettingsDialog(QDialog):
         self.current_tab = "Profile"
         
         tab_y = 30
+        BUTTON_SPACING = 8  # 8px spacing between buttons
         for i, tab_name in enumerate(self.tabs):
             btn = QPushButton(tab_name)
-            btn.setGeometry(-5, tab_y, self.TAB_WIDTH, self.TAB_HEIGHT)
+            btn.setGeometry(0, tab_y, self.TAB_WIDTH, self.TAB_HEIGHT)
             btn.setParent(self)
             btn.setStyleSheet("""
                 QPushButton {
                     background: #f0f0f0;
-                    border: none;
+                    border-left: 3px solid #222;
+                    border-top: 2px solid #222;
+                    border-bottom: 2px solid #222;
                     border-right: none;
+                    border-top-left-radius: 16px;
+                    border-bottom-left-radius: 16px;
                     font-size: 10pt;
                     font-weight: bold;
                     color: #666;
-                    padding: 0px;
+                    padding: 0px 4px;
                     margin: 0px;
                 }
                 QPushButton:hover {
@@ -13404,7 +13410,7 @@ class SettingsDialog(QDialog):
             btn.setCursor(_pointing_cursor())
             btn.clicked.connect(partial(self._switch_tab, tab_name))
             self.tab_buttons[tab_name] = btn
-            tab_y += self.TAB_HEIGHT
+            tab_y += self.TAB_HEIGHT + BUTTON_SPACING
         
         # Draggable header (inside the frame)
         self.draggable_bar = DraggableBar(self)
@@ -13473,13 +13479,16 @@ class SettingsDialog(QDialog):
                 btn.setStyleSheet("""
                     QPushButton {
                         background: white;
-                        border: 2px solid #222;
+                        border-left: 3px solid #ff6600;
+                        border-top: 2px solid #ff6600;
+                        border-bottom: 2px solid #ff6600;
                         border-right: none;
-                        border-radius: 8px 0px 0px 8px;
+                        border-top-left-radius: 16px;
+                        border-bottom-left-radius: 16px;
                         font-size: 10pt;
                         font-weight: bold;
                         color: #ff6600;
-                        padding: 0px;
+                        padding: 0px 4px;
                         margin: 0px;
                     }
                 """)
@@ -13487,13 +13496,16 @@ class SettingsDialog(QDialog):
                 btn.setStyleSheet("""
                     QPushButton {
                         background: #f0f0f0;
-                        border: 2px solid #222;
+                        border-left: 3px solid #222;
+                        border-top: 2px solid #222;
+                        border-bottom: 2px solid #222;
                         border-right: none;
-                        border-radius: 8px 0px 0px 8px;
+                        border-top-left-radius: 16px;
+                        border-bottom-left-radius: 16px;
                         font-size: 10pt;
                         font-weight: bold;
                         color: #666;
-                        padding: 0px;
+                        padding: 0px 4px;
                         margin: 0px;
                     }
                     QPushButton:hover {
