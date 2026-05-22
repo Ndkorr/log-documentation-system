@@ -5,10 +5,10 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QFileDialog, QMessageBox, QMenu, QDialog, QComboBox, QLineEdit,
     QGraphicsDropShadowEffect, QFrame, QListWidget, QListWidgetItem, QToolButton,
-    QGraphicsBlurEffect, QMessageBox
+    QGraphicsBlurEffect, QMessageBox, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QSettings, QPropertyAnimation, QEasingCurve, QEvent, QRect
-from PyQt6.QtGui import QFont, QAction
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QSettings, QPropertyAnimation, QEasingCurve, QEvent, QRect, QUrl
+from PyQt6.QtGui import QFont, QAction, QPixmap, QDesktopServices
 from gui import SetupWizard
 from main import LogApp
 import shutil
@@ -242,44 +242,43 @@ class WelcomeWindow(QMainWindow):
         title_label.setStyleSheet("color: black; margin-top: 0px; margin-bottom: 30px;")
         content_layout.addWidget(title_label)
 
-        # Clickable text for actions.
-        self.create_new_label = AnimatedClickableLabel("Create New Project")
-        self.create_new_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.create_new_label.setFont(QFont("Arial", 18))
-        self.create_new_label.setStyleSheet("""margin-right: 250px;
-            margin-left: 250px;
-            margin-bottom: 5px;
-            padding: 10px;
-            border-radius: 15px;
-        """)
-        self.create_new_label.clicked.connect(self.create_new_project)
-        content_layout.addWidget(self.create_new_label)
+        def _make_menu_label(text, slot=None, max_width=520):
+            lbl = AnimatedClickableLabel(text)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setFont(QFont("Arial", 18))
+            lbl.setStyleSheet("padding: 10px; border-radius: 15px; margin-bottom: 6px;")
+            lbl.setMaximumWidth(max_width)
+            lbl.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+            if slot:
+                lbl.clicked.connect(slot)
+            return lbl
 
-        self.open_project_label = AnimatedClickableLabel("Open Project")
-        self.open_project_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.open_project_label.setFont(QFont("Arial", 18))
-        self.open_project_label.setStyleSheet("""
-            margin-right: 290px;
-            margin-left: 290px;
-            margin-bottom: 5px;
-            padding: 10px;
-            border-radius: 15px;
-        """)
-        self.open_project_label.clicked.connect(self.open_project)
-        content_layout.addWidget(self.open_project_label)
+        # Usage:
+        self.create_new_label = _make_menu_label("Create New Project", self.create_new_project)
+        content_layout.addWidget(self.create_new_label, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        self.docs_label = AnimatedClickableLabel("Documentations")
-        self.docs_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.docs_label.setFont(QFont("Arial", 18))
-        self.docs_label.setStyleSheet("""
-            margin-right: 270px;
-            margin-left: 270px;
-            margin-bottom: 5px;
-            padding: 10px;
-            border-radius: 15px;
-        """)
-        self.docs_label.clicked.connect(self.open_documentations)
-        content_layout.addWidget(self.docs_label)
+        self.open_project_label = _make_menu_label("Open Project", self.open_project)
+        content_layout.addWidget(self.open_project_label, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        self.docs_label = _make_menu_label("Documentations", self.open_documentations)
+        content_layout.addWidget(self.docs_label, alignment=Qt.AlignmentFlag.AlignHCenter)
+        
+        # GitHub logo under "Documentations"
+        logo_path = os.path.join(os.path.dirname(__file__), "assets", "Github-Dark.svg")
+        if os.path.exists(logo_path):
+            pixmap = QPixmap(logo_path)
+            pixmap = pixmap.scaled(36, 36, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.github_label = AnimatedClickableLabel()
+            self.github_label.setStyleSheet("padding: 4px; border-radius: 8px;")
+            self.github_label.setPixmap(pixmap)
+            self.github_label.setFixedSize(pixmap.width() + 8, pixmap.height() + 8)
+            self.github_label.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/Ndkorr")))
+            content_layout.addWidget(self.github_label, alignment=Qt.AlignmentFlag.AlignHCenter)
+        else:
+            # Optional fallback: simple text link
+            fallback = AnimatedClickableLabel("GitHub")
+            fallback.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/Ndkorr")))
+            content_layout.addWidget(fallback, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         content_layout.addStretch()
 
@@ -422,7 +421,9 @@ class WelcomeWindow(QMainWindow):
         }
 
     def open_documentations(self):
-        QMessageBox.information(self, "Documentation", "Documentation goes here...")
+        from docs import DocumentationDialog
+        dlg = DocumentationDialog(self)
+        dlg.exec()
 
     def launch_main_app(self, setup_data):
         from main import LogApp  # Import your LogApp class
@@ -439,6 +440,14 @@ class WelcomeWindow(QMainWindow):
         self.main_window = LogApp(
             log_mode=setup_data.get("log_type", "General"), file_path=file_path
         )
+        
+        # If the user cancelled loading during LogApp initialization, abort showing main window.
+        if getattr(self.main_window, "_load_was_canceled", False):
+            try:
+                self.main_window.close()
+            except Exception:
+                pass
+            return
 
         # Optionally pass other settings like user name and PDF title
         self.main_window.user_name = setup_data.get("user_name", "")
@@ -476,7 +485,7 @@ class WelcomeWindow(QMainWindow):
 
         # Change the hamburger icon if needed.
         if not self.nav_open:
-            self.hamburger_label.setText("X")  # Change icon to "X" when open.
+            self.hamburger_label.setText("")  # Change icon to "" when open.
             font = QFont()
             font.setPointSize(26)  # Set a smaller font size
             font.setBold(True)  # Make it bold

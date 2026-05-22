@@ -7,7 +7,7 @@
     QFileDialog, QMessageBox, QComboBox, QScrollArea, 
     QSizePolicy, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
     QSpacerItem, QStackedWidget, QTabWidget, QToolButton,
-    QPlainTextEdit, QCheckBox, QSpinBox, QFontComboBox
+    QPlainTextEdit, QCheckBox, QSpinBox, QFontComboBox, QAbstractItemView
     )
 from PyQt6.QtCore import (
     Qt, QDate, QSize, QRect, 
@@ -18,7 +18,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QColor, QFont, QBrush, QShortcut, 
     QKeySequence, QAction, QTextDocument, 
-    QPixmap, QCursor, QIntValidator
+    QPixmap, QCursor, QIntValidator, QPalette
     )
 from datetime import datetime
 import sys
@@ -36,6 +36,9 @@ import string
 import names
 import shutil
 import time
+import uuid
+import difflib
+import zipfile
 
 
 def get_config_dir(base_path=None):
@@ -59,11 +62,109 @@ def get_screen_at_cursor():
     return screen
 
 
+def apply_neutral_dialog_style(widget):
+    if widget is None:
+        return
+    widget.setStyleSheet("""
+        QDialog, QProgressDialog {
+            background-color: #f5f5f5;
+            color: #111111;
+        }
+        QLabel, QCheckBox {
+            color: #111111;
+        }
+        QLineEdit, QTextEdit, QPlainTextEdit, QListWidget, QComboBox, QDateEdit {
+            background-color: #ffffff;
+            color: #111111;
+            border: 1px solid #b8b8b8;
+            padding: 4px;
+        }
+        QPushButton {
+            background-color: #f0f0f0;
+            color: #111111;
+            border: 1px solid #b8b8b8;
+            padding: 6px;
+        }
+    """)
+
+
+def prompt_text_input(parent, title, label, text=""):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setFixedSize(380, 140)
+    apply_neutral_dialog_style(dialog)
+
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(QLabel(label))
+
+    line_edit = QLineEdit(dialog)
+    line_edit.setText(text)
+    layout.addWidget(line_edit)
+
+    button_row = QHBoxLayout()
+    ok_button = QPushButton("OK", dialog)
+    cancel_button = QPushButton("Cancel", dialog)
+    button_row.addWidget(ok_button)
+    button_row.addWidget(cancel_button)
+    layout.addLayout(button_row)
+
+    ok_button.clicked.connect(dialog.accept)
+    cancel_button.clicked.connect(dialog.reject)
+
+    accepted = dialog.exec() == QDialog.DialogCode.Accepted
+    return line_edit.text(), accepted
+
+
+def prompt_log_content_input(parent, title, prefix_text, text=""):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setFixedSize(520, 190)
+    apply_neutral_dialog_style(dialog)
+
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(QLabel("Modify your log entry:"))
+
+    prefix_label = QLabel(prefix_text)
+    prefix_label.setWordWrap(True)
+    prefix_label.setStyleSheet(
+        "background-color: #ececec; color: #444444; border: 1px solid #c8c8c8; padding: 6px;"
+    )
+    layout.addWidget(prefix_label)
+
+    text_edit = QLineEdit(dialog)
+    text_edit.setText(text)
+    layout.addWidget(text_edit)
+
+    button_row = QHBoxLayout()
+    ok_button = QPushButton("OK", dialog)
+    cancel_button = QPushButton("Cancel", dialog)
+    button_row.addWidget(ok_button)
+    button_row.addWidget(cancel_button)
+    layout.addLayout(button_row)
+
+    ok_button.clicked.connect(dialog.accept)
+    cancel_button.clicked.connect(dialog.reject)
+
+    accepted = dialog.exec() == QDialog.DialogCode.Accepted
+    return text_edit.text(), accepted
+
+
+def show_neutral_message_box(parent, icon, title, text, buttons):
+    box = QMessageBox(parent)
+    box.setIcon(icon)
+    box.setWindowTitle(title)
+    box.setText(text)
+    box.setStandardButtons(buttons)
+    apply_neutral_dialog_style(box)
+    return box.exec()
+
+
 class FileNameDialog(QDialog):
     def __init__(self, extension, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Log File Name")
         self.setFixedSize(350, 120)
+        apply_neutral_dialog_style(self)
         layout = QVBoxLayout(self)
         label = QLabel(f"Enter log file name (*.{extension}):")
         layout.addWidget(label)
@@ -88,21 +189,25 @@ class FileNameDialog(QDialog):
 
 
 class FilterDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, category_options=None, current_filters=None):
         super().__init__(parent)
         self.setWindowTitle("Filter Logs")
-        self.resize(350, 150)
-        self.setFixedSize(350, 150)
+        self.resize(400, 250)
+        self.setFixedSize(400, 250)
+        apply_neutral_dialog_style(self)
+        self.parent_widget = parent
+        self._updating_items = False  # Flag to prevent recursive updates
+        
         layout = QVBoxLayout(self)
         
-        # Date range filter section.
+        # Date range filter section
         date_range_layout = QHBoxLayout()
         
         start_label = QLabel("Start Date:")
         date_range_layout.addWidget(start_label)
         self.start_date_edit = QDateEdit(self)
         self.start_date_edit.setCalendarPopup(True)
-        self.start_date_edit.setDate(QDate.currentDate())
+        self.start_date_edit.setDate(QDate.currentDate().addDays(-70000))
         date_range_layout.addWidget(self.start_date_edit)
         
         end_label = QLabel("End Date:")
@@ -114,17 +219,38 @@ class FilterDialog(QDialog):
         
         layout.addLayout(date_range_layout)
         
-        # Log type filter section.
-        type_layout = QHBoxLayout()
-        type_label = QLabel("Select Log Type:")
-        type_layout.addWidget(type_label)
-        self.type_combo = QComboBox(self)
-        self.type_combo.addItem("All")
-        self.type_combo.addItems(["Just Details", "Problem ★" , "Solution ■", "Bug ▲", "Changes ◆"])  # Updated options
-        type_layout.addWidget(self.type_combo)
-        layout.addLayout(type_layout)
+        # Log type filter section with checkboxes
+        type_label = QLabel("Select Log Types:")
+        layout.addWidget(type_label)
         
-        # Buttons for applying or canceling.
+        # Create a QListWidget with checkable items
+        self.type_list = QListWidget(self)
+        self.type_list.setMaximumHeight(120)
+        
+        # Add "All" option
+        all_item = QListWidgetItem("All")
+        all_item.setFlags(all_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        all_item.setCheckState(Qt.CheckState.Checked)
+        self.type_list.addItem(all_item)
+        
+        # Add category options - all checked by default
+        if category_options:
+            for category in category_options:
+                item = QListWidgetItem(category)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Checked)  # All checked by default
+                self.type_list.addItem(item)
+        
+        # Load saved filter preferences
+        self.load_filter_preferences()
+        
+        # Connect signals for checkbox toggling and "All" functionality
+        self.type_list.itemChanged.connect(self.on_item_changed)
+        self.type_list.itemClicked.connect(self.on_item_clicked)
+        
+        layout.addWidget(self.type_list)
+        
+        # Buttons for applying or canceling
         button_layout = QHBoxLayout()
         self.apply_btn = QPushButton("Apply Filter", self)
         self.apply_btn.clicked.connect(self.accept)
@@ -133,13 +259,103 @@ class FilterDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         button_layout.addWidget(self.cancel_btn)
         layout.addLayout(button_layout)
-    
+
+    def on_item_clicked(self, item):
+        # Toggle checkbox when clicking on the item text
+        if item.checkState() == Qt.CheckState.Checked:
+            item.setCheckState(Qt.CheckState.Unchecked)
+        else:
+            item.setCheckState(Qt.CheckState.Checked)
+
+    def on_item_changed(self, item):
+        # Handle checkbox logic: manage All and individual selections
+        if self._updating_items:
+            return
+        
+        self._updating_items = True
+        
+        if item.text() == "All":
+            # When "All" is toggled
+            if item.checkState() == Qt.CheckState.Checked:
+                # Check all items when "All" is checked
+                for i in range(1, self.type_list.count()):
+                    self.type_list.item(i).setCheckState(Qt.CheckState.Checked)
+            else:
+                # Uncheck all items when "All" is unchecked
+                for i in range(1, self.type_list.count()):
+                    self.type_list.item(i).setCheckState(Qt.CheckState.Unchecked)
+        else:
+            # When an individual category is toggled, uncheck "All"
+            all_item = self.type_list.item(0)
+            if all_item.checkState() == Qt.CheckState.Checked:
+                all_item.setCheckState(Qt.CheckState.Unchecked)
+            
+            # Check if all individual items are now unchecked
+            # If so, auto-check "All"
+            all_unchecked = True
+            for i in range(1, self.type_list.count()):
+                if self.type_list.item(i).checkState() == Qt.CheckState.Checked:
+                    all_unchecked = False
+                    break
+            
+            if all_unchecked:
+                all_item.setCheckState(Qt.CheckState.Checked)
+                # Also check all items since "All" was auto-selected
+                for i in range(1, self.type_list.count()):
+                    self.type_list.item(i).setCheckState(Qt.CheckState.Checked)
+        
+        self._updating_items = False
+        self.save_filter_preferences()
+
     def get_filters(self):
-        # Return the selected start date, end date strings, and log type.
+        # Return the selected start date, end date, and list of selected log types.
         start_date = self.start_date_edit.date().toString("yyyy-MM-dd")
         end_date = self.end_date_edit.date().toString("yyyy-MM-dd")
-        log_type = self.type_combo.currentText()
-        return start_date, end_date, log_type
+        
+        # Collect all checked items (excluding "All")
+        selected_types = []
+        for i in range(1, self.type_list.count()):
+            item = self.type_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                selected_types.append(item.text())
+        
+        return start_date, end_date, selected_types
+
+    def save_filter_preferences(self):
+        # Save filter preferences to config.
+        if not self.parent_widget:
+            return
+        try:
+            settings = QSettings("LDS", "LogApp")
+            # Save checked categories
+            checked_categories = []
+            for i in range(1, self.type_list.count()):
+                item = self.type_list.item(i)
+                if item.checkState() == Qt.CheckState.Checked:
+                    checked_categories.append(item.text())
+            settings.setValue("filter/checked_categories", checked_categories)
+        except Exception:
+            pass
+
+    def load_filter_preferences(self):
+        # Load filter preferences from config.
+        try:
+            settings = QSettings("LDS", "LogApp")
+            checked_categories = settings.value("filter/checked_categories", None)
+            
+            if checked_categories:
+                # Uncheck "All" and all items first
+                self.type_list.item(0).setCheckState(Qt.CheckState.Unchecked)
+                for i in range(1, self.type_list.count()):
+                    self.type_list.item(i).setCheckState(Qt.CheckState.Unchecked)
+                
+                # Check only the saved categories
+                for i in range(1, self.type_list.count()):
+                    item = self.type_list.item(i)
+                    if item.text() in checked_categories:
+                        item.setCheckState(Qt.CheckState.Checked)
+        except Exception:
+            pass
 
 
 class ClickableLabel(QLabel):
@@ -149,6 +365,7 @@ class ClickableLabel(QLabel):
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.original_pixmap: Optional[QPixmap] = None
         self.original_pixmap = None
+        self.is_selected = False
         # Store the original stylesheet so we can revert back on hover out.
         self.base_style = "font-size: 15px; padding: 5px;"
         self.setStyleSheet(self.base_style)
@@ -258,7 +475,7 @@ class ImageViewerWindow(QMainWindow):
         self.resize(800, 600)
 
     def showEvent(self, event):
-        """Compute the fit-to-window scale factor when the window is shown."""
+        # Compute the fit-to-window scale factor when the window is shown
         super().showEvent(event)
         viewport_size = self.scroll_area.viewport().size()
         if self.original_pixmap:
@@ -280,7 +497,7 @@ class ImageViewerWindow(QMainWindow):
         return super().eventFilter(source, event)
 
     def handle_wheel_event(self, event):
-        """Adjust zoom based on mouse wheel scrolling (% per notch)."""
+        # Adjust zoom based on mouse wheel scrolling (% per notch)
         delta = event.angleDelta().y()
         if delta > 0:
             self.zoom_by(20)
@@ -288,7 +505,7 @@ class ImageViewerWindow(QMainWindow):
             self.zoom_by(-20)
 
     def zoom_by(self, delta_percent):
-        """Adjust the zoom percentage and update the image."""
+        # Adjust the zoom percentage and update the image
         self.zoom_percent += delta_percent
         # Clamp the zoom percent between -100% and +500% relative to fit-to-window.
         self.zoom_percent = max(-100, min(500, self.zoom_percent))
@@ -297,7 +514,7 @@ class ImageViewerWindow(QMainWindow):
         self.update_overlay()
 
     def update_image(self):
-        """Scale the original pixmap using the current scale and update the label."""
+        # Scale the original pixmap using the current scale and update the label
         if self.original_pixmap:
             new_width = int(self.original_pixmap.width() * self.current_scale)
             new_height = int(self.original_pixmap.height() * self.current_scale)
@@ -309,7 +526,7 @@ class ImageViewerWindow(QMainWindow):
             self.image_label.setPixmap(scaled_pixmap)
 
     def update_overlay(self):
-        """Update the overlay text to show current zoom and original image dimensions."""
+        # Update the overlay text to show current zoom and original image dimensions.
         if self.original_pixmap:
             # Use original dimensions for static size information.
             original_width = self.original_pixmap.width()
@@ -317,6 +534,13 @@ class ImageViewerWindow(QMainWindow):
             # Show zoom relative to the fit-to-window baseline (0 means fit).
             zoom_text = f"{'+' if self.zoom_percent > 0 else ''}{self.zoom_percent}%"
             self.overlay.setText(f"Zoom: {zoom_text}   Original Size: {original_width}x{original_height}px")
+    
+    def keyPressEvent(self, event):
+        # Allow closing the viewer with the Escape key.
+        if event.key() == Qt.Key.Key_Escape:
+            self.close()
+        else:
+            super().keyPressEvent(event)
 
 class ClickableDefinitionLabel(QLabel):
     def __init__(self, *args, **kwargs):
@@ -363,6 +587,7 @@ class DefinitionViewer(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Full Definition")
         self.resize(400, 300)
+        apply_neutral_dialog_style(self)
         
         layout = QVBoxLayout(self)
         
@@ -420,12 +645,241 @@ class DefinitionViewer(QDialog):
         window_geometry.moveCenter(screen_geometry.center())
         self.move(window_geometry.topLeft())
 
+class KeywordDialog(QDialog):
+    # Unified dialog for adding/editing keywords with multiple images
+    def __init__(self, keyword="", definition="", image_paths=None, parent=None):
+        super().__init__(parent)
+        self.keyword = keyword
+        self.definition = definition
+        self.image_paths = image_paths or []  # List of image paths
+        self.is_editing = bool(keyword)  # True if editing existing keyword
+        
+        self.init_ui()
+        self.center()
+    
+    def init_ui(self):
+        self.setWindowTitle("Add Keyword" if not self.is_editing else "Edit Keyword")
+        self.setFixedSize(600, 600)
+        apply_neutral_dialog_style(self)
+        
+        layout = QVBoxLayout(self)
+        
+        # Keyword field
+        layout.addWidget(QLabel("Keyword:"))
+        self.keyword_input = QLineEdit(self)
+        self.keyword_input.setText(self.keyword)
+        if self.is_editing:
+            self.keyword_input.setReadOnly(True)  # Can't change keyword name when editing
+        layout.addWidget(self.keyword_input)
+        
+        # Definition field
+        layout.addWidget(QLabel("Definition:"))
+        self.definition_input = QTextEdit(self)
+        self.definition_input.setPlainText(self.definition)
+        self.definition_input.setFixedHeight(150)
+        layout.addWidget(self.definition_input)
+        
+        # Images section
+        layout.addWidget(QLabel("Examples (Images):"))
+        
+        # Image list with scroll area
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        self.images_container = QWidget()
+        self.images_layout = QVBoxLayout(self.images_container)
+        self.images_layout.setSpacing(8)
+        
+        # Populate existing images
+        self.image_widgets = []
+        for img_path in self.image_paths:
+            self.add_image_widget(img_path)
+        
+        self.images_layout.addStretch()
+        scroll_area.setWidget(self.images_container)
+        scroll_area.setFixedHeight(250)
+        layout.addWidget(scroll_area)
+        
+        # Add image button
+        add_image_btn = QPushButton("+ Add Image")
+        add_image_btn.clicked.connect(self.add_image)
+        layout.addWidget(add_image_btn)
+        
+        # OK/Cancel buttons
+        button_layout = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(ok_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+        
+        self.setLayout(layout)
+    
+    def add_image_widget(self, image_path):
+        
+        # Construct full path if relative path is provided
+        config_folder = self.parent().config_folder if self.parent() else get_config_dir()
+        if not os.path.isabs(image_path):
+            full_path = os.path.join(config_folder, image_path)
+        else:
+            full_path = image_path
+        
+        # Create a widget for displaying and managing a single image
+        img_widget = QWidget()
+        img_layout = QHBoxLayout(img_widget)
+        img_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Display image thumbnail
+        if os.path.exists(full_path):
+            pixmap = QPixmap(full_path)
+            if not pixmap.isNull():
+                thumbnail = pixmap.scaledToHeight(40, Qt.TransformationMode.SmoothTransformation)
+                thumb_label = QLabel()
+                thumb_label.setPixmap(thumbnail)
+                img_layout.addWidget(thumb_label)
+        
+        # Image path label
+        path_label = QLabel(os.path.basename(image_path))
+        img_layout.addWidget(path_label)
+        img_layout.addStretch()
+        
+        # Move up button
+        move_up_btn = QPushButton("↑")
+        move_up_btn.setFixedWidth(30)
+        move_up_btn.clicked.connect(lambda: self.move_image_up(img_widget))
+        img_layout.addWidget(move_up_btn)
+        
+        # Move down button
+        move_down_btn = QPushButton("↓")
+        move_down_btn.setFixedWidth(30)
+        move_down_btn.clicked.connect(lambda: self.move_image_down(img_widget))
+        img_layout.addWidget(move_down_btn)
+        
+        # Delete button
+        delete_btn = QPushButton("Delete")
+        delete_btn.clicked.connect(lambda: self.remove_image_widget(img_widget, image_path))
+        img_layout.addWidget(delete_btn)
+        
+        img_widget.setLayout(img_layout)
+        self.images_layout.insertWidget(len(self.image_widgets), img_widget)
+        self.image_widgets.append((img_widget, image_path))
+    
+    def add_image(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Image",
+            "",
+            "Image Files (*.png *.jpg *.jpeg *.bmp *.gif);;All Files (*)"
+        )
+        if file_path:
+            import shutil
+            config_folder = self.parent().config_folder if self.parent() else get_config_dir()
+
+            images_folder = os.path.join(config_folder, "keyword_images")
+            if not os.path.exists(images_folder):
+                os.makedirs(images_folder)
+
+            ext = os.path.splitext(file_path)[1]
+            timestamp = int(time.time() * 1000)
+            # Use KEYWORD name in filename for 1:1 matching
+            keyword_safe = self.keyword_input.text().strip().replace(" ", "_")
+            dest_filename = f"{keyword_safe}_{timestamp}{ext}"
+            dest_path = os.path.join(images_folder, dest_filename)
+
+            shutil.copy2(file_path, dest_path)
+
+            # Store RELATIVE path
+            relative_path = os.path.relpath(dest_path, config_folder)
+
+            self.image_paths.append(relative_path)
+            self.add_image_widget(relative_path)
+    
+    def remove_image_widget(self, widget, image_path):
+        idx = self.images_layout.indexOf(widget)
+        if idx >= 0:
+            self.images_layout.removeWidget(widget)
+            widget.deleteLater()
+
+        self.image_widgets = [(w, p) for w, p in self.image_widgets if w is not widget]
+
+        config_folder = self.parent().config_folder if self.parent() else get_config_dir()
+        full_path = os.path.join(config_folder, image_path) if not os.path.isabs(image_path) else image_path
+        try:
+            if os.path.exists(full_path):
+                os.remove(full_path)
+        except Exception as e:
+            print(f"Error deleting image {full_path}: {e}")
+
+        if image_path in self.image_paths:
+            self.image_paths.remove(image_path)
+
+    
+    def move_image_up(self, widget):
+        # Move image up in the list
+        idx = self.images_layout.indexOf(widget)
+        if idx > 0:
+            self.images_layout.insertWidget(idx - 1, self.images_layout.takeAt(idx).widget())
+            self.image_widgets[idx], self.image_widgets[idx - 1] = self.image_widgets[idx - 1], self.image_widgets[idx]
+    
+    def move_image_down(self, widget):
+        # Move image down in the list
+        idx = self.images_layout.indexOf(widget)
+        if idx < len(self.image_widgets) - 1:
+            self.images_layout.insertWidget(idx + 1, self.images_layout.takeAt(idx).widget())
+            self.image_widgets[idx], self.image_widgets[idx + 1] = self.image_widgets[idx + 1], self.image_widgets[idx]
+    
+    def get_data(self):
+        # Return the keyword, definition, and image paths
+        # Update image_paths from current widget order
+        self.image_paths = [p for _, p in self.image_widgets]
+        return self.keyword_input.text().strip(), self.definition_input.toPlainText(), self.image_paths
+    
+    def center(self):
+        # Center the dialog on the screen
+        screen = get_screen_at_cursor()
+        screen_geometry = screen.availableGeometry()
+        window_geometry = self.frameGeometry()
+        window_geometry.moveCenter(screen_geometry.center())
+        self.move(window_geometry.topLeft())
+    
+    def accept(self):
+        # Override accept to validate required fields"""
+        keyword = self.keyword_input.text().strip()
+        definition = self.definition_input.toPlainText().strip()
+
+        # Check if keyword is empty
+        if not keyword:
+            show_neutral_message_box(
+                self,
+                QMessageBox.Icon.Warning,
+                "Validation Error",
+                "Keyword is required. Please enter a keyword.",
+                QMessageBox.StandardButton.Ok
+            )
+            return
+
+        # Check if definition is empty
+        if not definition:
+            show_neutral_message_box(
+                self,
+                QMessageBox.Icon.Warning,
+                "Validation Error",
+                "Definition is required. Please enter a definition.",
+                QMessageBox.StandardButton.Ok
+            )
+            return
+
+        # All validation passed, accept the dialog
+        super().accept()
+        
 class DictionaryDialog(QDialog):
     def __init__(self, parent=None, config_folder=None):
         super().__init__(parent)
         self.setWindowTitle("Dictionary")
         self.setGeometry(100, 100, 700, 450)
         self.setFixedSize(700, 450)
+        apply_neutral_dialog_style(self)
         self.config_folder = config_folder or get_config_dir()
 
         self.main_layout = QHBoxLayout()
@@ -442,9 +896,6 @@ class DictionaryDialog(QDialog):
         self.keyword_list.itemClicked.connect(self.display_definition)
         self.keyword_list.setFixedWidth(200)
         self.left_layout.addWidget(self.keyword_list)
-        
-        # Add a static item at the top
-        self.add_static_item("Keywords")
         
         self.main_layout.addLayout(self.left_layout)
         
@@ -464,6 +915,24 @@ class DictionaryDialog(QDialog):
         self.image_container_layout = QVBoxLayout()
         self.image_container_layout.setSpacing(0)  # No spacing between the "Example" label and the image preview
         
+        # Put the layout into a widget so it can be scrolled
+        self.image_container_widget = QWidget()
+        self.image_container_widget.setLayout(self.image_container_layout)
+        
+        # Scroll area that will contain the image container widget
+        self.image_scroll_area = QScrollArea(self)
+        self.image_scroll_area.setWidgetResizable(True)
+        self.image_scroll_area.setWidget(self.image_container_widget)
+        #self.image_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # hide vertical scroll bar
+        self.image_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.image_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.image_scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        # Limit the visual height of the image box (adjust value as needed)
+        self.image_scroll_area.setFixedHeight(220)
+        self.image_scroll_area.setStyleSheet("border: none; background: none;")
+        
         # New "Example" label; initially hidden
         self.example_label = QLabel("Example", self)
         self.example_label.setStyleSheet("font-weight: bold;")
@@ -472,14 +941,16 @@ class DictionaryDialog(QDialog):
         
         # Add image preview label (clickable)
         self.image_label = ClickableLabel(self)
-        self.image_label.setFixedHeight(100)  # Preview height; adjust as needed.
+        self.image_label.setFixedHeight(150)  # Preview height; adjust as needed.
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setStyleSheet("border: 1px solid #ccc;")
+        self.image_label.setStyleSheet("border: none; background: none;")
         self.image_label.setVisible(False)
         self.image_container_layout.addWidget(self.image_label)
         
         # Add the container layout to the definition layout.
-        self.definition_layout.addLayout(self.image_container_layout)
+        self.definition_layout.addWidget(self.image_scroll_area)
+        
+        self._dynamic_image_widgets = []
         
         # Buttons
         self.button_layout = QHBoxLayout()
@@ -494,6 +965,14 @@ class DictionaryDialog(QDialog):
         self.delete_button = QPushButton("Delete", self)
         self.delete_button.clicked.connect(self.delete_keyword)
         self.button_layout.addWidget(self.delete_button)
+
+        self.export_button = QPushButton("Export", self)
+        self.export_button.clicked.connect(self.export_dictionary_package)
+        self.button_layout.addWidget(self.export_button)
+
+        self.import_button = QPushButton("Import", self)
+        self.import_button.clicked.connect(self.import_dictionary_package)
+        self.button_layout.addWidget(self.import_button)
         
         self.definition_layout.addLayout(self.button_layout)
         self.main_layout.addLayout(self.definition_layout)
@@ -524,7 +1003,7 @@ class DictionaryDialog(QDialog):
         
     
     def add_static_item(self, text):
-        """ Adds a non-clickable, non-deletable item to the list """
+        # Adds a non-clickable, non-deletable item to the list
         static_item = QListWidgetItem(text)
         static_item.setFlags(Qt.ItemFlag.NoItemFlags)  # Disable interactions
         static_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft)  # Center text
@@ -534,66 +1013,66 @@ class DictionaryDialog(QDialog):
         static_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))  # Bold font
         static_item.setData(Qt.ItemDataRole.UserRole, "static")  # Mark as static
         self.keyword_list.addItem(static_item)  # Add to list
-        
-    def add_keyword(self):
-        # Prompt user for a keyword
-        word, ok = QInputDialog.getText(self, "Add Keyword", "Enter new keyword:")
     
-        if ok and word.strip():  # Ensure input is not empty
-            word = word.strip()
+    def refresh_keyword_list(self):
+        # Clear and rebuild the keyword list sorted alphabetically
+        self.keyword_list.clear()
 
-            # Check if keyword already exists
-            if word in self.dictionary:
-                QMessageBox.warning(self, "Duplicate Keyword", "This keyword already exists!")
-                return
+        # Add static header
+        self.add_static_item("Keywords")
 
-            # Prompt user for a definition
-            definition, ok_def = QInputDialog.getText(self, "Add Definition", f"Enter definition for '{word}':")
-        
-            if ok_def and definition.strip():
-                definition = definition.strip()
-                
-                # Ask the user if they want to add an example image.
-                add_img = QMessageBox.question(
-                    self,
-                    "Add Image?",
-                    "Do you want to add an example image for this keyword?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
+        # Sort keywords alphabetically and add them
+        sorted_keywords = sorted(self.dictionary.keys())
+        for keyword in sorted_keywords:
+            self.add_list_item(keyword)
 
-                image_path = None
-                if add_img == QMessageBox.StandardButton.Yes:
-                    file_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
-                    if file_path:
-                        # Define a local folder to store keyword images.
-                        local_dir = os.path.join(self.config_folder, "keyword_images")
-                        if not os.path.exists(local_dir):
-                            os.makedirs(local_dir)
-                        # Create a unique filename using the keyword and current timestamp.
-                        unique_name = f"{word}_{int(time.time())}{os.path.splitext(file_path)[1]}"
-                        dest_path = os.path.join(local_dir, unique_name)
-                        try:
-                            shutil.copy(file_path, dest_path)
-                            image_path = dest_path
-                        except Exception as e:
-                            QMessageBox.warning(self, "Image Error", f"Could not copy image:\n{e}")
-                
-                # Store in dictionary
-                self.dictionary[word] = definition
-                if image_path:
-                    self.keyword_images[word] = image_path
+    def _keyword_search_score(self, query: str, candidate: str):
+        q = (query or "").strip().lower()
+        c = (candidate or "").strip().lower()
+        if not q or not c:
+            return None
+        if q == c:
+            return 5000
+        if c.startswith(q):
+            return 4200 - len(c)
+        if q in c:
+            return 3300 - c.find(q)
 
-                # Add keyword visually
-                self.add_list_item(word)
+        # Token-aware matching for multi-word queries/candidates.
+        q_tokens = [t for t in re.split(r"\s+", q) if t]
+        c_tokens = [t for t in re.split(r"\s+", c) if t]
+        if q_tokens and c_tokens:
+            matched_tokens = 0
+            token_score = 0
+            for qt in q_tokens:
+                best_ratio = 0.0
+                for ct in c_tokens:
+                    ratio = difflib.SequenceMatcher(None, qt, ct).ratio()
+                    if ratio > best_ratio:
+                        best_ratio = ratio
+                if best_ratio >= 0.80:
+                    matched_tokens += 1
+                    token_score += int(best_ratio * 100)
+            if matched_tokens:
+                return 2200 + (matched_tokens * 100) + token_score - len(c)
 
-                # Auto-select new item
-                self.select_keyword(word)
-                
-                # Save the updated dictionary and image paths.
+        ratio = difflib.SequenceMatcher(None, q, c).ratio()
+        if ratio >= 0.72:
+            return int(1500 + ratio * 500) - len(c)
+        return None
+    
+    def add_keyword(self):
+        dialog = KeywordDialog(parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            keyword, definition, image_paths = dialog.get_data()
+            if keyword.strip():
+                self.dictionary[keyword] = definition
+                self.keyword_images[keyword] = image_paths
                 self.save_keyword_definitions()
+                self.refresh_keyword_list()
     
     def select_keyword(self, word):
-        """Find and select the keyword in the list."""
+        # Find and select the keyword in the list.
         for i in range(self.keyword_list.count()):
             item = self.keyword_list.item(i)
             if item and item.text() == word:
@@ -602,150 +1081,329 @@ class DictionaryDialog(QDialog):
                 break
             
     def delete_keyword(self):
-        """Delete the selected keyword and its definition."""
         selected_item = self.keyword_list.currentItem()
         if selected_item:
             word = selected_item.text()
-            
-            # Confirmation Dialog
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setWindowTitle("Caution")
-            msg.setText(f"Are you sure you want to delete '{word}'?")
-            msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            
-            if msg.exec() == QMessageBox.StandardButton.Yes:
-                if word in self.dictionary:
-                    del self.dictionary[word]  # Remove the keyword from the dictionary
-                self.keyword_list.takeItem(self.keyword_list.row(selected_item))  # Remove the item from the list
-                self.definition_label.clear()  # Clear the definition area
-            
-            else:
-                pass
+            if word == "Keywords" or word == "":
+                return
+
+            # Delete image files
+            import shutil
+            if word in self.keyword_images:
+                for rel_path in self.keyword_images[word]:
+                    full_path = os.path.join(self.config_folder, rel_path)
+                    if os.path.exists(full_path):
+                        try:
+                            os.remove(full_path)
+                        except Exception as e:
+                            print(f"Error deleting image {full_path}: {e}")
+
+            # Delete from dictionaries
+            if word in self.dictionary:
+                del self.dictionary[word]
+            if word in self.keyword_images:
+                del self.keyword_images[word]
+
+            self.save_keyword_definitions()
+            self.refresh_keyword_list()
+
+            # Clear the definition display
+            self.definition_label.setText("Select a keyword to view its definition.")
+            self.definition_label.full_definition = ""
+            self.example_label.setVisible(False)
+            self.image_label.setVisible(False)
 
     def display_definition(self, item):
         word = item.text()
+        if word == "Keywords":
+            return
+    
         full_def = self.dictionary.get(word, "No definition available.")
-        # For preview purposes, truncate if too long (e.g., show first 200 characters)
         preview_text = full_def if len(full_def) <= 780 else full_def[:780] + "..."
         formatted_definition = f"<b>{word}:</b><br>{preview_text}"
         self.definition_label.setText(formatted_definition)
         self.definition_label.full_definition = full_def
-
-        image_path = self.keyword_images.get(word)
-        if image_path:
-            pixmap = QPixmap(image_path)
-            if not pixmap.isNull():
-                # Store the original pixmap before scaling
-                self.image_label.original_pixmap = pixmap
-                scaled_pixmap = pixmap.scaled(
-                    self.image_label.width(),
-                    self.image_label.height(), 
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                self.image_label.setPixmap(scaled_pixmap)
-                self.image_label.setVisible(True)
-                self.example_label.setVisible(True)
-            else:
-                self.image_label.clear()
-                self.image_label.setVisible(False)
-                self.example_label.setVisible(False)
+        
+        # Remove previous dynamic thumbnails safely
+        for w in getattr(self, "_dynamic_image_widgets", []):
+            try:
+                self.image_container_layout.removeWidget(w)
+                w.setParent(None)
+                w.deleteLater()
+            except Exception:
+                pass
+        self._dynamic_image_widgets = []
+        
+        # Clear/hide static preview
+        self.image_label.clear()
+        self.image_label.setVisible(False)
+    
+        image_paths = self.keyword_images.get(word, [])
+        if image_paths:
+            self.example_label.setVisible(True)
+            # Show ALL images
+            for rel_path in image_paths:
+                full_path = os.path.join(self.config_folder, rel_path)
+                if os.path.exists(full_path):
+                    pixmap = QPixmap(full_path)
+                    if not pixmap.isNull():
+                        image_label = ClickableLabel(self)
+                        image_label.original_pixmap = pixmap
+                        scaled = pixmap.scaledToHeight(150, Qt.TransformationMode.SmoothTransformation)
+                        image_label.setPixmap(scaled)
+                        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                        self.image_container_layout.addWidget(image_label)
+                        self._dynamic_image_widgets.append(image_label)
         else:
-            self.image_label.clear()
-            self.image_label.setVisible(False)
             self.example_label.setVisible(False)
     
     def edit_keyword(self):
-        """Edit the definition and/or image of the selected keyword."""
         selected_item = self.keyword_list.currentItem()
         if selected_item:
-            # Prevent editing of static items
-            if selected_item.data(Qt.ItemDataRole.UserRole) == "static":
-                return
-        
             word = selected_item.text()
-            current_def = self.dictionary.get(word, "")
-            current_image = self.keyword_images.get(word, None)
+            if word == "Keywords":
+                return
 
-            # Prompt the user to edit the definition
-            new_def, ok = QInputDialog.getText(self, "Edit Definition", f"Edit definition for '{word}':", text=current_def)
-            if ok and new_def.strip():
-                self.dictionary[word] = new_def.strip()
+            definition = self.dictionary.get(word, "")
+            image_paths = self.keyword_images.get(word, [])
 
-            # Ask the user if they want to update the image
-            update_image = QMessageBox.question(
-                self,
-                "Update Image?",
-                f"Do you want to update the image for '{word}'?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
+            dialog = KeywordDialog(word, definition, image_paths, parent=self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                new_keyword, new_definition, new_image_paths = dialog.get_data()
 
-            if update_image == QMessageBox.StandardButton.Yes:
-                file_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
-                if file_path:
-                    # Define a local folder to store keyword images
-                    local_dir = os.path.join(self.config_folder, "keyword_images")
-                    if not os.path.exists(local_dir):
-                        os.makedirs(local_dir)
-                
-                    # Create a unique filename using the keyword and current timestamp
-                    unique_name = f"{word}_{int(time.time())}{os.path.splitext(file_path)[1]}"
-                    dest_path = os.path.join(local_dir, unique_name)
-                    try:
-                        shutil.copy(file_path, dest_path)
-                        self.keyword_images[word] = dest_path
-                    except Exception as e:
-                        QMessageBox.warning(self, "Image Error", f"Could not copy image:\n{e}")
+                # If keyword name changed, handle image reorganization
+                if new_keyword != word:
+                    # Move old images to new keyword name
+                    old_images = self.keyword_images.get(word, [])
+                    new_images = []
 
-            # Update the displayed definition and image
-            self.display_definition(selected_item)
+                    for old_rel_path in old_images:
+                        old_full_path = os.path.join(self.config_folder, old_rel_path)
+                        if os.path.exists(old_full_path):
+                            # Get extension
+                            ext = os.path.splitext(old_rel_path)[1]
+                            # Extract timestamp from filename
+                            parts = os.path.basename(old_rel_path).split('_')
+                            timestamp = parts[-1].replace(ext, '')  # Last part before extension
 
-            # Save the updated definitions and images
-            self.save_keyword_definitions()
+                            # Create new filename with new keyword name
+                            new_keyword_safe = new_keyword.replace(" ", "_")
+                            new_filename = f"{new_keyword_safe}_{timestamp}{ext}"
+                            new_full_path = os.path.join(self.config_folder, "keyword_images", new_filename)
+
+                            # Rename the file
+                            import shutil
+                            shutil.move(old_full_path, new_full_path)
+
+                            # Store new relative path
+                            new_rel_path = os.path.relpath(new_full_path, self.config_folder)
+                            new_images.append(new_rel_path)
+
+                    # Remove old keyword entry
+                    del self.dictionary[word]
+                    if word in self.keyword_images:
+                        del self.keyword_images[word]
+
+                    # Add new keyword with reorganized images
+                    self.dictionary[new_keyword] = new_definition
+                    self.keyword_images[new_keyword] = new_images
+                else:
+                    # Keyword name didn't change, just update definition and images
+                    self.dictionary[new_keyword] = new_definition
+                    self.keyword_images[new_keyword] = new_image_paths
+
+                self.save_keyword_definitions()
+                self.refresh_keyword_list()
     
     def search_keywords(self, text):
-        """Filter the keyword list based on the search box."""
-        for i in range(self.keyword_list.count()):
-            item = self.keyword_list.item(i)
-            if item is not None:
-                # Do not hide static item
-                if item.data(Qt.ItemDataRole.UserRole) == "static":
-                    item.setHidden(False)
-                else:
-                    # Show items containing the search text (case-insensitive)
-                    item.setHidden(text.lower() not in item.text().lower())
+        query = (text or "").strip()
+        self.keyword_list.clear()
+        self.add_static_item("Keywords")
+
+        if not query:
+            for keyword in sorted(self.dictionary.keys()):
+                self.add_list_item(keyword)
+            return
+
+        ranked = []
+        for keyword in self.dictionary.keys():
+            score = self._keyword_search_score(query, keyword)
+            if score is not None:
+                ranked.append((score, keyword))
+
+        ranked.sort(key=lambda x: (-x[0], x[1].casefold()))
+        for _score, keyword in ranked:
+            self.add_list_item(keyword)
     
     
     def save_keyword_definitions(self):
         definitions_file = os.path.join(self.config_folder, "keyword_definitions.json")
         with open(definitions_file, "w", encoding="utf-8") as file:
-            json.dump(getattr(self, 'keyword_definitions', {}), file, indent=4)
+            json.dump(self.dictionary, file, ensure_ascii=False, indent=2)
+
+        # Now keyword_images stores lists of paths
         images_file = os.path.join(self.config_folder, "keyword_images.json")
         with open(images_file, "w", encoding="utf-8") as file:
-            json.dump(getattr(self, 'keyword_images', {}), file, indent=4)
+            json.dump(self.keyword_images, file, ensure_ascii=False, indent=2)
 
     def load_keyword_definitions(self):
-        """Load keyword definitions and image paths from separate JSON files."""
-        config_dir = get_config_dir()
+        # Load keyword definitions and image paths from separate JSON files
         definitions_file = os.path.join(self.config_folder, "keyword_definitions.json")
         images_file = os.path.join(self.config_folder, "keyword_images.json")
 
         # Load definitions
         if os.path.exists(definitions_file):
             with open(definitions_file, "r", encoding="utf-8") as file:
-                self.keyword_definitions = json.load(file)
-            print(f"Keyword definitions loaded from {definitions_file}")
+                self.dictionary = json.load(file)
         else:
-            self.keyword_definitions = {}
+            self.dictionary = {}
 
-        # Load image paths
+        # Load image paths (now stores lists)
         if os.path.exists(images_file):
             with open(images_file, "r", encoding="utf-8") as file:
                 self.keyword_images = json.load(file)
-            print(f"Keyword images loaded from {images_file}")
+                # Ensure all values are lists for backward compatibility
+                for key in self.keyword_images:
+                    if not isinstance(self.keyword_images[key], list):
+                        self.keyword_images[key] = [self.keyword_images[key]]
         else:
             self.keyword_images = {}
+
+        # Only refresh once after loading everything
+        self.refresh_keyword_list()
+
+    def export_dictionary_package(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Dictionary Package",
+            "",
+            "LDS Dictionary (*.ldsdict)"
+        )
+        if not file_path:
+            return
+        if not file_path.lower().endswith(".ldsdict"):
+            file_path += ".ldsdict"
+
+        try:
+            with zipfile.ZipFile(file_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("keyword_definitions.json", json.dumps(self.dictionary, ensure_ascii=False, indent=2))
+                zf.writestr("keyword_images.json", json.dumps(self.keyword_images, ensure_ascii=False, indent=2))
+
+                for keyword, rel_paths in self.keyword_images.items():
+                    if not isinstance(rel_paths, list):
+                        rel_paths = [rel_paths]
+                    for rel_path in rel_paths:
+                        rel_path = str(rel_path).replace("\\", "/")
+                        full_path = os.path.join(self.config_folder, rel_path)
+                        if not os.path.isfile(full_path):
+                            continue
+                        arcname = f"images/{os.path.basename(rel_path)}"
+                        zf.write(full_path, arcname=arcname)
+
+            show_neutral_message_box(
+                self,
+                QMessageBox.Icon.Information,
+                "Export Complete",
+                f"Dictionary package saved:\n{file_path}",
+                QMessageBox.StandardButton.Ok,
+            )
+        except Exception as e:
+            show_neutral_message_box(
+                self,
+                QMessageBox.Icon.Critical,
+                "Export Failed",
+                f"Failed to export dictionary package:\n{e}",
+                QMessageBox.StandardButton.Ok,
+            )
+
+    def import_dictionary_package(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Dictionary Package",
+            "",
+            "LDS Dictionary (*.ldsdict)"
+        )
+        if not file_path:
+            return
+
+        reply = show_neutral_message_box(
+            self,
+            QMessageBox.Icon.Question,
+            "Import Dictionary",
+            "Import will replace the current dictionary entries in this project. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            with zipfile.ZipFile(file_path, "r") as zf:
+                names = set(zf.namelist())
+                if "keyword_definitions.json" not in names:
+                    raise ValueError("Package missing keyword_definitions.json")
+
+                imported_dictionary = json.loads(zf.read("keyword_definitions.json").decode("utf-8"))
+                if not isinstance(imported_dictionary, dict):
+                    raise ValueError("Invalid keyword_definitions.json format")
+
+                imported_images_map = {}
+                if "keyword_images.json" in names:
+                    imported_images_map = json.loads(zf.read("keyword_images.json").decode("utf-8"))
+                    if not isinstance(imported_images_map, dict):
+                        imported_images_map = {}
+
+                images_dir = os.path.join(self.config_folder, "keyword_images")
+                os.makedirs(images_dir, exist_ok=True)
+
+                normalized_images_map = {}
+                for keyword, rel_paths in imported_images_map.items():
+                    if not isinstance(rel_paths, list):
+                        rel_paths = [rel_paths]
+                    new_rel_paths = []
+                    for rel_path in rel_paths:
+                        rel_norm = str(rel_path).replace("\\", "/")
+                        img_name = os.path.basename(rel_norm)
+                        zip_path = f"images/{img_name}"
+                        if zip_path not in names:
+                            continue
+                        target_name = img_name
+                        base, ext = os.path.splitext(img_name)
+                        counter = 1
+                        target_full = os.path.join(images_dir, target_name)
+                        while os.path.exists(target_full):
+                            target_name = f"{base}_{counter}{ext}"
+                            target_full = os.path.join(images_dir, target_name)
+                            counter += 1
+                        with zf.open(zip_path, "r") as src, open(target_full, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        new_rel_paths.append(os.path.relpath(target_full, self.config_folder))
+                    normalized_images_map[str(keyword)] = new_rel_paths
+
+                self.dictionary = {str(k): str(v) for k, v in imported_dictionary.items()}
+                self.keyword_images = normalized_images_map
+                self.save_keyword_definitions()
+                self.refresh_keyword_list()
+
+                self.definition_label.setText("Select a keyword to view its definition.")
+                self.definition_label.full_definition = ""
+                self.example_label.setVisible(False)
+                self.image_label.setVisible(False)
+
+            show_neutral_message_box(
+                self,
+                QMessageBox.Icon.Information,
+                "Import Complete",
+                "Dictionary package imported successfully.",
+                QMessageBox.StandardButton.Ok,
+            )
+        except Exception as e:
+            show_neutral_message_box(
+                self,
+                QMessageBox.Icon.Critical,
+                "Import Failed",
+                f"Failed to import dictionary package:\n{e}",
+                QMessageBox.StandardButton.Ok,
+            )
     
     def center(self):
         # Center the dialog on the screen where cursor is located
@@ -760,6 +1418,7 @@ class RestorePointWindow(QDialog):  # Change QWidget to QDialog
     def __init__(self, restore_points, parent=None):
         super().__init__(parent)
         self.restore_points = restore_points  # Store restore points
+        apply_neutral_dialog_style(self)
         self.initUI()
         self.parent_widget = parent
 
@@ -1057,20 +1716,24 @@ class ClickableLogLabel(QLabel):
         background = self.property("log_background") or "transparent"
         mode = self.property("colored_selection_mode") or "darker"
         custom_color = self.property("colored_selection_color") or "#d6eaff"
-        
+
+        # If user selected a custom highlight, use it
         if mode == "custom":
             return custom_color
-        
-        # For logs without background, use the fixed highlight color (uniform)
+
+        # For logs without a background, prefer explicit viewer hover color
         if background == "transparent":
-            return custom_color
-        
+            hover = self.property("viewer_hover_color")
+            if hover:
+                return hover
+            return "#e3f2fd"
+
         # For logs with colored backgrounds, apply lighter/darker transformation
         color = QColor(background)
         if not color.isValid():
-            return custom_color
+            return "#e3f2fd"
         if mode == "lighter":
-            return color.lighter(115).name()
+            return color.lighter(110).name()
         return color.darker(115).name()
 
     def current_base_style(self):
@@ -1117,9 +1780,10 @@ class ClickableLogLabel(QLabel):
         if not self.is_selected:
             accent = self.property("important_accent_color") or "#f39c12"
             border = f"border-left: 5px solid {accent};" if self.property("important") else ""
+            hover_color = self.property("viewer_hover_color") or getattr(self.parent(), "viewer_hover_color", None) or self.selected_background_color()
             hover_style = f"""
                 QLabel {{
-                    background-color: #f5f5f5;
+                    background-color: {hover_color};
                     color: #333333;
                     font-size: {self.property("viewer_text_size") or 11}pt;
                     font-family: "{self.property("viewer_font_family") or "Arial"}";
@@ -1135,6 +1799,38 @@ class ClickableLogLabel(QLabel):
         if not self.is_selected:
             self.setStyleSheet(self.current_base_style())
         super().leaveEvent(event)
+
+
+class EditorLogLabel(QLabel):
+    def mousePressEvent(self, event):
+        owner = self.property("scroll_guard_owner")
+        if owner and owner._should_preserve_log_scroll():
+            if event.button() == Qt.MouseButton.LeftButton:
+                owner.select_editor_log_label(self)
+                event.accept()
+                return
+            if event.button() == Qt.MouseButton.RightButton:
+                owner.select_editor_log_label(self)
+                owner.show_context_menu_at_global_pos(event.globalPosition().toPoint())
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+
+class LogListWidget(QListWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._suppress_auto_scroll = False
+
+    def scrollTo(self, index, hint=QAbstractItemView.ScrollHint.EnsureVisible):
+        if self._suppress_auto_scroll:
+            return
+        super().scrollTo(index, hint)
+
+    def scrollToItem(self, item, hint=QAbstractItemView.ScrollHint.EnsureVisible):
+        if self._suppress_auto_scroll:
+            return
+        super().scrollToItem(item, hint)
 
 
 class LogsViewerWindow(QMainWindow):
@@ -1167,7 +1863,22 @@ class LogsViewerWindow(QMainWindow):
         self.log_list = log_list
         self.last_loaded_count = 0  # Track how many logs we've already added
         self.setup_ui()
+        self.scroll_area.viewport().installEventFilter(self)
         self.position_on_rightmost()
+        
+        # Add keyboard shortcuts for arrow key navigation
+        self.up_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Up), self)
+        self.up_shortcut.activated.connect(self.navigate_up)
+
+        self.down_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Down), self)
+        self.down_shortcut.activated.connect(self.navigate_down)
+        
+        # Add keyboard shortcuts for horizontal scrolling
+        self.left_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Left), self)
+        self.left_shortcut.activated.connect(self.scroll_left)
+
+        self.right_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Right), self)
+        self.right_shortcut.activated.connect(self.scroll_right)
         
         # Connect to parent signals for real-time sync
         if parent and hasattr(parent, 'logAdded'):
@@ -1188,7 +1899,10 @@ class LogsViewerWindow(QMainWindow):
 
     def apply_viewer_theme(self):
         dark_mode = self.viewer_pref("viewer_dark_mode", False)
-        bg = "#1f2329" if dark_mode else "#FFFFFF"
+        if dark_mode:
+            bg = "#1f2329"
+        else:
+            bg = self.viewer_pref("viewer_background_color", "#FFFFFF")  #
         scrollbar_bg = "#2b3038" if dark_mode else "#EEEEEE"
         handle_bg = "#5c6673" if dark_mode else "#CCCCCC"
         handle_hover = "#788391" if dark_mode else "#AAAAAA"
@@ -1227,6 +1941,8 @@ class LogsViewerWindow(QMainWindow):
         log_label.setProperty("colored_selection_mode", self.viewer_pref("viewer_colored_selection_mode", "darker"))
         log_label.setProperty("colored_selection_color", self.viewer_pref("viewer_colored_selection_color", "#d6eaff"))
         log_label.setProperty("selection_accent_color", self.viewer_pref("viewer_selection_accent_color", "#2196F3"))
+        log_label.setProperty("log_background", self.viewer_pref("viewer_log_background_color", "#FFFFFF"))
+        log_label.setProperty("viewer_hover_color", self.viewer_pref("viewer_hover_color", "#f0f0f0"))
         if self.parent_widget and hasattr(self.parent_widget, "is_important_log"):
             log_label.setProperty("important", self.parent_widget.is_important_log(log_text))
             log_label.setProperty("log_background", self.parent_widget.get_log_background_color(log_text))
@@ -1269,18 +1985,29 @@ class LogsViewerWindow(QMainWindow):
         selected_source_index = None
         if self.selected_log_label is not None:
             selected_source_index = self.selected_log_label.property("source_index")
+        visible_only = False
+        if self.parent_widget:
+            visible_only = bool(
+                getattr(self.parent_widget, "active_filter", None)
+                or getattr(self.parent_widget, "important_filter_active", False)
+            )
+        previous_scroll_value = None
+        scrollbar = self.scroll_area.verticalScrollBar()
+        if scrollbar:
+            previous_scroll_value = scrollbar.value()
         # Reload all logs from the log_list - used when loading from file
-        self.load_logs()
+        self.load_logs(visible_only=visible_only)
         if selected_source_index is not None:
             for i in range(self.logs_layout.count() - 2):
                 widget = self.logs_layout.itemAt(i).widget()
                 if isinstance(widget, ClickableLogLabel) and widget.property("source_index") == selected_source_index:
                     self.on_log_clicked(widget)
                     break
-        # Scroll to bottom to show latest logs
-        scrollbar = self.scroll_area.verticalScrollBar()
         if scrollbar:
-            scrollbar.setValue(scrollbar.maximum())    
+            if visible_only and previous_scroll_value is not None:
+                scrollbar.setValue(previous_scroll_value)
+            else:
+                scrollbar.setValue(scrollbar.maximum())    
         
     def load_logs(self, visible_only=False):
         # Load all logs from the log_list into the viewer.
@@ -1309,7 +2036,11 @@ class LogsViewerWindow(QMainWindow):
 
     def on_filter_changed(self):
         # Rebuild from currently visible logs after filter changes.
+        scrollbar = self.scroll_area.verticalScrollBar()
+        previous_scroll_value = scrollbar.value() if scrollbar else None
         self.load_logs(visible_only=True)
+        if scrollbar and previous_scroll_value is not None:
+            scrollbar.setValue(previous_scroll_value)
     
     def on_log_added(self, log_text):
         # Handle a single new log emitted from the main app; build the viewer label from the provided text.
@@ -1361,10 +2092,16 @@ class LogsViewerWindow(QMainWindow):
         self.selected_log_label = clicked_widget
 
     def on_log_double_clicked(self, clicked_widget):
-        # Bring main window to front and focus the matching source log row.
+        # Bring main window to front and sync the matching source log row.
         source_index = clicked_widget.property("source_index")
         if source_index is None or not self.parent_widget:
             return
+
+        previous_focus = None
+        try:
+            previous_focus = self.parent_widget.focusWidget()
+        except Exception:
+            previous_focus = None
 
         if self.parent_widget.isMinimized():
             self.parent_widget.showNormal()
@@ -1374,9 +2111,22 @@ class LogsViewerWindow(QMainWindow):
         if 0 <= source_index < self.parent_widget.log_list.count():
             item = self.parent_widget.log_list.item(source_index)
             if item:
-                self.parent_widget.log_list.setCurrentItem(item)
-                self.parent_widget.log_list.scrollToItem(item)
-                self.parent_widget.log_list.setFocus()
+                item_label = self.parent_widget.log_list.itemWidget(item)
+                if self.parent_widget._should_preserve_log_scroll() and isinstance(item_label, QLabel):
+                    self.parent_widget.select_editor_log_label(item_label, scroll_to_item=True)
+                else:
+                    self.parent_widget.log_list.blockSignals(True)
+                    try:
+                        self.parent_widget.log_list.setCurrentItem(item)
+                    finally:
+                        self.parent_widget.log_list.blockSignals(False)
+                    self.parent_widget.apply_editor_selected_log_highlight()
+
+                try:
+                    if previous_focus and previous_focus is not self.parent_widget.log_list:
+                        previous_focus.setFocus(Qt.FocusReason.OtherFocusReason)
+                except Exception:
+                    pass
     
     def position_on_rightmost(self):
         # Position the window on the rightmost part of the screen where cursor is
@@ -1388,6 +2138,100 @@ class LogsViewerWindow(QMainWindow):
             x = screen_rect.right() - self.width()
             y = screen_rect.top()
             self.move(x, y)
+            
+    def navigate_up(self):
+        # Navigate to the previous log using Up arrow keys
+        if self.selected_log_label is None:
+            return
+
+        # Store the current horizontal scroll position
+        h_scrollbar = self.scroll_area.horizontalScrollBar()
+        h_position = h_scrollbar.value()
+
+        current_index = self.logs_layout.indexOf(self.selected_log_label)
+        if current_index > 0:
+            previous_widget = self.logs_layout.itemAt(current_index - 1).widget()
+            if isinstance(previous_widget, ClickableLogLabel):
+                self.on_log_clicked(previous_widget)
+                self.scroll_area.ensureWidgetVisible(previous_widget)
+                # Restore the horizontal scroll position
+                h_scrollbar.setValue(h_position)
+
+    def navigate_down(self):
+        # Navigate to the next log using Down arrow key
+        if self.selected_log_label is None:
+            return
+
+        # Store the current horizontal scroll position
+        h_scrollbar = self.scroll_area.horizontalScrollBar()
+        h_position = h_scrollbar.value()
+
+        current_index = self.logs_layout.indexOf(self.selected_log_label)
+        if current_index < self.logs_layout.count() - 3:  # Account for spacer/stretch
+            next_widget = self.logs_layout.itemAt(current_index + 1).widget()
+            if isinstance(next_widget, ClickableLogLabel):
+                self.on_log_clicked(next_widget)
+                self.scroll_area.ensureWidgetVisible(next_widget)
+                # Restore the horizontal scroll position
+                h_scrollbar.setValue(h_position)
+                
+    def scroll_left(self):
+        # Scroll left horizontally
+        h_scrollbar = self.scroll_area.horizontalScrollBar()
+        h_scrollbar.setValue(h_scrollbar.value() - 20)  # Scroll 20px left
+
+    def scroll_right(self):
+        # Scroll right horizontally
+        h_scrollbar = self.scroll_area.horizontalScrollBar()
+        h_scrollbar.setValue(h_scrollbar.value() + 20)  # Scroll 20px right
+    
+    
+    def keyPressEvent(self, event):
+        # Navigate using arrow up and down keys (only when a log is selected)
+        if event.key() == Qt.Key.Key_Up and self.selected_log_label is not None:
+            current_index = self.logs_layout.indexOf(self.selected_log_label)
+            if current_index > 0:
+                previous_widget = self.logs_layout.itemAt(current_index - 1).widget()
+                if isinstance(previous_widget, ClickableLogLabel):
+                    self.on_log_clicked(previous_widget)
+                    # Ensure the widget is visible in the scroll area
+                    self.scroll_area.ensureWidgetVisible(previous_widget)
+            event.accept()
+            return
+
+        elif event.key() == Qt.Key.Key_Down and self.selected_log_label is not None:
+            current_index = self.logs_layout.indexOf(self.selected_log_label)
+            if current_index < self.logs_layout.count() - 3:  # Account for spacer/stretch
+                next_widget = self.logs_layout.itemAt(current_index + 1).widget()
+                if isinstance(next_widget, ClickableLogLabel):
+                    self.on_log_clicked(next_widget)
+                    # Ensure the widget is visible in the scroll area
+                    self.scroll_area.ensureWidgetVisible(next_widget)
+            event.accept()
+            return
+
+        # For other keys, call the parent implementation
+        super().keyPressEvent(event)
+    
+    def eventFilter(self, obj, event):
+        # Intercept key and wheel events from the scroll area viewport
+        if obj == self.scroll_area.viewport():
+            if event.type() == QEvent.Type.KeyPress:
+                self.keyPressEvent(event)
+                if event.isAccepted():
+                    return True
+            elif event.type() == QEvent.Type.Wheel:
+                # Handle mouse wheel - Shift determines which scrollbar
+                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    scrollbar = self.scroll_area.horizontalScrollBar()
+                else:
+                    scrollbar = self.scroll_area.verticalScrollBar()
+
+                delta = event.angleDelta().y()
+                scrollbar.setValue(scrollbar.value() - delta // 8)
+                event.accept()
+                return True
+        return super().eventFilter(obj, event)
 
 
 class LogApp(QWidget):
@@ -1401,6 +2245,8 @@ class LogApp(QWidget):
 
     IMPORTANT_MARKER = "<!-- LDS_IMPORTANT:1 -->"
     NOT_IMPORTANT_MARKER = "<!-- LDS_IMPORTANT:0 -->"
+    CATEGORY_STYLE_MARKER_PREFIX = "<!-- LDS_CAT_STYLE:"
+    CATEGORY_STYLE_MARKER_SUFFIX = " -->"
 
     DEFAULT_COUNTERS = {
         "Problem ★": 0,
@@ -1428,11 +2274,65 @@ class LogApp(QWidget):
         "viewer_colored_selection_mode": "darker",
         "viewer_colored_selection_color": "#d6eaff",
         "viewer_selection_accent_color": "#2196F3",
+        "viewer_background_color": "#FFFFFF",
+        "viewer_hover_color": "#f0f0f0",
     }
+
+    DEFAULT_VIEWER_DARK_PRESET = {
+        "viewer_background_color": "#1f2329",
+        "viewer_hover_color": "#2b3038",
+        "viewer_colored_selection_color": "#3d5572",
+        "viewer_selection_accent_color": "#8ab4f8",
+    }
+
+    DEFAULT_EDITOR_PREFERENCES = {
+        "editor_dark_mode": False,
+        "editor_background_color": "#FFFFFF",
+        "editor_body_background_color": "#F0F0F0",
+        "editor_button_foreground_color": "#111111",
+        "editor_button_background_color": "#F0F0F0",
+        "editor_hover_color": "#cde8ff",
+    }
+
+    DEFAULT_EDITOR_DARK_PRESET = {
+        "editor_background_color": "#1f2329",
+        "editor_body_background_color": "#2b3038",
+        "editor_button_foreground_color": "#f4f4f4",
+        "editor_button_background_color": "#3a414c",
+        "editor_hover_color": "#3d5572",
+    }
+
+    DEFAULT_EDITOR_CATEGORIES = [
+        {"id": "problem", "icon": "★", "category": "Problem", "background": "#fff4bf", "foreground": "#111111", "deletable": False},
+        {"id": "bug", "icon": "▲", "category": "Bug", "background": "#ffd9d9", "foreground": "#111111", "deletable": False},
+        {"id": "solution", "icon": "■", "category": "Solution", "background": "#d8f5df", "foreground": "#111111", "deletable": False},
+        {"id": "changes", "icon": "◆", "category": "Changes", "background": "#d8f5df", "foreground": "#111111", "deletable": False},
+        {"id": "details", "icon": "", "category": "Just Details", "background": "transparent", "foreground": "#111111", "deletable": False},
+    ]
+
+    CATEGORY_ICON_OPTIONS = [
+        "",
+        "★", "☆",
+        "▲", "△",
+        "◆", "◇",
+        "■", "□",
+        "●", "○",
+        "✦", "✧",
+        "✓", "✔",
+        "!", "?", "#", "@",
+        "→", "←",
+        "⚑", "⚠",
+    ]
     
     def __init__(self, setup_data=None, log_mode="General", file_path=None, parent=None):
         super().__init__(parent)
+        if file_path:
+            filename, ext = os.path.splitext(os.path.basename(file_path))
+            self.current_file = filename   # just the name without extension
+            self.current_ext = ext
+            self.fileName = self.current_file
         self.current_file = file_path
+        self._load_was_canceled = False
         # Use setup_data to initialize user/project config
         if setup_data:
             self.user_name = setup_data.get("user_name", "")
@@ -1467,6 +2367,10 @@ class LogApp(QWidget):
 
         # Initialize counters for different log types
         self.log_counters = dict(self.DEFAULT_COUNTERS)
+        self.active_filter = None
+        self.important_filter_active = False
+        
+        self._important_sort_backup = None
 
         # Start the hardware monitoring thread
         self.hw_monitor = HardwareMonitor()
@@ -1474,6 +2378,8 @@ class LogApp(QWidget):
         self.hw_monitor.start()
         self.logs_viewer = LogsViewerWindow(self.log_list, self)
         self.logs_viewer.show()
+        # Load and apply saved filters on initialization
+        self.load_and_apply_saved_filters()
         print("LogApp initialized.")
 
         # If a file_path is provided, load the logs immediately.
@@ -1483,10 +2389,181 @@ class LogApp(QWidget):
     def is_important_log(self, html_text):
         return self.IMPORTANT_MARKER in html_text
 
+    def _parse_category_style_marker(self, html_text: str):
+        if not isinstance(html_text, str):
+            return None
+        start = html_text.find(self.CATEGORY_STYLE_MARKER_PREFIX)
+        if start == -1:
+            return None
+        end = html_text.find(self.CATEGORY_STYLE_MARKER_SUFFIX, start)
+        if end == -1:
+            return None
+        payload = html_text[start + len(self.CATEGORY_STYLE_MARKER_PREFIX):end]
+        # payload format: id=<val>;bg=<val>;fg=<val>
+        parts = [p.strip() for p in payload.split(";") if p.strip()]
+        out = {}
+        for p in parts:
+            if "=" not in p:
+                continue
+            k, v = p.split("=", 1)
+            out[k.strip()] = v.strip()
+        if not out:
+            return None
+        return out
+
+    def _category_style_marker(self, cid: str, bg: str, fg: str) -> str:
+        cid_val = str(cid or "")
+        bg_val = str(bg or "transparent")
+        fg_val = str(fg or "#111111")
+        return f"{self.CATEGORY_STYLE_MARKER_PREFIX}id={cid_val};bg={bg_val};fg={fg_val}{self.CATEGORY_STYLE_MARKER_SUFFIX}"
+
+    def _extract_icon_from_log_html(self, html_text: str) -> str:
+        if not isinstance(html_text, str):
+            return ""
+        m = re.search(r"(?:<!--.*?-->\s*)*<span[^>]*>([^<]*)</span>\s*<span", html_text, re.DOTALL)
+        if not m:
+            return ""
+        return (m.group(1) or "").strip()
+
+    def _extract_category_number_from_log_html(self, html_text: str) -> Optional[int]:
+        if not isinstance(html_text, str):
+            return None
+        plain = self.strip_html(html_text)
+        m = re.search(r"#(\d+)\s*$", plain)
+        if not m:
+            return None
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+
+    def _category_config_by_id(self, cid: str):
+        self._ensure_editor_categories()
+        cid = str(cid or "").strip()
+        if not cid:
+            return None
+        for c in getattr(self, "editor_categories", []):
+            if str(c.get("id", "")).strip() == cid:
+                return c
+        return None
+
+    def _category_config_by_icon(self, icon: str, categories=None):
+        if categories is None:
+            self._ensure_editor_categories()
+            categories = getattr(self, "editor_categories", [])
+        icon = str(icon or "").strip()
+        if icon == "":
+            # Prefer the "Just Details" default when icon is blank
+            for c in categories:
+                if str(c.get("category", "")).strip() == "Just Details":
+                    return c
+        for c in categories:
+            if str(c.get("icon", "")).strip() == icon:
+                return c
+        return None
+
+    def normalize_logs_to_categories_and_rebuild_counters(self, previous_categories=None):
+        if not hasattr(self, "log_list") or not self.log_list:
+            return
+        self._ensure_editor_categories()
+
+        counters = {}
+        for i in range(self.log_list.count()):
+            item = self.log_list.item(i)
+            label = self.log_list.itemWidget(item)
+            if not isinstance(label, QLabel):
+                continue
+            html_text = label.text()
+
+            marker = self._parse_category_style_marker(html_text) or {}
+            cid = str(marker.get("id", "")).strip()
+            cfg = self._category_config_by_id(cid) if cid else None
+            if not cfg and previous_categories is not None:
+                icon = self._extract_icon_from_log_html(html_text)
+                previous_cfg = self._category_config_by_icon(icon, previous_categories)
+                if previous_cfg:
+                    previous_id = str(previous_cfg.get("id", "")).strip()
+                    cfg = self._category_config_by_id(previous_id)
+            if not cfg:
+                icon = self._extract_icon_from_log_html(html_text)
+                cfg = self._category_config_by_icon(icon)
+            if not cfg:
+                continue
+
+            cid = str(cfg.get("id", "")).strip() or uuid.uuid4().hex
+            cfg["id"] = cid
+
+            existing_n = self._extract_category_number_from_log_html(html_text)
+            if existing_n is not None:
+                counters[cid] = max(counters.get(cid, 0), existing_n)
+            else:
+                counters[cid] = counters.get(cid, 0) + 1
+
+            icon = str(cfg.get("icon", "")).strip()
+            fg = str(cfg.get("foreground", "#111111"))
+            bg = str(cfg.get("background", "transparent"))
+
+            # Remove any existing cat-style marker and replace with the new one
+            if self.CATEGORY_STYLE_MARKER_PREFIX in html_text:
+                start = html_text.find(self.CATEGORY_STYLE_MARKER_PREFIX)
+                end = html_text.find(self.CATEGORY_STYLE_MARKER_SUFFIX, start)
+                if end != -1:
+                    html_text = html_text[:start] + html_text[end + len(self.CATEGORY_STYLE_MARKER_SUFFIX):]
+
+            style_marker = self._category_style_marker(cid, bg, fg)
+
+            # Replace the first visible icon span even if hidden markers/comments come first.
+            icon_span_pattern = r"^((?:\s|<!--.*?-->)*?)<span[^>]*>[^<]*</span>"
+            replacement = r"\1" + f'<span style="color:{fg};">{icon}</span>'
+            if re.search(icon_span_pattern, html_text, re.DOTALL):
+                html_text = re.sub(icon_span_pattern, replacement, html_text, count=1, flags=re.DOTALL)
+            else:
+                html_text = f'<span style="color:{fg};">{icon}</span> ' + html_text
+
+            # Update the main content span color so foreground changes apply to
+            # existing logs, not only newly created ones.
+            text_span_pattern = r"^((?:\s|<!--.*?-->)*?<span[^>]*>[^<]*</span>\s*)<span[^>]*>"
+            text_span_replacement = r"\1" + f'<span style="color:{fg};">'
+            if re.search(text_span_pattern, html_text, re.DOTALL):
+                html_text = re.sub(text_span_pattern, text_span_replacement, html_text, count=1, flags=re.DOTALL)
+
+            html_text = style_marker + html_text
+            html_text = self.set_importance_marker(html_text, self.is_important_log(label.text()))
+            label.setText(html_text)
+            self.apply_log_label_style(label, self.is_important_log(html_text))
+
+        self.log_counters = counters
+        self.save_log_counters()
+
+    def _current_category_config(self):
+        self._ensure_editor_categories()
+        if not hasattr(self, "category_selector") or not self.category_selector:
+            return None
+        cid = self.category_selector.currentData(Qt.ItemDataRole.UserRole)
+        if cid:
+            for c in getattr(self, "editor_categories", []):
+                if str(c.get("id", "")).strip() == str(cid).strip():
+                    return c
+        # Fallback: match by category name only (best-effort).
+        current = self.category_selector.currentText()
+        if not isinstance(current, str):
+            return None
+        text = current.strip()
+        name = text
+        # If label is "Name ICON", strip the last char icon.
+        if len(text) >= 2 and text[-2] == " ":
+            name = text[:-2]
+        for c in getattr(self, "editor_categories", []):
+            if str(c.get("category", "")).strip() == name:
+                return c
+        return None
+
     def load_default_log_theme_colors(self):
         for key, value in self.DEFAULT_LOG_THEME_COLORS.items():
             setattr(self, key, value)
         for key, value in self.DEFAULT_VIEWER_PREFERENCES.items():
+            setattr(self, key, value)
+        for key, value in self.DEFAULT_EDITOR_PREFERENCES.items():
             setattr(self, key, value)
 
     def set_importance_marker(self, html_text, important):
@@ -1495,6 +2572,9 @@ class LogApp(QWidget):
         return f"{marker}{html_text}"
 
     def get_log_background_color(self, html_text):
+        marker = self._parse_category_style_marker(html_text)
+        if marker and "bg" in marker:
+            return marker["bg"]
         plain_text = self.strip_html(html_text)
         if "Fixed" in plain_text or "Resolved" in plain_text or "■" in plain_text or "Solution #" in plain_text:
             return getattr(self, "resolved_background_color", self.DEFAULT_LOG_THEME_COLORS["resolved_background_color"])
@@ -1505,23 +2585,124 @@ class LogApp(QWidget):
         return getattr(self, "default_background_color", self.DEFAULT_LOG_THEME_COLORS["default_background_color"])
 
     def apply_log_label_style(self, label, important=False):
-        background = self.get_log_background_color(label.text())
         accent_color = getattr(self, "important_accent_color", self.DEFAULT_LOG_THEME_COLORS["important_accent_color"])
         border = f"border-left: 5px solid {accent_color};" if important else ""
         padding = "padding-left: 6px;" if important else "padding-left: 0px;"
-        if important:
-            label.setStyleSheet(f"QLabel {{ background-color: {background}; {border} {padding} }}")
-        else:
-            label.setStyleSheet(f"QLabel {{ background-color: {background}; {padding} }}")
+        # Keep the label transparent so the QListWidgetItem background / hover can show through
+        label.setStyleSheet(f"QLabel {{ background-color: transparent; {border} {padding} }}")
 
     def refresh_log_label_styles(self):
         for index in range(self.log_list.count()):
             item = self.log_list.item(index)
             label = self.log_list.itemWidget(item)
             if isinstance(label, QLabel):
+                bg = self.get_log_background_color(label.text())
+                try:
+                    if isinstance(bg, str) and bg.strip() and bg.strip().lower() != "transparent":
+                        item.setBackground(QBrush(QColor(bg)))
+                    else:
+                        item.setBackground(QBrush())
+                except Exception:
+                    item.setBackground(QBrush())
                 self.apply_log_label_style(label, self.is_important_log(label.text()))
-        if hasattr(self, "logs_viewer") and self.logs_viewer:
-            self.logs_viewer.refresh_logs()
+        self.apply_editor_selected_log_highlight()
+
+    def _capture_log_list_scroll(self):
+        if not hasattr(self, "log_list") or not self.log_list:
+            return None
+        vertical_scrollbar = self.log_list.verticalScrollBar()
+        horizontal_scrollbar = self.log_list.horizontalScrollBar()
+        return (
+            vertical_scrollbar.value() if vertical_scrollbar else None,
+            horizontal_scrollbar.value() if horizontal_scrollbar else None,
+            vertical_scrollbar,
+            horizontal_scrollbar,
+        )
+
+    def _restore_log_list_scroll(self, scroll_state):
+        if not scroll_state:
+            return
+        previous_vertical, previous_horizontal, vertical_scrollbar, horizontal_scrollbar = scroll_state
+        if vertical_scrollbar and previous_vertical is not None:
+            vertical_scrollbar.setValue(previous_vertical)
+        if horizontal_scrollbar and previous_horizontal is not None:
+            horizontal_scrollbar.setValue(previous_horizontal)
+
+    def apply_editor_selected_log_highlight(self, restore_scroll=True):
+        if not hasattr(self, "log_list") or not self.log_list:
+            return
+        scroll_state = self._capture_log_list_scroll() if restore_scroll else None
+        preserve_scroll = self._should_preserve_log_scroll()
+        selected_label = self.editor_selected_log_label if preserve_scroll else None
+        # restore each item's base background and label style
+        for i in range(self.log_list.count()):
+            item = self.log_list.item(i)
+            label = self.log_list.itemWidget(item)
+            if isinstance(label, QLabel):
+                bg = self.get_log_background_color(label.text())
+                try:
+                    if isinstance(bg, str) and bg.strip() and bg.strip().lower() != "transparent":
+                        item.setBackground(QBrush(QColor(bg)))
+                    else:
+                        item.setBackground(QBrush())
+                except Exception:
+                    item.setBackground(QBrush())
+                self.apply_log_label_style(label, self.is_important_log(label.text()))
+        # apply hover/highlight to the currently selected item
+        if preserve_scroll and selected_label:
+            for i in range(self.log_list.count()):
+                item = self.log_list.item(i)
+                label = self.log_list.itemWidget(item)
+                if label is selected_label:
+                    hover_color = getattr(self, "editor_hover_color", self.DEFAULT_EDITOR_PREFERENCES.get("editor_hover_color", "#cde8ff"))
+                    try:
+                        item.setBackground(QBrush(QColor(hover_color)))
+                    except Exception:
+                        item.setBackground(QBrush())
+                    if isinstance(label, QLabel):
+                        self.apply_log_label_style(label, self.is_important_log(label.text()))
+                    break
+        else:
+            current = self.log_list.currentItem()
+            if current:
+                hover_color = getattr(self, "editor_hover_color", self.DEFAULT_EDITOR_PREFERENCES.get("editor_hover_color", "#cde8ff"))
+                try:
+                    current.setBackground(QBrush(QColor(hover_color)))
+                except Exception:
+                    current.setBackground(QBrush())
+                sel_label = self.log_list.itemWidget(current)
+                if isinstance(sel_label, QLabel):
+                    self.apply_log_label_style(sel_label, self.is_important_log(sel_label.text()))
+        if restore_scroll:
+            self._restore_log_list_scroll(scroll_state)
+            QTimer.singleShot(0, lambda state=scroll_state: self._restore_log_list_scroll(state))
+
+    def select_editor_log_label(self, label, scroll_to_item=False):
+        if not isinstance(label, QLabel):
+            return
+        self.editor_selected_log_label = label
+        if scroll_to_item:
+            item = None
+            for i in range(self.log_list.count()):
+                current_item = self.log_list.item(i)
+                if self.log_list.itemWidget(current_item) is label:
+                    item = current_item
+                    break
+            if item:
+                previous_suppression = getattr(self.log_list, "_suppress_auto_scroll", False)
+                self.log_list._suppress_auto_scroll = False
+                try:
+                    self.log_list.scrollToItem(item)
+                finally:
+                    self.log_list._suppress_auto_scroll = previous_suppression
+        self.apply_editor_selected_log_highlight(restore_scroll=not scroll_to_item)
+    
+    def on_editor_log_selection_changed(self, current, previous):
+        if previous:
+            prev_label = self.log_list.itemWidget(previous)
+            if isinstance(prev_label, QLabel):
+                self.apply_log_label_style(prev_label, self.is_important_log(prev_label.text()))
+        self.apply_editor_selected_log_highlight()
 
     def count_important_logs(self):
         count = 0
@@ -1534,11 +2715,55 @@ class LogApp(QWidget):
 
     def update_importance_counter(self):
         self.log_counters["Importance"] = self.count_important_logs()
+        # update menu badge if present
+        try:
+            self.update_important_menu_label()
+        except Exception:
+            pass
+    def position_view_badge(self):
+        # Position the small badge over the View menu action
+        try:
+            if not hasattr(self, "menu_bar") or not hasattr(self, "view_menu_action") or not hasattr(self, "view_badge"):
+                return
+            rect = self.menu_bar.actionGeometry(self.view_menu_action)
+            if rect.isValid():
+                self.view_badge.adjustSize()
+                x = rect.right() - (self.view_badge.width() // 2)
+                y = rect.top() + (rect.height() - self.view_badge.height()) // 2 - 2
+                x = max(0, min(x, self.menu_bar.width() - self.view_badge.width()))
+                y = max(0, min(y, self.menu_bar.height() - self.view_badge.height()))
+                self.view_badge.move(x, y)
+                self.view_badge.raise_()
+        except Exception:
+            pass
+        
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self.position_view_badge)
+        
+    def toggle_view_important(self, checked: bool):
+        self.important_filter_active = checked
+        self.reapply_all_filters()
+
+    def update_important_menu_label(self):
+        count = int(self.log_counters.get("Importance", 0))
+        if hasattr(self, "important_action") and isinstance(self.important_action, QAction):
+            self.important_action.setText(f"Important ({count})")
+        # update overlay badge
+        if hasattr(self, "view_badge"):
+            if count <= 0:
+                self.view_badge.hide()
+            else:
+                self.view_badge.setText("99+" if count > 99 else str(count))
+                self.view_badge.adjustSize()
+                self.view_badge.show()
+                QTimer.singleShot(0, self.position_view_badge)
 
     def configure_log_label(self, label, html_text, word_wrap=False):
         label.setText(html_text)
         label.setTextFormat(Qt.TextFormat.RichText)
         label.setOpenExternalLinks(False)
+        label.setProperty("scroll_guard_owner", self)
         try:
             label.linkActivated.disconnect(self.handle_internal_link)
         except TypeError:
@@ -1546,6 +2771,671 @@ class LogApp(QWidget):
         label.linkActivated.connect(self.handle_internal_link)
         label.setWordWrap(word_wrap)
         self.apply_log_label_style(label, self.is_important_log(html_text))
+
+    def _contrast_text_color_for_bg(self, bg_hex: str) -> str:
+        color = QColor(bg_hex)
+        if not color.isValid():
+            return "#111111"
+        r, g, b, _a = color.getRgb()
+        # Perceived luminance: pick black on light backgrounds, white on dark.
+        luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
+        return "#111111" if luminance > 150 else "#FFFFFF"
+
+    def _set_preview_button_color(self, button: QPushButton, bg_hex: str):
+        fg = self._contrast_text_color_for_bg(bg_hex)
+        button.setStyleSheet(
+            f"background-color: {bg_hex}; color: {fg}; border: 1px solid {fg}; padding: 6px;"
+        )
+
+    def _ensure_editor_categories(self):
+        cats = getattr(self, "editor_categories", None)
+        if not isinstance(cats, list) or not cats:
+            self.editor_categories = list(self.DEFAULT_EDITOR_CATEGORIES)
+            return
+        normalized = []
+        for c in cats:
+            if not isinstance(c, dict):
+                continue
+            normalized.append(
+                {
+                    "id": str(c.get("id", "")).strip(),
+                    "icon": str(c.get("icon", "")),
+                    "category": str(c.get("category", "")),
+                    "background": str(c.get("background", "transparent")),
+                    "foreground": str(c.get("foreground", "#111111")),
+                    "deletable": bool(c.get("deletable", True)),
+                }
+            )
+        if not normalized:
+            normalized = list(self.DEFAULT_EDITOR_CATEGORIES)
+
+        defaults = list(getattr(self, "editor_categories_default", list(self.DEFAULT_EDITOR_CATEGORIES)))
+        defaults_by_id = {str(d.get("id", "")).strip(): d for d in defaults if str(d.get("id", "")).strip()}
+        defaults_by_name = {str(d.get("category", "")).strip(): d for d in defaults}
+
+        # Preserve the saved order while still enforcing that default rows exist and stay non-deletable.
+        merged = []
+        seen_default_names = set()
+        for c in normalized:
+            cid = str(c.get("id", "")).strip()
+            name = str(c.get("category", "")).strip()
+            default_entry = defaults_by_id.get(cid) or defaults_by_name.get(name)
+            if default_entry:
+                default_name = str(default_entry.get("category", "")).strip()
+                if default_name in seen_default_names:
+                    continue
+                default_id = str(default_entry.get("id", "")).strip()
+                merged.append(
+                    {
+                        "id": default_id or cid or uuid.uuid4().hex,
+                        "icon": str(c.get("icon", default_entry.get("icon", ""))),
+                        "category": default_name,
+                        "background": str(c.get("background", default_entry.get("background", "transparent"))),
+                        "foreground": str(c.get("foreground", default_entry.get("foreground", "#111111"))),
+                        "deletable": False,
+                    }
+                )
+                seen_default_names.add(default_name)
+                continue
+
+            merged.append(
+                {
+                    "id": cid or uuid.uuid4().hex,
+                    "icon": str(c.get("icon", "")),
+                    "category": name,
+                    "background": str(c.get("background", "transparent")),
+                    "foreground": str(c.get("foreground", "#111111")),
+                    "deletable": True,
+                }
+            )
+
+        # Append any default categories that were missing from persisted data.
+        for d in defaults:
+            default_name = str(d.get("category", "")).strip()
+            if default_name in seen_default_names:
+                continue
+            dd = dict(d)
+            if not str(dd.get("id", "")).strip():
+                dd["id"] = uuid.uuid4().hex
+            dd["deletable"] = False
+            merged.append(dd)
+
+        self.editor_categories = merged
+
+    def refresh_category_selector(self):
+        if not hasattr(self, "category_selector") or not self.category_selector:
+            return
+        self._ensure_editor_categories()
+        current = self.category_selector.currentText()
+        current_id = self.category_selector.currentData(Qt.ItemDataRole.UserRole)
+        self.category_selector.blockSignals(True)
+        self.category_selector.clear()
+        visible_categories = []
+        for c in self.editor_categories:
+            category_name = str(c.get("category", "")).strip()
+            if self.log_type == "General" and category_name == "Solution":
+                continue
+            if self.log_type == "Debugging" and category_name not in {"Just Details", "Bug"}:
+                continue
+            visible_categories.append(c)
+
+        for c in visible_categories:
+            cid = str(c.get("id", "")).strip() or uuid.uuid4().hex
+            c["id"] = cid
+            icon = c.get("icon", "").strip()
+            name = c.get("category", "").strip() or "Untitled"
+            label = f"{name} {icon}".strip()
+            self.category_selector.addItem(label, cid)
+        idx = self.category_selector.findText(current)
+        if current_id:
+            for i in range(self.category_selector.count()):
+                if self.category_selector.itemData(i, Qt.ItemDataRole.UserRole) == current_id:
+                    self.category_selector.setCurrentIndex(i)
+                    break
+            else:
+                if idx >= 0:
+                    self.category_selector.setCurrentIndex(idx)
+        elif idx >= 0:
+            self.category_selector.setCurrentIndex(idx)
+        self.category_selector.blockSignals(False)
+
+    def get_filterable_category_options(self):
+        self._ensure_editor_categories()
+        options = []
+        for c in self.editor_categories:
+            category_name = str(c.get("category", "")).strip()
+            if self.log_type == "General" and category_name == "Solution":
+                continue
+            if self.log_type == "Debugging" and category_name not in {"Just Details", "Bug"}:
+                continue
+            icon = str(c.get("icon", "")).strip()
+            label = f"{category_name} {icon}".strip()
+            if label:
+                options.append(label)
+        return options
+
+    def _color_combo(self, initial: str):
+        combo = QComboBox()
+        options = [
+            "transparent",
+            "#FFFFFF",
+            "#F0F0F0",
+            "#111111",
+            "#1f2329",
+            "#2b3038",
+            "#3a414c",
+            "#cde8ff",
+            "#3d5572",
+            "#ffd9d9",
+            "#fff4bf",
+            "#d8f5df",
+            "Custom...",
+        ]
+        combo.addItems(options)
+        if initial in options:
+            combo.setCurrentText(initial)
+        else:
+            combo.setCurrentText("Custom...")
+        return combo
+
+    def open_editor_categories(self):
+        self._ensure_editor_categories()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Categories")
+        dialog.setFixedSize(640, 320)
+        dialog.setStyleSheet("""
+            QDialog { background-color: #f5f5f5; color: #111111; }
+            QLabel { color: #111111; }
+            QPushButton { padding: 6px; }
+            QLineEdit { padding: 4px; }
+        """)
+
+        layout = QVBoxLayout(dialog)
+
+        reset_btn = QPushButton("Reset Defaults")
+        layout.addWidget(reset_btn)
+
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        scroll_contents = QWidget()
+        rows_layout = QVBoxLayout(scroll_contents)
+        rows_layout.setContentsMargins(0, 0, 0, 0)
+        rows_layout.setSpacing(6)
+        scroll.setWidget(scroll_contents)
+        layout.addWidget(scroll)
+
+        row_widgets = []
+
+        def refresh_move_buttons():
+            total = len(row_widgets)
+            for idx, (_container, data) in enumerate(row_widgets):
+                up_btn = data.get("_move_up_btn")
+                down_btn = data.get("_move_down_btn")
+                if up_btn is not None:
+                    up_btn.setEnabled(idx > 0)
+                if down_btn is not None:
+                    down_btn.setEnabled(idx < total - 1)
+
+        def refresh_icon_choices():
+            used_by_other = {}
+            for _container, data in row_widgets:
+                row_id = str(data.get("id", "")).strip()
+                icon_value = str(data.get("icon", "")).strip()
+                if icon_value:
+                    used_by_other.setdefault(icon_value, set()).add(row_id)
+
+            for _container, data in row_widgets:
+                combo = data.get("_icon_widget")
+                if combo is None:
+                    continue
+                row_id = str(data.get("id", "")).strip()
+                current_icon = str(data.get("icon", "")).strip()
+                allow_default_icons = bool(data.get("_allow_default_icons", True))
+                if allow_default_icons:
+                    base_options = list(self.CATEGORY_ICON_OPTIONS)
+                else:
+                    default_icons = {
+                        str(c.get("icon", "")).strip()
+                        for c in getattr(self, "editor_categories_default", list(self.DEFAULT_EDITOR_CATEGORIES))
+                    }
+                    base_options = [icon for icon in self.CATEGORY_ICON_OPTIONS if icon not in default_icons]
+
+                available = []
+                for icon_option in base_options:
+                    if icon_option == "" and current_icon != "":
+                        owners = used_by_other.get(icon_option, set())
+                        if owners and owners != {row_id}:
+                            continue
+                    owners = used_by_other.get(icon_option, set())
+                    if not owners or owners == {row_id}:
+                        available.append(icon_option)
+                if current_icon and current_icon not in available:
+                    available.append(current_icon)
+                combo.blockSignals(True)
+                combo.clear()
+                combo.addItems(available)
+                combo.setCurrentText(current_icon if current_icon in available else "")
+                combo.blockSignals(False)
+
+        def enforce_unique_icons(changed_id=None):
+            seen = {}
+            for _container, data in row_widgets:
+                icon_value = str(data.get("icon", "")).strip()
+                if not icon_value:
+                    continue
+                if icon_value not in seen:
+                    seen[icon_value] = str(data.get("id", "")).strip()
+                    continue
+                current_id = str(data.get("id", "")).strip()
+                if changed_id and current_id != changed_id:
+                    data["icon"] = ""
+                else:
+                    data["icon"] = ""
+
+            for _container, data in row_widgets:
+                combo = data.get("_icon_widget")
+                if combo is not None:
+                    desired = str(data.get("icon", "")).strip()
+                    if combo.currentText() != desired:
+                        combo.blockSignals(True)
+                        combo.setCurrentText(desired)
+                        combo.blockSignals(False)
+            refresh_icon_choices()
+
+        def icon_combo(initial: str, allow_default_icons: bool = True):
+            combo = QComboBox()
+            if allow_default_icons:
+                options = list(self.CATEGORY_ICON_OPTIONS)
+            else:
+                default_icons = {
+                    str(c.get("icon", "")).strip()
+                    for c in getattr(self, "editor_categories_default", list(self.DEFAULT_EDITOR_CATEGORIES))
+                }
+                options = [icon for icon in self.CATEGORY_ICON_OPTIONS if icon not in default_icons]
+            combo.addItems(options)
+            combo.setCurrentText(initial if initial in options else (options[0] if options else ""))
+            return combo
+
+        def make_row(cat: dict):
+            row = QHBoxLayout()
+            row.setSpacing(8)
+
+            cat_w = QLineEdit(cat.get("category", ""))
+            bg_btn = QPushButton("Background")
+            fg_btn = QPushButton("Foreground")
+            up_btn = QPushButton("↑")
+            down_btn = QPushButton("↓")
+            del_btn = QPushButton("X")
+            up_btn.setFixedWidth(28)
+            down_btn.setFixedWidth(28)
+            del_btn.setFixedWidth(28)
+
+            deletable = bool(cat.get("deletable", True))
+            icon_w = icon_combo(cat.get("icon", ""), allow_default_icons=not deletable)
+            if not deletable:
+                cat_w.setEnabled(False)
+                del_btn.setEnabled(False)
+
+            current_value = {
+                "id": str(cat.get("id", "")).strip() or uuid.uuid4().hex,
+                "icon": cat.get("icon", ""),
+                "category": cat.get("category", ""),
+                "background": cat.get("background", "transparent"),
+                "foreground": cat.get("foreground", "#111111"),
+                "deletable": deletable,
+            }
+            current_value["_icon_widget"] = icon_w
+            current_value["_allow_default_icons"] = not deletable
+            current_value["_bg_button"] = bg_btn
+            current_value["_fg_button"] = fg_btn
+            current_value["_move_up_btn"] = up_btn
+            current_value["_move_down_btn"] = down_btn
+
+            self._set_preview_button_color(bg_btn, str(current_value["background"]))
+            self._set_preview_button_color(fg_btn, str(current_value["foreground"]))
+
+            def on_icon_changed(text):
+                current_value["icon"] = text
+                enforce_unique_icons(changed_id=current_value["id"])
+
+            icon_w.currentTextChanged.connect(on_icon_changed)
+            cat_w.textChanged.connect(lambda t: current_value.__setitem__("category", t))
+
+            def choose_color_for(key: str, btn: QPushButton):
+                start = QColor(str(current_value[key]))
+                chosen = QColorDialog.getColor(start, dialog)
+                if chosen.isValid():
+                    current_value[key] = chosen.name()
+                    self._set_preview_button_color(btn, str(current_value[key]))
+
+            def set_transparent_for(key: str, btn: QPushButton):
+                current_value[key] = "transparent"
+                self._set_preview_button_color(btn, "transparent")
+
+            def open_bg_menu():
+                menu = QMenu(dialog)
+                pick = QAction("Pick Color", dialog)
+                transparent = QAction("Transparent", dialog)
+                pick.triggered.connect(lambda: choose_color_for("background", bg_btn))
+                transparent.triggered.connect(lambda: set_transparent_for("background", bg_btn))
+                menu.addAction(pick)
+                menu.addAction(transparent)
+                menu.exec(bg_btn.mapToGlobal(bg_btn.rect().bottomLeft()))
+
+            def open_fg_menu():
+                menu = QMenu(dialog)
+                pick = QAction("Pick Color", dialog)
+                pick.triggered.connect(lambda: choose_color_for("foreground", fg_btn))
+                menu.addAction(pick)
+                menu.exec(fg_btn.mapToGlobal(fg_btn.rect().bottomLeft()))
+
+            bg_btn.clicked.connect(open_bg_menu)
+            fg_btn.clicked.connect(open_fg_menu)
+
+            row.addWidget(icon_w)
+            row.addWidget(cat_w)
+            row.addWidget(bg_btn)
+            row.addWidget(fg_btn)
+            row.addWidget(up_btn)
+            row.addWidget(down_btn)
+            row.addWidget(del_btn)
+
+            container = QWidget()
+            container.setLayout(row)
+
+            def move_row(delta: int):
+                current_index = None
+                for i, (w, _data) in enumerate(row_widgets):
+                    if w is container:
+                        current_index = i
+                        break
+                if current_index is None:
+                    return
+                new_index = current_index + delta
+                if new_index < 0 or new_index >= len(row_widgets):
+                    return
+                row_widgets.insert(new_index, row_widgets.pop(current_index))
+                rows_layout.removeWidget(container)
+                rows_layout.insertWidget(new_index, container)
+                refresh_move_buttons()
+
+            up_btn.clicked.connect(lambda: move_row(-1))
+            down_btn.clicked.connect(lambda: move_row(1))
+
+            def delete_row():
+                if not current_value["deletable"]:
+                    return
+                container.setParent(None)
+                for i, (w, _data) in enumerate(list(row_widgets)):
+                    if w is container:
+                        row_widgets.pop(i)
+                        break
+                refresh_move_buttons()
+
+            del_btn.clicked.connect(delete_row)
+
+            row_widgets.append((container, current_value))
+            rows_layout.addWidget(container)
+            refresh_move_buttons()
+
+        def rebuild_rows(cats: list):
+            for i in reversed(range(rows_layout.count())):
+                item = rows_layout.takeAt(i)
+                w = item.widget()
+                if w is not None:
+                    w.setParent(None)
+            row_widgets.clear()
+            for cat in cats:
+                make_row(cat)
+            enforce_unique_icons()
+            refresh_icon_choices()
+            refresh_move_buttons()
+
+        rebuild_rows(self.editor_categories)
+
+        add_btn = QPushButton("Add")
+        layout.addWidget(add_btn)
+        add_btn.clicked.connect(lambda: make_row({"id": uuid.uuid4().hex, "icon": "", "category": "New Category", "background": "transparent", "foreground": "#111111", "deletable": True}))
+
+        button_row = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        button_row.addWidget(save_btn)
+        button_row.addWidget(cancel_btn)
+        layout.addLayout(button_row)
+
+        def save_categories():
+            previous_categories = [dict(c) for c in getattr(self, "editor_categories", [])]
+            enforce_unique_icons()
+            cats = []
+            icon_usage = {}
+            name_usage = {}
+            for _container, data in row_widgets:
+                name = str(data.get("category", "")).strip()
+                if not name:
+                    continue
+                icon_value = str(data.get("icon", "")).strip()
+                icon_usage.setdefault(icon_value, []).append(name or "Untitled")
+                name_usage.setdefault(name.casefold(), []).append(name)
+                cats.append(
+                    {
+                        "id": str(data.get("id", "")).strip() or uuid.uuid4().hex,
+                        "icon": icon_value,
+                        "category": name,
+                        "background": str(data.get("background", "transparent")),
+                        "foreground": str(data.get("foreground", "#111111")),
+                        "deletable": bool(data.get("deletable", True)),
+                    }
+                )
+
+            duplicate_icons = {icon: names for icon, names in icon_usage.items() if len(names) > 1}
+            if duplicate_icons:
+                details = []
+                for icon, names in duplicate_icons.items():
+                    icon_label = "(blank)" if icon == "" else icon
+                    details.append(f"{icon_label}: {', '.join(names)}")
+                QMessageBox.warning(
+                    dialog,
+                    "Duplicate Icons",
+                    "Each category must use a unique icon before saving.\n\n" + "\n".join(details),
+                )
+                return
+
+            duplicate_names = {norm_name: names for norm_name, names in name_usage.items() if len(names) > 1}
+            if duplicate_names:
+                details = []
+                for names in duplicate_names.values():
+                    details.append(", ".join(names))
+                QMessageBox.warning(
+                    dialog,
+                    "Duplicate Category Names",
+                    "Each category must use a unique name before saving.\n\n" + "\n".join(details),
+                )
+                return
+
+            defaults = list(getattr(self, "editor_categories_default", list(self.DEFAULT_EDITOR_CATEGORIES)))
+            defaults_by_id = {str(d.get("id", "")).strip(): d for d in defaults if str(d.get("id", "")).strip()}
+            defaults_by_name = {str(d.get("category", "")).strip(): d for d in defaults}
+
+            merged = []
+            seen_default_names = set()
+            for c in cats:
+                cid = str(c.get("id", "")).strip()
+                name = str(c.get("category", "")).strip()
+                default_entry = defaults_by_id.get(cid) or defaults_by_name.get(name)
+                if default_entry:
+                    default_name = str(default_entry.get("category", "")).strip()
+                    if default_name in seen_default_names:
+                        continue
+                    default_id = str(default_entry.get("id", "")).strip()
+                    merged.append(
+                        {
+                            "id": default_id or cid or uuid.uuid4().hex,
+                            "icon": str(c.get("icon", default_entry.get("icon", ""))),
+                            "category": default_name,
+                            "background": str(c.get("background", default_entry.get("background", "transparent"))),
+                            "foreground": str(c.get("foreground", default_entry.get("foreground", "#111111"))),
+                            "deletable": False,
+                        }
+                    )
+                    seen_default_names.add(default_name)
+                    continue
+
+                merged.append(
+                    {
+                        "id": cid or uuid.uuid4().hex,
+                        "icon": str(c.get("icon", "")),
+                        "category": name,
+                        "background": str(c.get("background", "transparent")),
+                        "foreground": str(c.get("foreground", "#111111")),
+                        "deletable": True,
+                    }
+                )
+
+            for d in defaults:
+                default_name = str(d.get("category", "")).strip()
+                if default_name in seen_default_names:
+                    continue
+                dd = dict(d)
+                dd["deletable"] = False
+                if not str(dd.get("id", "")).strip():
+                    dd["id"] = uuid.uuid4().hex
+                merged.append(dd)
+
+            self.editor_categories = merged
+            self.save_user_config()
+            self.refresh_category_selector()
+            self.normalize_logs_to_categories_and_rebuild_counters(previous_categories=previous_categories)
+            if hasattr(self, "logs_viewer") and self.logs_viewer:
+                self.logs_viewer.refresh_logs()
+            dialog.accept()
+
+        def reset_defaults():
+            defaults = list(getattr(self, "editor_categories_default", list(self.DEFAULT_EDITOR_CATEGORIES)))
+            defaults_by_name = {str(d.get("category", "")).strip(): dict(d) for d in defaults}
+
+            used_custom_icons = set()
+            for _container, data in row_widgets:
+                name = str(data.get("category", "")).strip()
+                if name in defaults_by_name:
+                    continue
+                icon_value = str(data.get("icon", "")).strip()
+                if icon_value:
+                    used_custom_icons.add(icon_value)
+
+            for _container, data in row_widgets:
+                name = str(data.get("category", "")).strip()
+                if name not in defaults_by_name:
+                    continue
+                default_entry = defaults_by_name[name]
+                reset_icon = str(default_entry.get("icon", "")).strip()
+                if reset_icon and reset_icon in used_custom_icons:
+                    reset_icon = ""
+                data["icon"] = reset_icon
+                data["background"] = str(default_entry.get("background", "transparent"))
+                data["foreground"] = str(default_entry.get("foreground", "#111111"))
+
+                icon_widget = data.get("_icon_widget")
+                if icon_widget is not None:
+                    icon_widget.blockSignals(True)
+                    icon_widget.setCurrentText(data["icon"])
+                    icon_widget.blockSignals(False)
+
+                bg_btn = data.get("_bg_button")
+                if bg_btn is not None:
+                    self._set_preview_button_color(bg_btn, str(data["background"]))
+
+                fg_btn = data.get("_fg_button")
+                if fg_btn is not None:
+                    self._set_preview_button_color(fg_btn, str(data["foreground"]))
+
+            enforce_unique_icons()
+            refresh_icon_choices()
+
+        reset_btn.clicked.connect(reset_defaults)
+        save_btn.clicked.connect(save_categories)
+        cancel_btn.clicked.connect(dialog.reject)
+        dialog.exec()
+
+    def apply_editor_theme(self):
+        dark_mode = bool(getattr(self, "editor_dark_mode", self.DEFAULT_EDITOR_PREFERENCES["editor_dark_mode"]))
+        preset = self.DEFAULT_EDITOR_DARK_PRESET if dark_mode else self.DEFAULT_EDITOR_PREFERENCES
+
+        editor_background = getattr(self, "editor_background_color", preset["editor_background_color"])
+        body_background = getattr(self, "editor_body_background_color", preset["editor_body_background_color"])
+        button_foreground = getattr(self, "editor_button_foreground_color", preset["editor_button_foreground_color"])
+        button_background = getattr(self, "editor_button_background_color", preset["editor_button_background_color"])
+        hover_color = getattr(self, "editor_hover_color", preset.get("editor_hover_color", self.DEFAULT_EDITOR_PREFERENCES["editor_hover_color"]))
+
+        editor_text = "#f4f4f4" if dark_mode else "#111111"
+        border_color = "#5c6673" if dark_mode else "#b8b8b8"
+        selection_background = hover_color
+
+        self.setStyleSheet(f"""
+            QWidget#LogAppRoot {{
+                background-color: {body_background};
+                color: {editor_text};
+            }}
+            QWidget#LogAppRoot QLabel,
+            QWidget#LogAppRoot QCheckBox,
+            QWidget#LogAppRoot QComboBox {{
+                color: {editor_text};
+            }}
+            QWidget#LogAppRoot QMenuBar {{
+                background-color: {body_background};
+                color: {editor_text};
+            }}
+            QWidget#LogAppRoot QMenuBar::item:hover {{
+                background-color: {hover_color};
+                color: {button_foreground};
+            }}
+            QWidget#LogAppRoot QMenuBar::item:selected {{
+                background-color: {hover_color};
+                color: {button_foreground};
+            }}
+            QWidget#LogAppRoot QMenu {{
+                background-color: {body_background};
+                color: {editor_text};
+                border: 1px solid {border_color};
+            }}
+            QWidget#LogAppRoot QMenu::item:hover {{
+                background-color: {hover_color};
+                color: {button_foreground};
+            }}
+            QWidget#LogAppRoot QMenu::item:selected {{
+                background-color: {hover_color};
+                color: {button_foreground};
+            }}
+            QWidget#LogAppRoot QTextEdit,
+            QWidget#LogAppRoot QListWidget {{
+                background-color: {editor_background};
+                color: {editor_text};
+                border: 1px solid {border_color};
+                selection-background-color: {selection_background};
+                outline: none;
+            }}
+            QWidget#LogAppRoot QListWidget::item:hover {{
+                background-color: {hover_color};
+            }}
+            QWidget#LogAppRoot QListWidget::item:selected {{
+                background-color: {hover_color};
+            }}
+            QWidget#LogAppRoot QComboBox,
+            QWidget#LogAppRoot QPushButton {{
+                background-color: {button_background};
+                color: {button_foreground};
+                border: 1px solid {border_color};
+                padding: 4px;
+            }}
+            QWidget#LogAppRoot QPushButton:hover {{
+                background-color: {hover_color};
+            }}
+            QWidget#LogAppRoot QPushButton:pressed {{
+                background-color: {hover_color};
+            }}
+        """)
+        self.apply_editor_selected_log_highlight()
 
     def create_menu_bar(self, layout):
         menu_bar = QMenuBar(self)
@@ -1558,7 +3448,30 @@ class LogApp(QWidget):
 
         # View Menu
         view_menu = QMenu("View", self)
-        menu_bar.addMenu(view_menu)
+        self.menu_bar = menu_bar  
+        self.view_menu_action = self.menu_bar.addMenu(view_menu)
+        
+        # create overlay badge for the View menu
+        importance_count = int(getattr(self, "log_counters", {}).get("Importance", 0))
+        self.view_badge = QLabel(str(importance_count) if importance_count > 0 else "", self.menu_bar)
+        self.view_badge.setObjectName("ViewBadge")
+        self.view_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.view_badge.setStyleSheet(
+            "QLabel#ViewBadge { background-color: #d32f2f; color: white; "
+            "border-radius: 8px; min-width: 16px; max-height: 16px; "
+            "font-size: 10px; font-weight: bold; padding: 0px 4px; }"
+        )
+        if importance_count <= 0:
+            self.view_badge.hide()
+        else:
+            self.view_badge.show()
+        self.view_badge.adjustSize()
+        QTimer.singleShot(0, self.position_view_badge)
+        
+        self.important_action = QAction(f"Important ({importance_count})", self)
+        self.important_action.setCheckable(True)
+        self.important_action.triggered.connect(self.toggle_view_important)
+        view_menu.addAction(self.important_action)
 
         preferences_action = QAction("Preferences", self)
         preferences_action.triggered.connect(self.open_preferences)
@@ -1608,7 +3521,13 @@ class LogApp(QWidget):
     def open_preferences(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Log Viewer Preferences")
-        dialog.setFixedSize(360, 340)
+        dialog.setFixedSize(360, 380)
+        # Keep this dialog readable regardless of the viewer theme.
+        dialog.setStyleSheet("""
+            QDialog { background-color: #f5f5f5; color: #111111; }
+            QLabel, QCheckBox { color: #111111; }
+            QPushButton { padding: 6px; }
+        """)
 
         layout = QVBoxLayout(dialog)
 
@@ -1656,37 +3575,83 @@ class LogApp(QWidget):
         selection_mode_input.setCurrentText(mode_to_label.get(current_mode, "Darker"))
         selection_layout.addWidget(selection_mode_input)
         layout.addLayout(selection_layout)
+        
+        initial_preset = self.DEFAULT_VIEWER_DARK_PRESET if dark_mode_input.isChecked() else self.DEFAULT_VIEWER_PREFERENCES
+        background_color = {"value": getattr(self, "viewer_background_color", initial_preset["viewer_background_color"])}
+        background_button = QPushButton("Background Color")
+        self._set_preview_button_color(background_button, background_color["value"])
+        background_button.setEnabled(not dark_mode_input.isChecked())
+        layout.addWidget(background_button)
 
         selected_color = {"value": getattr(self, "viewer_colored_selection_color", "#d6eaff")}
         color_button = QPushButton("Selected Highlight Color")
         color_button.setEnabled(selection_mode_input.currentText() == "Choose Color")
-        color_button.setStyleSheet(f"background-color: {selected_color['value']};")
+        self._set_preview_button_color(color_button, selected_color["value"])
         layout.addWidget(color_button)
 
-        accent_color = {"value": getattr(self, "viewer_selection_accent_color", "#2196F3")}
+        accent_color = {"value": getattr(self, "viewer_selection_accent_color", initial_preset.get("viewer_selection_accent_color", "#2196F3"))}
         accent_button = QPushButton("Selection Border Accent Color")
-        accent_button.setStyleSheet(f"background-color: {accent_color['value']};")
+        self._set_preview_button_color(accent_button, accent_color["value"])
         layout.addWidget(accent_button)
+        
+        hover_color = {"value": getattr(self, "viewer_hover_color", initial_preset["viewer_hover_color"])}
+        hover_button = QPushButton("Hover Color")
+        self._set_preview_button_color(hover_button, hover_color["value"])
+        layout.addWidget(hover_button)
 
         def choose_selection_color():
             color = QColorDialog.getColor(QColor(selected_color["value"]), dialog)
             if color.isValid():
                 selected_color["value"] = color.name()
-                color_button.setStyleSheet(f"background-color: {selected_color['value']};")
+                self._set_preview_button_color(color_button, selected_color["value"])
 
         def choose_accent_color():
             color = QColorDialog.getColor(QColor(accent_color["value"]), dialog)
             if color.isValid():
                 accent_color["value"] = color.name()
-                accent_button.setStyleSheet(f"background-color: {accent_color['value']};")
+                self._set_preview_button_color(accent_button, accent_color["value"])
+        
+        def choose_background_color():
+            color = QColorDialog.getColor(QColor(background_color["value"]), dialog)
+            if color.isValid():
+                background_color["value"] = color.name()
+                self._set_preview_button_color(background_button, background_color["value"])
 
+        def choose_hover_color():
+            color = QColorDialog.getColor(QColor(hover_color["value"]), dialog)
+            if color.isValid():
+                hover_color["value"] = color.name()
+                self._set_preview_button_color(hover_button, hover_color["value"])
         def update_selection_color_enabled(text):
             color_button.setEnabled(text == "Choose Color")
 
+        def set_background_button_enabled():
+            background_button.setEnabled(not dark_mode_input.isChecked())
+
+        def reset_colors_to_mode_preset(checked):
+            # Treat the checkbox toggle as a reset-to-preset switch.
+            preset = self.DEFAULT_VIEWER_DARK_PRESET if checked else self.DEFAULT_VIEWER_PREFERENCES
+            background_color["value"] = preset["viewer_background_color"]
+            hover_color["value"] = preset["viewer_hover_color"]
+            accent_color["value"] = preset.get("viewer_selection_accent_color", accent_color["value"])
+
+            # Only reset selection highlight when user is in custom mode (it's the most visible impact)
+            if selection_mode_input.currentText() == "Choose Color":
+                selected_color["value"] = preset.get("viewer_colored_selection_color", selected_color["value"])
+
+            self._set_preview_button_color(background_button, background_color["value"])
+            self._set_preview_button_color(hover_button, hover_color["value"])
+            self._set_preview_button_color(accent_button, accent_color["value"])
+            self._set_preview_button_color(color_button, selected_color["value"])
+            set_background_button_enabled()
+
         selection_mode_input.currentTextChanged.connect(update_selection_color_enabled)
+        dark_mode_input.stateChanged.connect(reset_colors_to_mode_preset)
+        set_background_button_enabled()
+        background_button.clicked.connect(choose_background_color)
         color_button.clicked.connect(choose_selection_color)
         accent_button.clicked.connect(choose_accent_color)
-
+        hover_button.clicked.connect(choose_hover_color)
         button_layout = QHBoxLayout()
         save_button = QPushButton("Save")
         cancel_button = QPushButton("Cancel")
@@ -1708,6 +3673,8 @@ class LogApp(QWidget):
             self.viewer_colored_selection_mode = selection_label_to_mode.get(selection_mode_input.currentText(), "darker")
             self.viewer_colored_selection_color = selected_color["value"]
             self.viewer_selection_accent_color = accent_color["value"]
+            self.viewer_background_color = background_color["value"]
+            self.viewer_hover_color = hover_color["value"]
             self.save_user_config()
             if hasattr(self, "logs_viewer") and self.logs_viewer:
                 self.logs_viewer.apply_viewer_theme()
@@ -1719,11 +3686,151 @@ class LogApp(QWidget):
         dialog.exec()
 
     def open_editor_playground(self):
-        QMessageBox.information(
-            self,
-            "Editor's Playground",
-            "Editor's playground will be added here."
-        )
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Editor's Playground")
+        dialog.setFixedSize(360, 320)
+        # Keep this dialog readable regardless of the main UI theme.
+        dialog.setStyleSheet("""
+            QDialog { background-color: #f5f5f5; color: #111111; }
+            QLabel, QCheckBox { color: #111111; }
+            QPushButton { padding: 6px; }
+        """)
+
+        layout = QVBoxLayout(dialog)
+
+        dark_mode_input = QCheckBox("Dark mode")
+        dark_mode_input.setChecked(bool(getattr(self, "editor_dark_mode", False)))
+        layout.addWidget(dark_mode_input)
+
+        initial_preset = self.DEFAULT_EDITOR_DARK_PRESET if dark_mode_input.isChecked() else self.DEFAULT_EDITOR_PREFERENCES
+
+        editor_background = {"value": getattr(self, "editor_background_color", initial_preset["editor_background_color"])}
+        editor_background_button = QPushButton("Custom background (editor)")
+        self._set_preview_button_color(editor_background_button, editor_background["value"])
+        editor_background_button.setEnabled(True)
+        layout.addWidget(editor_background_button)
+
+        body_background = {"value": getattr(self, "editor_body_background_color", initial_preset["editor_body_background_color"])}
+        body_background_button = QPushButton("Custom background (body)")
+        self._set_preview_button_color(body_background_button, body_background["value"])
+        body_background_button.setEnabled(not dark_mode_input.isChecked())
+        layout.addWidget(body_background_button)
+
+        button_foreground = {"value": getattr(self, "editor_button_foreground_color", initial_preset["editor_button_foreground_color"])}
+        button_foreground_button = QPushButton("Buttons foreground")
+        self._set_preview_button_color(button_foreground_button, button_foreground["value"])
+        button_foreground_button.setEnabled(True)
+        layout.addWidget(button_foreground_button)
+
+        button_background = {"value": getattr(self, "editor_button_background_color", initial_preset["editor_button_background_color"])}
+        button_background_button = QPushButton("Buttons background")
+        self._set_preview_button_color(button_background_button, button_background["value"])
+        button_background_button.setEnabled(True)
+        layout.addWidget(button_background_button)
+
+        hover_color = {"value": getattr(self, "editor_hover_color", initial_preset.get("editor_hover_color", self.DEFAULT_EDITOR_PREFERENCES["editor_hover_color"]))}
+        hover_button = QPushButton("Hover")
+        self._set_preview_button_color(hover_button, hover_color["value"])
+        hover_button.setEnabled(True)
+        layout.addWidget(hover_button)
+
+        importance_color = {"value": getattr(self, "important_accent_color", self.DEFAULT_LOG_THEME_COLORS["important_accent_color"])}
+        importance_button = QPushButton("Importance color")
+        self._set_preview_button_color(importance_button, importance_color["value"])
+        importance_button.setEnabled(True)
+        layout.addWidget(importance_button)
+
+        categories_button = QPushButton("Categories")
+        layout.addWidget(categories_button)
+
+        def choose_editor_background():
+            color = QColorDialog.getColor(QColor(editor_background["value"]), dialog)
+            if color.isValid():
+                editor_background["value"] = color.name()
+                self._set_preview_button_color(editor_background_button, editor_background["value"])
+
+        def choose_body_background():
+            color = QColorDialog.getColor(QColor(body_background["value"]), dialog)
+            if color.isValid():
+                body_background["value"] = color.name()
+                self._set_preview_button_color(body_background_button, body_background["value"])
+
+        def choose_button_foreground():
+            color = QColorDialog.getColor(QColor(button_foreground["value"]), dialog)
+            if color.isValid():
+                button_foreground["value"] = color.name()
+                self._set_preview_button_color(button_foreground_button, button_foreground["value"])
+
+        def choose_button_background():
+            color = QColorDialog.getColor(QColor(button_background["value"]), dialog)
+            if color.isValid():
+                button_background["value"] = color.name()
+                self._set_preview_button_color(button_background_button, button_background["value"])
+
+        def choose_hover_color():
+            color = QColorDialog.getColor(QColor(hover_color["value"]), dialog)
+            if color.isValid():
+                hover_color["value"] = color.name()
+                self._set_preview_button_color(hover_button, hover_color["value"])
+
+        def choose_importance_color():
+            color = QColorDialog.getColor(QColor(importance_color["value"]), dialog)
+            if color.isValid():
+                importance_color["value"] = color.name()
+                self._set_preview_button_color(importance_button, importance_color["value"])
+
+        def set_body_button_enabled():
+            body_background_button.setEnabled(not dark_mode_input.isChecked())
+
+        def reset_colors_to_mode_preset(checked):
+            # Treat the checkbox toggle as a reset-to-preset switch.
+            preset = self.DEFAULT_EDITOR_DARK_PRESET if checked else self.DEFAULT_EDITOR_PREFERENCES
+            editor_background["value"] = preset["editor_background_color"]
+            body_background["value"] = preset["editor_body_background_color"]
+            button_foreground["value"] = preset["editor_button_foreground_color"]
+            button_background["value"] = preset["editor_button_background_color"]
+            hover_color["value"] = preset.get("editor_hover_color", self.DEFAULT_EDITOR_PREFERENCES["editor_hover_color"])
+
+            self._set_preview_button_color(editor_background_button, editor_background["value"])
+            self._set_preview_button_color(body_background_button, body_background["value"])
+            self._set_preview_button_color(button_foreground_button, button_foreground["value"])
+            self._set_preview_button_color(button_background_button, button_background["value"])
+            self._set_preview_button_color(hover_button, hover_color["value"])
+            set_body_button_enabled()
+
+        dark_mode_input.stateChanged.connect(reset_colors_to_mode_preset)
+        set_body_button_enabled()
+        editor_background_button.clicked.connect(choose_editor_background)
+        body_background_button.clicked.connect(choose_body_background)
+        button_foreground_button.clicked.connect(choose_button_foreground)
+        button_background_button.clicked.connect(choose_button_background)
+        hover_button.clicked.connect(choose_hover_color)
+        importance_button.clicked.connect(choose_importance_color)
+        categories_button.clicked.connect(self.open_editor_categories)
+
+        button_layout = QHBoxLayout()
+        save_button = QPushButton("Save")
+        cancel_button = QPushButton("Cancel")
+        button_layout.addWidget(save_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+
+        def save_editor_preferences():
+            self.editor_dark_mode = dark_mode_input.isChecked()
+            self.editor_background_color = editor_background["value"]
+            self.editor_body_background_color = body_background["value"]
+            self.editor_button_foreground_color = button_foreground["value"]
+            self.editor_button_background_color = button_background["value"]
+            self.editor_hover_color = hover_color["value"]
+            self.important_accent_color = importance_color["value"]
+            self.save_user_config()
+            self.apply_editor_theme()
+            self.refresh_log_label_styles()
+            dialog.accept()
+
+        save_button.clicked.connect(save_editor_preferences)
+        cancel_button.clicked.connect(dialog.reject)
+        dialog.exec()
 
     def update_recent_files_menu(self):
         self.recent_menu.clear()
@@ -1764,9 +3871,11 @@ class LogApp(QWidget):
     def show_help(self):
         QMessageBox.information(self, "How to Use", "1. Open or create a log file.\n2. Add logs using the text input.\n3. Save logs to keep them.\n4. Use 'Recent' to quickly access previous logs.")
 
-    def init_ui(self):
+    def init_ui(self):  
         print("Setting up UI...")
-        self.setWindowTitle("Log Documentation System")
+        self.setObjectName("LogAppRoot")
+        # set window title to current file
+        self.setWindowTitle(self.fileName)
         self.setGeometry(100, 100, 500, 400)
         self.setFixedSize(500, 400)  # Make window not resizable
         self.setWindowFlag(Qt.WindowType.MSWindowsFixedSizeDialogHint)
@@ -1813,6 +3922,7 @@ class LogApp(QWidget):
             self.category_selector.addItems(["Just Details", "Bug ▲"])    
 
         combo_layout.addWidget(self.category_selector)
+        self.refresh_category_selector()
 
         layout.addLayout(combo_layout)
 
@@ -1828,8 +3938,16 @@ class LogApp(QWidget):
 
         layout.addLayout(button_layout)
 
-        self.log_list = QListWidget(self)
+        self.log_list = LogListWidget(self)
+        self.editor_selected_log_label = None
+        # allow this widget to forward events to LogApp.eventFilter
+        self.log_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.log_list.installEventFilter(self)
+        self.log_list.viewport().installEventFilter(self)
+        # allow horizontal scrollbar when needed
+        self.log_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.log_list.itemDoubleClicked.connect(self.edit_log)
+        self.log_list.currentItemChanged.connect(self.on_editor_log_selection_changed)
 
         # Set context menu policy to enable right-click menu
         self.log_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -1883,6 +4001,7 @@ class LogApp(QWidget):
 
         self.setLayout(layout)
         print("UI setup complete.")
+        self.apply_editor_theme()
 
         # Hotkey for Saving Logs
         self.save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
@@ -2050,25 +4169,19 @@ class LogApp(QWidget):
             timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%SH]")
             additional_info = ""
 
-            category = self.category_selector.currentText()
-            indicators = {"Problem ★": "★", "Solution ■": "■", "Bug ▲": "▲", "Changes ◆": "◆", "Just Details": ""}
-            category_icon = indicators.get(category, "")
-
-            # Set default colors for categories
-            category_colors = {
-                "Problem ★": "red",
-                "Bug ▲": "black",
-                "Solution ■": "yellow",
-                "Changes ◆": "blue",
-            }
-            icon_color = category_colors.get(category, "green")  # Fallback to green if category not found
+            cat_cfg = self._current_category_config() or {}
+            category_id = str(cat_cfg.get("id", "")).strip() or "unknown"
+            category_icon = str(cat_cfg.get("icon", "")).strip()
+            category_bg = str(cat_cfg.get("background", "transparent"))
+            category_fg = str(cat_cfg.get("foreground", "#111111"))
+            icon_color = category_fg
 
             # Auto-increment counter for the selected category.
             # Ensure missing keys from older counter files are created on the fly.
-            if category not in self.log_counters:
-                self.log_counters[category] = 0
-            self.log_counters[category] += 1
-            log_number = f" #{self.log_counters[category]}"
+            if category_id not in self.log_counters:
+                self.log_counters[category_id] = 0
+            self.log_counters[category_id] += 1
+            log_number = f" #{self.log_counters[category_id]}"
 
             if self.log_type == "Debugging":
                 memory_usage = self.get_system_info()
@@ -2078,25 +4191,35 @@ class LogApp(QWidget):
             elif self.log_type == "General" and self.user_name:
                 additional_info = f" - User: {self.user_name}"
 
-            # Use the customized text color for the main log entry text
-            main_text_color = self.text_color.name() if hasattr(self, 'text_color') else "black"  # Default to black
+            # Category foreground drives the log entry foreground (viewer/editor will still render rich text).
+            main_text_color = category_fg
 
             # Format the log text using format_text
             formatted_log_text = self.format_text(log_text)
 
             # Create the log entry with HTML formatting
+            style_marker = self._category_style_marker(category_id, category_bg, category_fg)
             log_entry = (
+                f"{style_marker}"
                 f'<span style="color:{icon_color};">{category_icon}</span> '
                 f'<span style="color:{main_text_color};">{timestamp} [{self.log_type}] {formatted_log_text}{additional_info}{log_number}</span>'
             )
 
             # Create a QLabel to render the rich text
-            label = QLabel()
+            label = EditorLogLabel()
             self.configure_log_label(label, log_entry, word_wrap=False)
             label.setSizePolicy(label.sizePolicy().horizontalPolicy(), label.sizePolicy().verticalPolicy())
 
             # Add the QLabel to the QListWidget
             item = QListWidgetItem()
+            # Set the item background from the category so hover/selection shows through
+            try:
+                if category_bg and str(category_bg).strip().lower() != "transparent":
+                    item.setBackground(QBrush(QColor(category_bg)))
+                else:
+                    item.setBackground(QBrush())
+            except Exception:
+                pass
             self.log_list.addItem(item)
             self.log_list.setItemWidget(item, label)
 
@@ -2120,6 +4243,7 @@ class LogApp(QWidget):
 
             # Emit signal for real-time sync with LogsViewerWindow
             self.logAdded.emit(log_entry)
+            self.reapply_active_filter()
 
         else:
             QMessageBox.warning(self, "Invalid Input", "Log entry cannot be empty.")
@@ -2137,26 +4261,35 @@ class LogApp(QWidget):
         if isinstance(label, QLabel):
             # Get the plain text version of the current log entry
             current_text = self.strip_html(label.text())
+            prefix_match = re.match(r"^\s*(\S*)\s*(\[[^\]]+\]\s*\[[^\]]+\])\s*", current_text)
+            prefix_text = ""
+            editable_text = current_text.strip()
+            if prefix_match:
+                icon_text = (prefix_match.group(1) or "").strip()
+                header_text = (prefix_match.group(2) or "").strip()
+                prefix_text = f"{icon_text} {header_text}".strip()
+                editable_text = current_text[prefix_match.end():].strip()
+            editable_text = re.sub(r"\s+\|\s+\[[^\]]+\].*$", "", editable_text).strip()
+            editable_text = re.sub(r"\s*-\s*User:.*?(#\d+\s*)?$", "", editable_text).strip()
+            editable_text = re.sub(r"\s+#\d+\s*$", "", editable_text).strip()
 
             # Open a dialog pre-filled with the current log text
-            plain_text, ok = QInputDialog.getText(self, "Edit Log", "Modify your log entry:", text="")
+            plain_text, ok = prompt_log_content_input(self, "Edit Log", prefix_text or "Log header", text=editable_text)
             if ok and plain_text.strip():
-                timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%SH]")
                 status_date = datetime.now().strftime("[%Y-%m-%d %H:%M:%SH]")
-                category = self.category_selector.currentText()
-                indicators = {"Problem ★": "★", "Solution ■": "■", "Bug ▲": "▲", "Changes ◆": "◆", "Just Details": ""}
-                category_icon = indicators.get(category, "")
-
-                category_colors = {
-                    "Problem ★": "red",
-                    "Bug ▲": "black",
-                    "Solution ■": "yellow",
-                    "Changes ◆": "blue",
-                }
-                icon_color = category_colors.get(category, "green")
-                main_text_color = self.text_color.name() if hasattr(self, 'text_color') else "black"
-
                 existing_html = label.text()
+                marker = self._parse_category_style_marker(existing_html) or {}
+                marker_category_id = str(marker.get("id", "")).strip()
+                cat_cfg = self._category_config_by_id(marker_category_id) if marker_category_id else None
+                if not cat_cfg:
+                    cat_cfg = self._current_category_config() or {}
+                category_id = str(cat_cfg.get("id", "")).strip() or marker_category_id or "unknown"
+                category_icon = str(cat_cfg.get("icon", "")).strip()
+                category_bg = str(cat_cfg.get("background", "transparent"))
+                category_fg = str(cat_cfg.get("foreground", "#111111"))
+                icon_color = category_fg
+                main_text_color = category_fg
+
                 existing_plain = self.strip_html(existing_html)
                 kept_status_badges = []
                 if "Resolved" in existing_html:
@@ -2173,16 +4306,40 @@ class LogApp(QWidget):
                 all_status_badges = kept_status_badges + [edited_badge]
                 status_suffix = f"{status_prefix} " + " ".join(all_status_badges)
 
+                style_marker = self._category_style_marker(category_id, category_bg, category_fg)
+                preserved_prefix = prefix_text or f"{category_icon} [{datetime.now().strftime('%Y-%m-%d %H:%M:%SH')}] [{self.log_type}]"
                 updated_text = (
+                    f"{style_marker}"
                     f'<span style="color:{icon_color};">{category_icon}</span> '
-                    f'<span style="color:{main_text_color};">{timestamp} [{self.log_type}] {plain_text}{status_suffix}</span>'
+                    f'<span style="color:{main_text_color};">{preserved_prefix[len(category_icon):].strip()} {plain_text}{status_suffix}</span>'
                 )
                 # Update the existing label with the new rich text
                 updated_text = self.set_importance_marker(updated_text, self.is_important_log(existing_html))
                 self.configure_log_label(label, updated_text, word_wrap=False)
+                # update the corresponding item's background to match new content
+                try:
+                    row = self.log_list.row(item)
+                    list_item = self.log_list.item(row)
+                    if list_item:
+                        bg = self.get_log_background_color(updated_text)
+                        if isinstance(bg, str) and bg.strip() and bg.strip().lower() != "transparent":
+                            list_item.setBackground(QBrush(QColor(bg)))
+                        else:
+                            list_item.setBackground(QBrush())
+                except Exception:
+                    pass
+                row = self.log_list.row(item)
+                self.logEdited.emit(row)
+                self.reapply_active_filter()
                 # No need to re-add the widget or duplicate it; this updates the current item.
             elif not plain_text.strip():
-                QMessageBox.warning(self, "Invalid Input", "Log entry cannot be empty.")
+                show_neutral_message_box(
+                    self,
+                    QMessageBox.Icon.Warning,
+                    "Invalid Input",
+                    "Log entry cannot be empty.",
+                    QMessageBox.StandardButton.Ok,
+                )
 
     def save_logs(self):
         self.unsaved_changes = False
@@ -2231,8 +4388,8 @@ class LogApp(QWidget):
         print(f"Logs saved to {file_name}")
         print(f"Config saved to {config_folder}")
 
-        self.setWindowTitle("Log Documentation System - File saved")  # Update title
-        QTimer.singleShot(2000, lambda: self.setWindowTitle("Log Documentation System"))   # Reset after 2 seconds
+        self.setWindowTitle(f"{self.fileName} - File saved")  # Update title
+        QTimer.singleShot(2000, lambda: self.setWindowTitle(f"{self.fileName}"))   # Reset after 2 seconds
 
     def open_logs(self, file_path=None):
         print("Opening logs...")
@@ -2249,6 +4406,7 @@ class LogApp(QWidget):
         self.save_recent_file(file_path)
         self.log_list.clear()
         self.load_user_config()
+        self.apply_editor_theme()
 
         # Use project folder and config subfolder
         project_folder = os.path.dirname(file_path)
@@ -2260,12 +4418,42 @@ class LogApp(QWidget):
             try:
                 with open(counters_path, "r", encoding="utf-8") as f:
                     loaded_counters = json.load(f)
-                    self.log_counters = dict(self.DEFAULT_COUNTERS)
-                    if isinstance(loaded_counters, dict):
-                        self.log_counters.update(loaded_counters)
+                    # New format: ordered list of {id, count, ...}
+                    if isinstance(loaded_counters, list):
+                        self.log_counters = {}
+                        for item in loaded_counters:
+                            if not isinstance(item, dict):
+                                continue
+                            cid = str(item.get("id", "")).strip()
+                            if not cid:
+                                continue
+                            try:
+                                self.log_counters[cid] = int(item.get("count", 0))
+                            except Exception:
+                                self.log_counters[cid] = 0
+                    # Old format: dict keyed by display name
+                    elif isinstance(loaded_counters, dict):
+                        self.log_counters = {}
+                        # migrate by matching category name (ignoring icon changes)
+                        self._ensure_editor_categories()
+                        by_name = {str(c.get("category", "")).strip(): str(c.get("id", "")).strip() for c in getattr(self, "editor_categories", [])}
+                        for k, v in loaded_counters.items():
+                            name = str(k).strip()
+                            # if key looks like "Name ICON", strip icon part
+                            if name and len(name) >= 2 and name[-2] == " ":
+                                name = name[:-2]
+                            cid = by_name.get(name)
+                            if not cid:
+                                continue
+                            try:
+                                self.log_counters[cid] = int(v)
+                            except Exception:
+                                self.log_counters[cid] = 0
+                    else:
+                        self.log_counters = {}
             except Exception as e:
                 print(f"Error loading log counters: {e}")
-                self.log_counters = dict(self.DEFAULT_COUNTERS)
+                self.log_counters = {}
         else:
             self.detect_log_counters()
 
@@ -2301,6 +4489,7 @@ class LogApp(QWidget):
             progress_dialog = QProgressDialog("Loading Please Wait...", "Cancel", 0, len(lines), self)
             progress_dialog.setWindowTitle("Loading Logs")
             progress_dialog.setFixedSize(300, 100)
+            apply_neutral_dialog_style(progress_dialog)
             progress_dialog.setWindowFlag(Qt.WindowType.Window | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint)
             progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
             progress_dialog.setMinimumDuration(0)  # Show immediately
@@ -2320,17 +4509,35 @@ class LogApp(QWidget):
 
             for i, line in enumerate(lines):
                 if progress_dialog.wasCanceled():
-                    self.log_list.clear()   # Clear all log items
-                    self.current_file = None  # Reset the current file reference
-                    QMessageBox.information(self, "Loading Cancelled", "The loading process has been cancelled.")
+                    self._load_was_canceled = True
+                    # cleanup partially-loaded state
+                    self.log_list.clear()
+                    self.current_file = None
+                    progress_dialog.close()
+                    box = QMessageBox(self)
+                    box.setIcon(QMessageBox.Icon.Information)
+                    box.setWindowTitle("Loading Cancelled")
+                    box.setText("The loading process has been cancelled.")
+                    box.setStandardButtons(QMessageBox.StandardButton.Ok)
+                    apply_neutral_dialog_style(box)
+                    box.exec()
                     print("Loading canceled by user.")
-                    break
+
+                    # close auxiliary viewers if open
+                    try:
+                        if hasattr(self, "logs_viewer") and self.logs_viewer:
+                            self.logs_viewer.close()
+                    except Exception:
+                        pass
+                    
+                    return
+                
                 line = line.strip()
 
                 if line:  # Ensure the line is not empty
 
                     # Create a QLabel and set the saved HTML content
-                    label = QLabel()
+                    label = EditorLogLabel()
                     self.configure_log_label(label, line, word_wrap=False)
                     label.adjustSize()
 
@@ -2350,6 +4557,8 @@ class LogApp(QWidget):
             self.update_importance_counter()
             self.save_log_counters()
             self.refresh_log_label_styles()
+            self.normalize_logs_to_categories_and_rebuild_counters()
+            self.reapply_active_filter()
             print(f"Logs loaded successfully from {file_path}")
             
             if hasattr(self, 'logs_viewer') and self.logs_viewer:
@@ -2377,6 +4586,33 @@ class LogApp(QWidget):
             print(f"Error opening file: {e}")
 
     def eventFilter(self, source, event):
+        # Wheel events on the list viewport -> horizontal if Shift held, otherwise vertical
+        if getattr(self, "log_list", None) and source is self.log_list.viewport() and event.type() == QEvent.Type.Wheel:
+            dx = event.angleDelta().x()
+            dy = event.angleDelta().y()
+            delta = dx if dx != 0 else dy
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                h = self.log_list.horizontalScrollBar()
+                h.setValue(h.value() - (delta // 8))
+            else:
+                v = self.log_list.verticalScrollBar()
+                v.setValue(v.value() - (dy // 8))
+            event.accept()
+            return True
+    
+        # Left/Right arrow keys when the list has focus -> scroll horizontally
+        if getattr(self, "log_list", None) and source is self.log_list and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Left:
+                h = self.log_list.horizontalScrollBar()
+                h.setValue(h.value() - (h.singleStep() or 20))
+                event.accept()
+                return True
+            if event.key() == Qt.Key.Key_Right:
+                h = self.log_list.horizontalScrollBar()
+                h.setValue(h.value() + (h.singleStep() or 20))
+                event.accept()
+                return True
+                
         if source == self.log_input and event.type() == QEvent.Type.KeyPress:
             # Debug: print key code and modifiers
             print("Key pressed in log_input:", event.key(), event.modifiers())
@@ -2387,69 +4623,96 @@ class LogApp(QWidget):
         return super().eventFilter(source, event)
 
     def show_context_menu(self, pos: QPoint):
-        item = self.log_list.itemAt(pos)
-        if item:
-            menu = QMenu()
-            # Get the selected log text
-            label = self.log_list.itemWidget(item)
-            log_text = self.strip_html(label.text()) if isinstance(label, QLabel) else ""
+        self.show_context_menu_at_global_pos(self.log_list.viewport().mapToGlobal(pos))
 
-            # Check if the log is a Bug or Problem
-            is_resolvable = "▲" in log_text
-            can_mark_important = "Fixed" not in log_text and "Resolved" not in log_text and "■" not in log_text
-            is_important = self.is_important_log(label.text()) if isinstance(label, QLabel) else False
+    def show_context_menu_at_global_pos(self, global_pos: QPoint):
+        scroll_state = self._capture_log_list_scroll()
+        try:
+            item = self.log_list.itemAt(self.log_list.viewport().mapFromGlobal(global_pos))
+            if item:
+                menu = QMenu()
+                # Get the selected log text
+                label = self.log_list.itemWidget(item)
+                log_text = self.strip_html(label.text()) if isinstance(label, QLabel) else ""
 
-            delete_action = menu.addAction("Delete")
-            edit_action = menu.addAction("Edit")
+                # Check if the log is a Bug or Problem
+                is_resolvable = "▲" in log_text
+                can_mark_important = "Fixed" not in log_text and "Resolved" not in log_text and "■" not in log_text
+                is_important = self.is_important_log(label.text()) if isinstance(label, QLabel) else False
 
-            importance_action = None
-            if can_mark_important:
-                importance_action = menu.addAction("Remove Importance" if is_important else "Mark as Important")
+                delete_action = menu.addAction("Delete")
+                edit_action = menu.addAction("Edit")
 
-            # Add "Fix" option only for Bugs
-            fix_action = None
-            if is_resolvable:
-                fix_action = menu.addAction("Fix")
+                importance_action = None
+                if can_mark_important:
+                    importance_action = menu.addAction("Remove Importance" if is_important else "Mark as Important")
 
-            # Add "Solution" option only for Problems
-            solution_action = None
-            if "★" in log_text:
-                solution_action = menu.addAction("Add Solution")
+                # Add "Fix" option only for Bugs
+                fix_action = None
+                if is_resolvable:
+                    fix_action = menu.addAction("Fix")
 
-            # Add "View All Logs" option
-            view_all_action = menu.addAction("View All Logs")
-            
-            action = menu.exec(self.log_list.viewport().mapToGlobal(pos))
-            
-            if action is None:
-                return  # Exit function without doing anything
+                # Add "Solution" option only for Problems
+                solution_action = None
+                if "★" in log_text:
+                    solution_action = menu.addAction("Add Solution")
 
-            if action == delete_action:
-                row = self.log_list.row(item)
-                self.log_list.takeItem(row)
-                self.logDeleted.emit(row)  # Emit signal
-                print("Log entry deleted.")
+                # Add "View All Logs" option
+                view_all_action = menu.addAction("View All Logs")
+                
+                action = menu.exec(global_pos)
+                
+                if action is None:
+                    return  # Exit function without doing anything
 
-            elif action == edit_action:
-                row = self.log_list.row(item)
-                self.edit_log(item)
-                self.logEdited.emit(row)  # Emit signal
-                print("Log entry edited.")
+                if action == delete_action:
+                    row = self.log_list.row(item)
+                    self.log_list.takeItem(row)
+                    self.logDeleted.emit(row)  # Emit signal
+                    self.reapply_active_filter()
+                    print("Log entry deleted.")
 
-            elif action == importance_action:
-                self.set_log_importance(item, not is_important)
-            
-            elif action == view_all_action:
-                self.open_logs_viewer()
-                print("Opened Logs Viewer window.")
+                elif action == edit_action:
+                    row = self.log_list.row(item)
+                    self.edit_log(item)
+                    self.logEdited.emit(row)  # Emit signal
+                    print("Log entry edited.")
 
-            elif action == fix_action:
-                self.resolve_log(item)
-                print("Log entry resolved.")
+                elif action == importance_action:
+                    self.set_log_importance(item, not is_important)
+                
+                elif action == view_all_action:
+                    self.open_logs_viewer()
+                    print("Opened Logs Viewer window.")
 
-            elif action == solution_action:
-                self.add_solution(item)
-                print("Solution added for the problem.")
+                elif action == fix_action:
+                    self.resolve_log(item)
+                    print("Log entry resolved.")
+
+                elif action == solution_action:
+                    self.add_solution(item)
+                    print("Solution added for the problem.")
+        finally:
+            self._restore_log_list_scroll(scroll_state)
+            QTimer.singleShot(0, lambda state=scroll_state: self._restore_log_list_scroll(state))
+
+    def _should_preserve_log_scroll(self):
+        return bool(getattr(self, "active_filter", None) or getattr(self, "important_filter_active", False))
+
+    def _begin_log_scroll_guard(self, delay_ms=250):
+        if not hasattr(self, "log_list") or not self.log_list:
+            return
+        if not self._should_preserve_log_scroll():
+            return
+        self.log_list._suppress_auto_scroll = True
+        guard_token = getattr(self, "_log_scroll_guard_token", 0) + 1
+        self._log_scroll_guard_token = guard_token
+
+        def clear_guard(token=guard_token):
+            if getattr(self, "_log_scroll_guard_token", 0) == token and hasattr(self, "log_list") and self.log_list:
+                self.log_list._suppress_auto_scroll = False
+
+        QTimer.singleShot(delay_ms, clear_guard)
 
     def set_log_importance(self, item, important):
         label = self.log_list.itemWidget(item)
@@ -2462,6 +4725,7 @@ class LogApp(QWidget):
         self.save_log_counters()
         self.unsaved_changes = True
         self.importanceChanged.emit()
+        self.reapply_active_filter()
 
     def add_solution(self, item):
         # Add a solution log corresponding to a problem log and mark it as Resolved
@@ -2477,7 +4741,7 @@ class LogApp(QWidget):
             match = re.search(r"★.*?#(\d+)", problem_text)
             if match:
                 problem_number = match.group(1)
-                solution_text, ok = QInputDialog.getText(self, "Add Solution", f"Enter solution for Problem #{problem_number}:")
+                solution_text, ok = prompt_text_input(self, "Add Solution", f"Enter solution for Problem #{problem_number}:")
                 if ok and solution_text.strip():
                     # Add the solution log
                     timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%SH]")
@@ -2485,7 +4749,7 @@ class LogApp(QWidget):
                         f'<span style="color:yellow;">■</span> '
                         f'<span style="color:black;">{timestamp} [General] {solution_text.strip()} - Solution #{problem_number}</span>'
                     )
-                    solution_label = QLabel()
+                    solution_label = EditorLogLabel()
                     self.configure_log_label(solution_label, solution_entry, word_wrap=False)
 
                     solution_item = QListWidgetItem()
@@ -2502,6 +4766,7 @@ class LogApp(QWidget):
                     self.update_importance_counter()
                     self.save_log_counters()
                     self.importanceChanged.emit()
+                    self.reapply_active_filter()
 
                     print(f"Solution #{problem_number} added successfully and Problem #{problem_number} marked as Resolved.")
                 else:
@@ -2692,6 +4957,7 @@ class LogApp(QWidget):
 
     def auto_save_logs(self):
         if self.current_file:
+            self.unsaved_changes = False
             print("Auto-saving logs...")
             self.update_importance_counter()
             with open(self.current_file, "w", encoding="utf-8") as file:
@@ -2702,8 +4968,8 @@ class LogApp(QWidget):
                         file.write(label.text() + "\n")
             print(f"Logs auto-saved to {self.current_file}")
             self.save_log_counters()
-            self.setWindowTitle("Log Documentation System - Auto-saved")  # Update title
-            QTimer.singleShot(8000, lambda: self.setWindowTitle("Log Documentation System"))  # Reset after 2 seconds
+            self.setWindowTitle(f"{self.fileName} - Auto-saved")  # Update title
+            QTimer.singleShot(8000, lambda: self.setWindowTitle(f"{self.fileName}"))  # Reset after 2 seconds
         else:
             print("Auto-save skipped: No file selected")
 
@@ -2734,6 +5000,16 @@ class LogApp(QWidget):
                 "viewer_colored_selection_mode": getattr(self, "viewer_colored_selection_mode", self.DEFAULT_VIEWER_PREFERENCES["viewer_colored_selection_mode"]),
                 "viewer_colored_selection_color": getattr(self, "viewer_colored_selection_color", self.DEFAULT_VIEWER_PREFERENCES["viewer_colored_selection_color"]),
                 "viewer_selection_accent_color": getattr(self, "viewer_selection_accent_color", self.DEFAULT_VIEWER_PREFERENCES["viewer_selection_accent_color"]),
+                "viewer_background_color": getattr(self, "viewer_background_color", self.DEFAULT_VIEWER_PREFERENCES["viewer_background_color"]),
+                "viewer_hover_color": getattr(self, "viewer_hover_color", self.DEFAULT_VIEWER_PREFERENCES["viewer_hover_color"]),
+                "editor_dark_mode": getattr(self, "editor_dark_mode", self.DEFAULT_EDITOR_PREFERENCES["editor_dark_mode"]),
+                "editor_background_color": getattr(self, "editor_background_color", self.DEFAULT_EDITOR_PREFERENCES["editor_background_color"]),
+                "editor_body_background_color": getattr(self, "editor_body_background_color", self.DEFAULT_EDITOR_PREFERENCES["editor_body_background_color"]),
+                "editor_button_foreground_color": getattr(self, "editor_button_foreground_color", self.DEFAULT_EDITOR_PREFERENCES["editor_button_foreground_color"]),
+                "editor_button_background_color": getattr(self, "editor_button_background_color", self.DEFAULT_EDITOR_PREFERENCES["editor_button_background_color"]),
+                "editor_hover_color": getattr(self, "editor_hover_color", self.DEFAULT_EDITOR_PREFERENCES["editor_hover_color"]),
+                "editor_categories": getattr(self, "editor_categories", list(self.DEFAULT_EDITOR_CATEGORIES)),
+                "editor_categories_default": getattr(self, "editor_categories_default", list(self.DEFAULT_EDITOR_CATEGORIES)),
             }
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=4)
@@ -2752,6 +5028,10 @@ class LogApp(QWidget):
                 settings.setValue(key, getattr(self, key, default_value))
             for key, default_value in self.DEFAULT_VIEWER_PREFERENCES.items():
                 settings.setValue(key, getattr(self, key, default_value))
+            for key, default_value in self.DEFAULT_EDITOR_PREFERENCES.items():
+                settings.setValue(key, getattr(self, key, default_value))
+            settings.setValue("editor_categories", getattr(self, "editor_categories", list(self.DEFAULT_EDITOR_CATEGORIES)))
+            settings.setValue("editor_categories_default", getattr(self, "editor_categories_default", list(self.DEFAULT_EDITOR_CATEGORIES)))
             print("User config saved to global settings")
 
     def load_user_config(self):
@@ -2775,6 +5055,10 @@ class LogApp(QWidget):
                         setattr(self, key, data.get(key, default_value))
                     for key, default_value in self.DEFAULT_VIEWER_PREFERENCES.items():
                         setattr(self, key, data.get(key, default_value))
+                    for key, default_value in self.DEFAULT_EDITOR_PREFERENCES.items():
+                        setattr(self, key, data.get(key, default_value))
+                    self.editor_categories_default = data.get("editor_categories_default", list(self.DEFAULT_EDITOR_CATEGORIES))
+                    self.editor_categories = data.get("editor_categories", list(self.editor_categories_default))
                 return
         # Fallback to global config
         settings = QSettings("MyCompany", "LogDocumentationSystem")
@@ -2794,6 +5078,35 @@ class LogApp(QWidget):
             elif isinstance(default_value, int):
                 value = int(value)
             setattr(self, key, value)
+        for key, default_value in self.DEFAULT_EDITOR_PREFERENCES.items():
+            value = settings.value(key, default_value)
+            if isinstance(default_value, bool):
+                value = value in (True, "true", "True", "1", 1)
+            setattr(self, key, value)
+        categories_value = settings.value("editor_categories", None)
+        if categories_value is None:
+            self.editor_categories = list(self.DEFAULT_EDITOR_CATEGORIES)
+        else:
+            # QSettings may store as string; keep it resilient.
+            if isinstance(categories_value, str):
+                try:
+                    self.editor_categories = json.loads(categories_value)
+                except Exception:
+                    self.editor_categories = list(self.DEFAULT_EDITOR_CATEGORIES)
+            else:
+                self.editor_categories = categories_value
+
+        categories_default_value = settings.value("editor_categories_default", None)
+        if categories_default_value is None:
+            self.editor_categories_default = list(self.DEFAULT_EDITOR_CATEGORIES)
+        else:
+            if isinstance(categories_default_value, str):
+                try:
+                    self.editor_categories_default = json.loads(categories_default_value)
+                except Exception:
+                    self.editor_categories_default = list(self.DEFAULT_EDITOR_CATEGORIES)
+            else:
+                self.editor_categories_default = categories_default_value
 
     def open_pdf(self, file_path):
         try:
@@ -2969,6 +5282,7 @@ class LogApp(QWidget):
             self.update_importance_counter()
             self.save_log_counters()
             self.importanceChanged.emit()
+            self.reapply_active_filter()
 
     def get_log_state(self):
         """Returns a snapshot of the current log list (for undo/redo)."""
@@ -3002,7 +5316,7 @@ class LogApp(QWidget):
         """Restores the log list to a previous state."""
         self.log_list.clear()  # Clear current logs
         for log in state:
-            label = QLabel()
+            label = EditorLogLabel()
             self.configure_log_label(label, log, word_wrap=False)
 
             item = QListWidgetItem()
@@ -3011,7 +5325,7 @@ class LogApp(QWidget):
 
     def create_restore_point(self):
         """Save the current logs as a restore point with a timestamped name."""
-        version_name, ok = QInputDialog.getText(self, "Create Restore Point", "Enter a version name:")
+        version_name, ok = prompt_text_input(self, "Create Restore Point", "Enter a version name:")
 
         if not ok or not version_name.strip():
             return  # User canceled
@@ -3073,7 +5387,7 @@ class LogApp(QWidget):
 
         self.log_list.clear()  # Clear current logs
         for log_entry in self.restore_points[version_name]:
-            label = QLabel()
+            label = EditorLogLabel()
             self.configure_log_label(label, log_entry, word_wrap=False)
 
             item = QListWidgetItem()
@@ -3234,16 +5548,18 @@ class LogApp(QWidget):
                 self.restore_points = {}
 
     def open_dictionary(self):
-        """Open the DictionaryDialog and update keyword definitions."""
+        # Open the DictionaryDialog and update keyword definitions
         if self.current_file:
             project_folder = os.path.dirname(self.current_file)
             config_folder = get_config_dir(project_folder)
         else:
             config_folder = get_config_dir()
+
         self.dictionary_dialog = DictionaryDialog(self, config_folder=config_folder)
-        self.dictionary_dialog.dictionary = getattr(self, 'keyword_definitions', {})
-        for keyword in sorted(self.dictionary_dialog.dictionary.keys()):
-            self.dictionary_dialog.add_list_item(keyword)
+        # Sync LogApp's keyword data with what was loaded from disk
+        self.keyword_definitions = self.dictionary_dialog.dictionary
+        self.keyword_images = self.dictionary_dialog.keyword_images
+
         self.dictionary_dialog.show()
     
     def open_logs_viewer(self):
@@ -3283,68 +5599,137 @@ class LogApp(QWidget):
             self.keyword_definitions = {}
 
     def open_filter_dialog(self):
-        """Open the filter dialog and apply filtering if the user accepts."""
-        dialog = FilterDialog(self)
+        dialog = FilterDialog(self, self.get_filterable_category_options())
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            start_date, end_date, log_type = dialog.get_filters()
-            self.filter_logs(start_date, end_date, log_type)
+            start_date, end_date, log_types = dialog.get_filters()
+            self.filter_logs(start_date, end_date, log_types)
 
-    def filter_logs(self, start_date, end_date, log_type):
-        # Convert dates.
-        start_date = QDate.fromString(start_date, "yyyy-MM-dd")
-        end_date = QDate.fromString(end_date, "yyyy-MM-dd")
+    def filter_logs(self, start_date, end_date, log_types):
+        """Store filter settings.
 
-        # Define a mapping from descriptive log type to its icon.
-        log_type_icons = {
-            "Problem ★": "★",
-            "Solution ■": "■",
-            "Bug ▲": "▲",
-            "Changes ◆": "◆"
+        Args:
+            start_date: Start date string (yyyy-MM-dd)
+            end_date: End date string (yyyy-MM-dd)
+            log_types: List of selected category names (e.g., ["Problem ★", "Bug ▲"])
+        """
+        self.active_filter = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "categories": log_types,  # Store as list
         }
-        # Extract the icon that should be present.
-        expected_icon = log_type_icons.get(log_type, "")
+        self.reapply_all_filters()
+
+    def clear_filter_preferences(self):
+        # Clear saved filter preferences from config
+        try:
+            settings = QSettings("LDS", "LogApp")
+            settings.remove("filter/checked_categories")
+        except Exception:
+            pass
+    
+    def clear_filters(self):
+        # Reset filtering to show all logs
+        self.active_filter = None
+
+        # Also reset filter preferences if a FilterDialog instance exists
+        # This ensures next time the dialog opens, it shows defaults
+        try:
+            settings = QSettings("LDS", "LogApp")
+            settings.remove("filter/checked_categories")
+        except Exception:
+            pass
+        
+        self.reapply_all_filters()
+    
+    def load_and_apply_saved_filters(self):
+        # Load and apply saved filter preferences on app initialization
+        try:
+            settings = QSettings("LDS", "LogApp")
+            checked_categories = settings.value("filter/checked_categories", [])
+
+            # Only apply filters if categories were previously saved
+            if checked_categories:
+                # Use default date range (all time)
+                start_date = QDate.currentDate().addDays(-70000).toString("yyyy-MM-dd")
+                end_date = QDate.currentDate().toString("yyyy-MM-dd")
+
+                # Apply the saved filters
+                self.filter_logs(start_date, end_date, checked_categories)
+        except Exception:
+            # If anything fails, just continue without filters
+            pass
+
+    def reapply_active_filter(self):
+        self.reapply_all_filters()
+
+    def reapply_all_filters(self):
+        # Reapply all active filters (date range, categories, importance)
+        if not hasattr(self, "log_list") or not self.log_list:
+            return
+
+        if not self._should_preserve_log_scroll():
+            self.editor_selected_log_label = None
+
+        vertical_scrollbar = self.log_list.verticalScrollBar()
+        horizontal_scrollbar = self.log_list.horizontalScrollBar()
+        previous_vertical = vertical_scrollbar.value() if vertical_scrollbar else None
+        previous_horizontal = horizontal_scrollbar.value() if horizontal_scrollbar else None
+
+        start_date = None
+        end_date = None
+        category_filters = []  # Now a list
+
+        if self.active_filter:
+            start_date = QDate.fromString(self.active_filter.get("start_date", ""), "yyyy-MM-dd")
+            end_date = QDate.fromString(self.active_filter.get("end_date", ""), "yyyy-MM-dd")
+            category_filters = self.active_filter.get("categories", [])  # Get as list
+            if not start_date.isValid():
+                start_date = None
+            if not end_date.isValid():
+                end_date = None
 
         for i in range(self.log_list.count()):
             item = self.log_list.item(i)
             label = self.log_list.itemWidget(item)
-            if isinstance(label, QLabel):
-                plain_text = self.strip_html(label.text())
+            if not isinstance(label, QLabel):
+                continue
+
+            visible = True
+            plain_text = self.strip_html(label.text())
+
+            # Date range filter
+            if start_date and end_date:
                 date_match = re.search(r"\[(\d{4}-\d{2}-\d{2})", plain_text)
                 if date_match:
                     log_date = QDate.fromString(date_match.group(1), "yyyy-MM-dd")
+                    visible = start_date <= log_date <= end_date
                 else:
-                    # item.setHidden(True)
-                    continue
+                    visible = False
 
-                date_ok = start_date <= log_date <= end_date
-
-                if log_type == "All":
-                    # Check if expected icon is in the plain text.
-                    type_ok = True
-
-                elif log_type == "Just Details":
-                    # "Just Details" should not contain any of the icons.
-                    type_ok = not any(icon in plain_text for icon in ["★", "■", "▲", "◆"])
-
+            # Category filter (check if log's category is in the selected list)
+            if visible and category_filters:  # If any categories are selected
+                marker = self._parse_category_style_marker(label.text()) or {}
+                marker_category_id = str(marker.get("id", "")).strip()
+                cfg = self._category_config_by_id(marker_category_id) if marker_category_id else None
+                if cfg:
+                    category_name = str(cfg.get("category", "")).strip()
+                    icon = str(cfg.get("icon", "")).strip()
+                    current_label = f"{category_name} {icon}".strip()
+                    # Check if current log category is in the selected categories
+                    visible = current_label in category_filters
                 else:
-                    expected_icon = log_type_icons.get(log_type, "")
-                    type_ok = expected_icon in plain_text
+                    visible = False
 
-                if item is not None:
-                    item.setHidden(not (date_ok and type_ok))
-        self.filterChanged.emit()
+            # Importance filter
+            if visible and self.important_filter_active:
+                visible = self.is_important_log(label.text())
 
-    def clear_filters(self):
-        """Reset filtering to show all logs."""
-        for i in range(self.log_list.count()):
-            item = self.log_list.item(i)
-            item.setHidden(False)
+            item.setHidden(not visible)
 
-            # Scroll to the last item in the log list
-            if self.log_list.count() > 0:
-                last_item = self.log_list.item(self.log_list.count() - 1)
-                self.log_list.scrollToItem(last_item)
-                print("Scrolled to the latest log entry.")
+        if vertical_scrollbar and previous_vertical is not None:
+            vertical_scrollbar.setValue(previous_vertical)
+        if horizontal_scrollbar and previous_horizontal is not None:
+            horizontal_scrollbar.setValue(previous_horizontal)
         self.filterChanged.emit()
 
     def strip_html(self, html_text):
@@ -3355,13 +5740,28 @@ class LogApp(QWidget):
     def save_log_counters(self):
         """Save the log counters to a JSON file in the config folder."""
         if self.current_file:
+            self._ensure_editor_categories()
             project_folder = os.path.dirname(self.current_file)
             config_folder = os.path.join(project_folder, "config")
             os.makedirs(config_folder, exist_ok=True)
             json_file = os.path.join(config_folder, "counters.json")
             try:
+                # Keep counters 1:1 and ordered like categories.
+                ordered = []
+                for c in getattr(self, "editor_categories", []):
+                    cid = str(c.get("id", "")).strip()
+                    if not cid:
+                        continue
+                    ordered.append(
+                        {
+                            "id": cid,
+                            "category": str(c.get("category", "")),
+                            "icon": str(c.get("icon", "")),
+                            "count": int(self.log_counters.get(cid, 0)),
+                        }
+                    )
                 with open(json_file, "w", encoding="utf-8") as json_out:
-                    json.dump(self.log_counters, json_out, indent=4)
+                    json.dump(ordered, json_out, indent=4)
                 print(f"Log counters saved to {json_file}")
             except Exception as e:
                 print(f"Error saving log counters: {e}")
