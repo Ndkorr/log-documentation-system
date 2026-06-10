@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QStackedWidget
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QRect, QTimer
-from PyQt6.QtGui import QPainter, QColor, QFont, QPen
+from PyQt6.QtGui import QPainter, QColor, QFont, QPen, QFontMetrics
 
 
 class DocumentationContent(QWidget):
@@ -207,14 +207,52 @@ class ChangelogPage(QWidget):
         # Add changelog entries here
         # Latest version should be first in the list for easier management
         self.changelog_entries = [
-            {"version": "1.2.0", "date": "May 18, 2026", "features": ["Added search functionality", "Improved PDF export", "Bug fixes"]},
-            {"version": "1.1.0", "date": "May 10, 2026", "features": ["Multi-log type support", "Custom naming"]},
-            {"version": "1.0.0", "date": "May 1, 2026", "features": ["Core logging features", "PDF export", "Basic UI"]},
-            {"version": "1.0.0", "date": "May 1, 2026", "features": ["Core logging features", "PDF export", "Basic UI"]},
+            {"version": "1.0.31", "date": "June, 11, 2026", "features": ["Format images saved on dictonary to use UTC format", "Rearrange recent files correctly on nav pane"]},
+            {"version": "1.0.30", "date": "May 29, 2026", "features": ["Added clipboard support for editing keywords on dictionary"]},
+            {"version": "1.0.29", "date": "May 22, 2026", "features": ["Documentation window | changelog - module - idea", "Modified dictionary to support multiple image", "Allows import/export of dictionary/ldsdict"]},
+            {"version": "1.0.28", "date": "May 09, 2026", "features": ["Category Edit", "Preferences", "Log Importance", "arrow keys and mouse wheel to scroll horizontally"]},
+            {"version": "1.0.27", "date": "May 01, 2026", "features": ["Added editor's background which will edit main window"]},
+            {"version": "1.0.26", "date": "April 25, 2026", "features": ["Modified ldsg and ldsd main.py", "added view logs window"]},
+            {"version": "1.0.25", "date": "April 17, 2026", "features": ["Added description tool", "Settings UI but not currently working"]},
+            {"version": "1.0.24", "date": "April 02, 2026", "features": ["Furhter improve label tool", "Hotkeys and wire it on hotkeys window", "Sync quick prop color on border color", "Changes the default color(background) of shapes to transparent", "Custom Cursor", "Added arrow tool", "Multi select and group",
+                                                                         "Supports copy and duplicate on grouped objects", "MarqueTool on select tool"]},
+            {"version": "1.0.23", "date": "March 28, 2026", "features": ["Side panel complete ui and function", "Spaces and Pages", "Added a page bar that'll automatically open once hover (really good implementation)", "Spaces contains pages", "Added qthread for background processing of saving", "Supports page renaming",
+                                                                         "Duplicate are now spammable", "Added arrowkeys movement to drag selected objects", "Snap to grid", "Hold shift while resizing to maintain aspect ratio", "Wire save file on statusoverlay", "Added Label tool"]},
+            {"version": "1.0.22", "date": "March 17, 2026", "features": ["Animation on saving and opening files"]},
+            {"version": "1.0.21", "date": "March 14, 2026", "features": ["Improved undo/redo system", "restore points implementation", "save/auto save feature", "working on hamburger icon(side panel)"]},
+            {"version": "1.0.20", "date": "March 09, 2026", "features": ["Added lock feature under context menu which will lock object to prevent interactions"]},
+            {"version": "1.0.19", "date": "March 01, 2026", "features": ["Custom color added on properties", "Idea to add a restore points under properties"]},
+            {"version": "1.0.18", "date": "February 24, 2026", "features": ["Border radius option is now only available on rect and rounded rect", "Border color and Border weight fixed bug not working"]},
+            {"version": "1.0.17", "date": "January 17, 2026", "features": ["Hamburger icon/side panel on welcome screen which displays all recent opened lds files", "Make the properties only available on shapes"]},
+            {"version": "1.0.16", "date": "January 14, 2026", "features": ["Been back from christmas and new year holidays", "Crisis happens deleted all python files but thankfully recovered it using git restore"]},
+            {"version": "1.0.15", "date": "December 17, 2025", "features": ["Been busy on another project cake kiosk", "Update the github to add github actions (CI/CD)", "Remove unneccessary files and folders to make the project more clean"]},
+            {"version": "1.0.14", "date": "October 26, 2025", "features": ["erase tool now actually erase the object instead of putting a white color on it"]},
+            {"version": "1.0.13", "date": "October 23, 2025", "features": ["Resize window for eraser and draw tool"]},
+            {"version": "1.0.12", "date": "August 16, 2025", "features": ["Fix quick prop lock color during preview edit", "Readjust crop tool"]},
+            {"version": "1.0.11", "date": "August 05, 2025", "features": ["Rotate 90 degrees only applicable on shapes. Rotate 90 Degrees now working after moving during preview mode. FIll color now works upon first filling. Copy can now copy shapes color and border"]},
+            {"version": "1.0.10", "date": "July 21, 2025", "features": ["Properties on Context Menu", "Crop and Fill Tool", "Rotation degree info overlay when rotating"]},
+            {"version": "1.0.9", "date": "May 24, 2025", "features": ["Draw and erase tool is now working", "Layers Overlay"]},
+            {"version": "1.0.8", "date": "May 14, 2025", "features": ["Added shapelayer, hotkeys, arctool menu, improve deselection by mousepressevent and keypressevent, Allow copy and pasting screenshots, Added context menu that includes: Undo, Redo, Copy, Paste, Rotate, Rotate Freely and properties. Also improve more hotkeys."]},
+            {"version": "1.0.7", "date": "April 24, 2025", "features": ["Early implementation of UIMode .ldsu"]},
+            {"version": "1.0.6", "date": "April 22, 2025", "features": ["Project folder structure with config file and auto generated folders for logs, definitions, etc."]},
+            {"version": "1.0.5", "date": "April 10, 2025", "features": ["Integration of welcome screen (setup.py)", "Divides debugging and general into two different .lds files: .ldsg and .ldsd",
+                                                                        "Recent Opened Files", "Added a setup wizard to create a lds project"]},
+            {"version": "1.0.4", "date": "March 30, 2025", "features": ["Dictionary where definition sits (user can now enter custom definitions)", "Also added an image field besides definition"]},
+            {"version": "1.0.3", "date": "March 26, 2025", "features": ["Implementation of definition and counters", "Context menu", "Problem, Bug and Solution connections",
+                                                                        "Version Control System", "Log Filter", "Wire the vcs to config file and auto create restore points with random hard coded names"]},
+            {"version": "1.0.2", "date": "March 23, 2025", "features": ["Focuses on debugging like cpu and gpu temperature each log entry", "Exporting as pdf and html",
+                                                                        "Customization (how exported document behave like line spacing etc.)", "Added auto save function",
+                                                                        "Wire the customization to config file .json", "Added username", "Set focus on added logs"]},
+            {"version": "1.0.1", "date": "March 19, 2025", "features": ["Divided main into debugging and general log documentation system", "Drag & Drop", "Hotkeys (ctrl + s to save) etc.",
+                                                                        "Limited log categories (Solution, Bug, Problem)"]},
+            {"version": "1.0.0", "date": "March 17, 2025", "features": ["Start uploading the initial project idea on github"]},
         ]
         
         # Scroll position for infinite scrolling effect
         self.scroll_offset = 0
+        self.hovered_entry_index = None
+        self.expanded_entry_index = None
+        self.setMouseTracking(True)
 
     def add_changelog_entry(self, version, date, features):
         """Add a new changelog entry. Use this to manage entries cleanly."""
@@ -306,8 +344,41 @@ class ChangelogPage(QWidget):
             
             # Draw scrollable changelog entries
             self._draw_changelog_entries(painter)
-        
+
         painter.end()
+
+    def _entry_text_rect(self, idx):
+        """Return the text block rectangle for a changelog entry index."""
+        entry_y_start = 100
+        entry_height = 150
+        circle_radius = 28
+        text_width = 350
+        text_offset = 15
+        circle_x = self.width() // 2
+
+        y = entry_y_start + (idx * entry_height) + self.scroll_offset
+        is_right = idx % 2 == 0
+        if is_right:
+            text_x = circle_x + circle_radius + text_offset
+        else:
+            text_x = circle_x - circle_radius - 365
+
+        return QRect(int(text_x), int(y - 8), text_width, 90)
+
+    def _entry_at_pos(self, pos):
+        """Find the hovered changelog entry by mouse position."""
+        viewport_top = 80
+        viewport_bottom = self.height() + 150
+        entry_y_start = 100
+        entry_height = 150
+
+        for idx, _entry in enumerate(self.changelog_entries):
+            y = entry_y_start + (idx * entry_height) + self.scroll_offset
+            if y + entry_height < viewport_top or y > viewport_bottom:
+                continue
+            if self._entry_text_rect(idx).contains(pos):
+                return idx
+        return None
 
     def _draw_changelog_entries(self, painter):
         # Draw all changelog entries with decorative circles and connecting line."""
@@ -373,6 +444,17 @@ class ChangelogPage(QWidget):
             painter.setPen(QPen(QColor(0, 0, 0), 1))
             painter.drawEllipse(circle_x - circle_radius, int(y), circle_radius * 2, circle_radius * 2)
 
+            # Draw hover background for the active entry text block
+            if idx == self.hovered_entry_index:
+                hover_rect = self._entry_text_rect(idx).adjusted(-10, -6, 10, 6)
+                hover_fill = QColor(255, 255, 255)
+                hover_fill.setAlpha(int(185 * self.content_opacity))
+                hover_border = QColor(0, 0, 0)
+                hover_border.setAlpha(int(60 * self.content_opacity))
+                painter.setBrush(hover_fill)
+                painter.setPen(QPen(hover_border, 1))
+                painter.drawRoundedRect(hover_rect, 10, 10)
+
             # Draw version
             version_color = QColor(0, 0, 0)
             version_color.setAlpha(int(255 * self.content_opacity))
@@ -397,23 +479,191 @@ class ChangelogPage(QWidget):
 
         painter.setClipRect(self.rect())
 
+    def _compute_entry_layout(self):
+        """Compute dynamic entry positions/heights for drawing and hit-testing."""
+        entry_y_start = 100
+        base_entry_height = 150
+        circle_x = self.width() // 2
+        circle_radius = 28
+        text_width = 350
+        text_offset = 15
+
+        features_font = QFont("Arial", 9)
+        features_metrics = QFontMetrics(features_font)
+        current_y = entry_y_start + self.scroll_offset
+        layout = []
+
+        for idx, entry in enumerate(self.changelog_entries):
+            is_right = idx % 2 == 0
+            if is_right:
+                text_x = circle_x + circle_radius + text_offset
+                alignment = Qt.AlignmentFlag.AlignLeft
+            else:
+                text_x = circle_x - circle_radius - 365
+                alignment = Qt.AlignmentFlag.AlignRight
+
+            features_text = " | ".join(entry["features"])
+            wrap_flags = int(alignment | Qt.TextFlag.TextWordWrap)
+            measured_rect = features_metrics.boundingRect(QRect(text_x, 0, text_width, 3000), wrap_flags, features_text)
+            full_features_height = max(35, measured_rect.height())
+
+            is_expanded = idx == self.expanded_entry_index
+            features_height = full_features_height if is_expanded else 35
+            text_rect = QRect(int(text_x), int(current_y - 8), text_width, int(49 + features_height))
+            hover_rect = text_rect.adjusted(-10, -6, 10, 6)
+            row_height = max(base_entry_height, int(65 + features_height))
+
+            layout.append({
+                "idx": idx,
+                "entry": entry,
+                "y": current_y,
+                "row_height": row_height,
+                "circle_x": circle_x,
+                "circle_radius": circle_radius,
+                "circle_center_y": current_y + circle_radius,
+                "text_x": text_x,
+                "text_width": text_width,
+                "alignment": alignment,
+                "features_text": features_text,
+                "features_height": features_height,
+                "hover_rect": hover_rect,
+            })
+
+            current_y += row_height
+
+        return layout
+
+    def _entry_text_rect(self, idx):
+        """Return the text block rectangle for a changelog entry index."""
+        for row in self._compute_entry_layout():
+            if row["idx"] == idx:
+                return row["hover_rect"]
+        return QRect()
+
+    def _entry_at_pos(self, pos):
+        """Find the hovered/clicked changelog entry by mouse position."""
+        viewport_top = 80
+        viewport_bottom = self.height() + 150
+        for row in self._compute_entry_layout():
+            y = row["y"]
+            row_bottom = y + row["row_height"]
+            if row_bottom < viewport_top or y > viewport_bottom:
+                continue
+            if row["hover_rect"].contains(pos):
+                return row["idx"]
+        return None
+
+    def _draw_changelog_entries(self, painter):
+        # Draw all changelog entries with decorative circles and connecting line.
+        layout = self._compute_entry_layout()
+
+        viewport_top = 80
+        viewport_bottom = self.height() + 150
+        painter.setClipRect(0, viewport_top, self.width(), viewport_bottom - viewport_top)
+
+        first_visible_y = None
+        last_visible_y = None
+
+        for row in layout:
+            y = row["y"]
+            row_bottom = y + row["row_height"]
+            if row_bottom < viewport_top or y > viewport_bottom:
+                continue
+            if first_visible_y is None:
+                first_visible_y = row["circle_center_y"]
+            last_visible_y = row["circle_center_y"]
+
+        if first_visible_y is not None and last_visible_y is not None:
+            line_color = QColor(0, 0, 0)
+            line_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(QPen(line_color, 2))
+            circle_x = layout[0]["circle_x"] if layout else self.width() // 2
+            painter.drawLine(circle_x, int(first_visible_y), circle_x, int(last_visible_y))
+
+        for row in layout:
+            idx = row["idx"]
+            entry = row["entry"]
+            y = row["y"]
+            row_bottom = y + row["row_height"]
+            if row_bottom < viewport_top or y > viewport_bottom:
+                continue
+
+            circle_color = QColor(0, 206, 209)
+            circle_color.setAlpha(int(255 * self.content_opacity))
+            painter.setBrush(circle_color)
+            painter.setPen(QPen(QColor(0, 0, 0), 1))
+            painter.drawEllipse(row["circle_x"] - row["circle_radius"], int(y), row["circle_radius"] * 2, row["circle_radius"] * 2)
+
+            if idx == self.hovered_entry_index:
+                hover_fill = QColor(255, 255, 255)
+                hover_fill.setAlpha(int(185 * self.content_opacity))
+                hover_border = QColor(0, 0, 0)
+                hover_border.setAlpha(int(60 * self.content_opacity))
+                painter.setBrush(hover_fill)
+                painter.setPen(QPen(hover_border, 1))
+                painter.drawRoundedRect(row["hover_rect"], 10, 10)
+
+            version_color = QColor(0, 0, 0)
+            version_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(version_color)
+            painter.setFont(QFont("Inter SemiBold", 14, QFont.Weight.Bold))
+            painter.drawText(row["text_x"], int(y - 5), row["text_width"], 20, row["alignment"], entry["version"])
+
+            date_color = QColor(100, 100, 100)
+            date_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(date_color)
+            painter.setFont(QFont("Arial", 10))
+            painter.drawText(row["text_x"], int(y + 20), row["text_width"], 15, row["alignment"], entry["date"])
+
+            features_color = QColor(80, 80, 80)
+            features_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(features_color)
+            painter.setFont(QFont("Arial", 9))
+            painter.drawText(row["text_x"], int(y + 35), row["text_width"], row["features_height"], row["alignment"] | Qt.TextFlag.TextWordWrap, row["features_text"])
+
+        painter.setClipRect(self.rect())
+
     def wheelEvent(self, event):
         # Handle mouse wheel for scrolling
         delta = event.angleDelta().y()
-        self.scroll_offset += delta // 11  # Smooth scrolling
+        self.scroll_offset += delta // 6  # Smooth scrolling
         self.update()
         super().wheelEvent(event)
 
+    def mouseMoveEvent(self, event):
+        hovered_idx = self._entry_at_pos(event.position().toPoint())
+        if hovered_idx != self.hovered_entry_index:
+            self.hovered_entry_index = hovered_idx
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        if self.hovered_entry_index is not None:
+            self.hovered_entry_index = None
+            self.update()
+        super().leaveEvent(event)
+
     def mousePressEvent(self, event):
         # Handle back button click
+        pos = event.position().toPoint()
         back_button_rect = QRect(10, 20, 80, 40)
-        if back_button_rect.contains(event.position().toPoint()):
+        if back_button_rect.contains(pos):
             if self.is_animating_in and self.content_opacity > 0.5:
                 self.animate_out()
+                return
+
+        clicked_idx = self._entry_at_pos(pos)
+        if clicked_idx is not None:
+            if self.expanded_entry_index == clicked_idx:
+                self.expanded_entry_index = None
+            else:
+                self.expanded_entry_index = clicked_idx
+            self.update()
+            return
         super().mousePressEvent(event)
 
 class ModulePage(QWidget):
-    # Module page with expanding circle animation and reverse animation on back
+    # Module page with left-side circles showing completion percentage and right-side descriptions
     back_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -433,6 +683,20 @@ class ModulePage(QWidget):
         
         # Direction: True = expanding in, False = contracting out
         self.is_animating_in = True
+        
+        # Module data structure with name, description, and percentage completion
+        self.modules = [
+            {"name": "docs.py", "description": "Document Page\nModified Module Page", "percentage": 75},
+            {"name": "main.py", "description": "LDSD and LDSG\nFormat saved image to use UTC Format", "percentage": 60},
+            {"name": "UIMode.py", "description": "LDSU - User Interface Design Mode", "percentage": 80},
+            {"name": "setup.py", "description": "Welcome Page\nRearrange recent files on nav pane", "percentage": 90},
+            {"name": "gui.py", "description": "Setup Wizard", "percentage": 40},
+        ]
+        
+        # Scroll position and hover state
+        self.scroll_offset = 0
+        self.hovered_module_index = None
+        self.setMouseTracking(True)
 
     def showEvent(self, event):
         # Start animation when page becomes visible
@@ -480,6 +744,115 @@ class ModulePage(QWidget):
         
         self.update()
 
+    def _module_at_pos(self, pos):
+        """Find the hovered module by mouse position."""
+        viewport_top = 100
+        viewport_bottom = self.height()
+        entry_y_start = 100
+        entry_height = 140
+        circle_x = 80
+        circle_radius = 28
+        text_width = 500
+        text_offset = 15
+
+        for idx, _module in enumerate(self.modules):
+            y = entry_y_start + (idx * entry_height) + self.scroll_offset
+            if y + entry_height < viewport_top or y > viewport_bottom:
+                continue
+            
+            text_x = circle_x + circle_radius + text_offset
+            text_rect = QRect(int(text_x), int(y - 8), text_width, 90)
+            if text_rect.contains(pos):
+                return idx
+        return None
+
+    def _draw_module_entries(self, painter):
+        """Draw all module entries with circles, percentages, and descriptions."""
+        entry_y_start = 100
+        entry_height = 140
+        circle_x = 80
+        circle_radius = 28
+        text_width = 500
+        text_offset = 15
+
+        viewport_top = 100
+        viewport_bottom = self.height()
+        
+        painter.setClipRect(0, viewport_top, self.width(), viewport_bottom - viewport_top)
+
+        first_visible_y = None
+        last_visible_y = None
+
+        for idx, module in enumerate(self.modules):
+            y = entry_y_start + (idx * entry_height) + self.scroll_offset
+            
+            if y + entry_height < viewport_top or y > viewport_bottom:
+                continue
+            
+            if first_visible_y is None:
+                first_visible_y = y + circle_radius
+            last_visible_y = y + circle_radius
+
+        # Draw connecting vertical line
+        if first_visible_y is not None and last_visible_y is not None and len(self.modules) > 1:
+            line_color = QColor(0, 0, 0)
+            line_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(QPen(line_color, 2))
+            painter.drawLine(circle_x, int(first_visible_y), circle_x, int(last_visible_y))
+
+        # Draw each module entry
+        for idx, module in enumerate(self.modules):
+            y = entry_y_start + (idx * entry_height) + self.scroll_offset
+            
+            if y + entry_height < viewport_top or y > viewport_bottom:
+                continue
+            
+            # Draw circle with percentage inside
+            circle_color = QColor(255, 255, 0)
+            circle_color.setAlpha(int(255 * self.content_opacity))
+            painter.setBrush(circle_color)
+            painter.setPen(QPen(QColor(0, 0, 0), 2))
+            painter.drawEllipse(int(circle_x - circle_radius), int(y), circle_radius * 2, circle_radius * 2)
+
+            # Draw percentage text inside circle
+            percentage_text = f"{module['percentage']}%"
+            percentage_color = QColor(0, 0, 0)
+            percentage_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(percentage_color)
+            painter.setFont(QFont("Inter SemiBold", 11, QFont.Weight.Bold))
+            circle_rect = QRect(int(circle_x - circle_radius), int(y), circle_radius * 2, circle_radius * 2)
+            painter.drawText(circle_rect, Qt.AlignmentFlag.AlignCenter, percentage_text)
+
+            # Draw hover background for text block
+            text_x = circle_x + circle_radius + text_offset
+            text_rect = QRect(int(text_x), int(y - 8), text_width, 90)
+            
+            if idx == self.hovered_module_index:
+                hover_rect = text_rect.adjusted(-10, -6, 10, 6)
+                hover_fill = QColor(255, 255, 255)
+                hover_fill.setAlpha(int(185 * self.content_opacity))
+                hover_border = QColor(0, 0, 0)
+                hover_border.setAlpha(int(60 * self.content_opacity))
+                painter.setBrush(hover_fill)
+                painter.setPen(QPen(hover_border, 1))
+                painter.drawRoundedRect(hover_rect, 10, 10)
+
+            # Draw module name
+            name_color = QColor(0, 0, 0)
+            name_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(name_color)
+            painter.setFont(QFont("Inter SemiBold", 12, QFont.Weight.Bold))
+            painter.drawText(int(text_x), int(y - 5), text_width, 20, Qt.AlignmentFlag.AlignLeft, module["name"])
+
+            # Draw module description
+            description_color = QColor(80, 80, 80)
+            description_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(description_color)
+            painter.setFont(QFont("Arial", 10))
+            painter.drawText(int(text_x), int(y + 20), text_width, 60, Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap, module["description"])
+
+        painter.setClipRect(self.rect())
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -526,21 +899,34 @@ class ModulePage(QWidget):
             painter.setPen(title_color)
             painter.setFont(QFont("Inter SemiBold", 28, QFont.Weight.Bold))
             title_rect = QRect(0, 25, self.width(), 50)
-            painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, "Module")
+            painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, "Modules")
             
-            # Placeholder content
-            content_color = QColor(100, 100, 100)
-            content_color.setAlpha(int(255 * self.content_opacity))
-            painter.setPen(content_color)
-            painter.setFont(QFont("Arial", 14))
-            content_rect = QRect(50, 180, self.width() - 100, 200)
-            painter.drawText(content_rect, Qt.TextFlag.TextWordWrap,
-                           "v1.0.0 - Initial Release\n\n"
-                           "• Added core logging features\n"
-                           "• Support for multiple log types\n"
-                           "• PDF export functionality")
+            # Draw module entries
+            self._draw_module_entries(painter)
         
         painter.end()
+
+    def wheelEvent(self, event):
+        """Handle mouse wheel for scrolling."""
+        delta = event.angleDelta().y()
+        self.scroll_offset += delta // 6  # Smooth scrolling
+        self.update()
+        super().wheelEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Track hovered module."""
+        hovered_idx = self._module_at_pos(event.position().toPoint())
+        if hovered_idx != self.hovered_module_index:
+            self.hovered_module_index = hovered_idx
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        """Clear hover state when leaving widget."""
+        if self.hovered_module_index is not None:
+            self.hovered_module_index = None
+            self.update()
+        super().leaveEvent(event)
         
     def mousePressEvent(self, event):
         # Handle back button click - start reverse animation

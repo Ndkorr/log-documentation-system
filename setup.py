@@ -58,6 +58,8 @@ class NavigationPane(QFrame):
         file_path = item.toolTip()
         # Emit the custom signal with the full file path.
         self.fileDoubleClicked.emit(file_path)
+        
+    
 
 # A simple clickable label for the hamburger icon.
 class ClickableLabel(QLabel):
@@ -385,12 +387,51 @@ class WelcomeWindow(QMainWindow):
             self, "Open Project", "", "LDS Files (*.lds *.ldsg *.ldsd)"
         )
         if file_path:
+            self.update_recent_files(file_path)
             setup_data = self.get_setup_data_for_file(file_path)
             self.launch_main_app(setup_data)
 
     def open_logs(self, file_path):
+        self.update_recent_files(file_path)
         setup_data = self.get_setup_data_for_file(file_path)
         self.launch_main_app(setup_data)
+    
+    def update_recent_files(self, file_path):
+        # Move opened file to the top of recent files list
+        settings = QSettings("MyCompany", "LogDocumentationSystem")
+        recent_files = settings.value("recent_files", [])
+
+        # Ensure it's a list
+        if not isinstance(recent_files, list):
+            recent_files = [recent_files] if recent_files else []
+
+        # Remove if already exists, then add to top
+        if file_path in recent_files:
+            recent_files.remove(file_path)
+        recent_files.insert(0, file_path)
+
+        # Keep only the 10 most recent
+        recent_files = recent_files[:10]
+
+        # Save back to settings
+        settings.setValue("recent_files", recent_files)
+
+        # Refresh the navigation pane display
+        self.refresh_nav_pane()
+
+    def refresh_nav_pane(self):
+        # Refresh the recent files list in the navigation pane
+        self.nav_pane.list_widget.clear()
+        settings = QSettings("MyCompany", "LogDocumentationSystem")
+        recent_files = settings.value("recent_files", [])
+        if not isinstance(recent_files, list):
+            recent_files = [recent_files] if recent_files else []
+
+        for file_path in recent_files:
+            filename = os.path.basename(file_path)
+            item = QListWidgetItem(filename)
+            item.setToolTip(file_path)
+            self.nav_pane.list_widget.addItem(item)
 
     def get_setup_data_for_file(self, file_path):
         # Determine log type by extension

@@ -20,7 +20,7 @@ from PyQt6.QtGui import (
     QKeySequence, QAction, QTextDocument, 
     QPixmap, QCursor, QIntValidator, QPalette
     )
-from datetime import datetime
+from datetime import datetime, timezone
 import sys
 import psutil
 from typing import Optional
@@ -653,8 +653,12 @@ class KeywordDialog(QDialog):
         self.definition = definition
         self.image_paths = image_paths or []  # List of image paths
         self.is_editing = bool(keyword)  # True if editing existing keyword
+        self.clipboard = QApplication.clipboard()
+        self._clipboard_monitor_connected = False
         
         self.init_ui()
+        self._connect_clipboard_monitor()
+        self.update_paste_image_button_visibility()
         self.center()
     
     def init_ui(self):
@@ -703,6 +707,11 @@ class KeywordDialog(QDialog):
         add_image_btn = QPushButton("+ Add Image")
         add_image_btn.clicked.connect(self.add_image)
         layout.addWidget(add_image_btn)
+
+        self.paste_image_btn = QPushButton("Paste Image")
+        self.paste_image_btn.clicked.connect(self.paste_image_from_clipboard)
+        self.paste_image_btn.setVisible(False)
+        layout.addWidget(self.paste_image_btn)
         
         # OK/Cancel buttons
         button_layout = QHBoxLayout()
@@ -715,6 +724,60 @@ class KeywordDialog(QDialog):
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
+
+    def _connect_clipboard_monitor(self):
+        if self.clipboard is None or self._clipboard_monitor_connected:
+            return
+        try:
+            self.clipboard.dataChanged.connect(self.update_paste_image_button_visibility)
+            self._clipboard_monitor_connected = True
+        except Exception:
+            self._clipboard_monitor_connected = False
+
+    def _disconnect_clipboard_monitor(self):
+        if self.clipboard is None or not self._clipboard_monitor_connected:
+            return
+        try:
+            self.clipboard.dataChanged.disconnect(self.update_paste_image_button_visibility)
+        except Exception:
+            pass
+        self._clipboard_monitor_connected = False
+
+    def _clipboard_has_image(self):
+        try:
+            mime = self.clipboard.mimeData()
+            if mime and mime.hasImage():
+                return True
+            pixmap = self.clipboard.pixmap()
+            return not pixmap.isNull()
+        except Exception:
+            return False
+
+    def update_paste_image_button_visibility(self):
+        if hasattr(self, "paste_image_btn"):
+            self.paste_image_btn.setVisible(self._clipboard_has_image())
+
+    def _add_image_from_pixmap(self, pixmap, ext=".png"):
+        if pixmap.isNull():
+            return False
+
+        config_folder = self.parent().config_folder if self.parent() else get_config_dir()
+        images_folder = os.path.join(config_folder, "keyword_images")
+        if not os.path.exists(images_folder):
+            os.makedirs(images_folder)
+
+        utc_now = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+        keyword_safe = self.keyword_input.text().strip().replace(" ", "_") or "keyword"
+        dest_filename = f"{keyword_safe}_{utc_now}{'UTC'}{ext}"
+        dest_path = os.path.join(images_folder, dest_filename)
+
+        if not pixmap.save(dest_path, "PNG"):
+            return False
+
+        relative_path = os.path.relpath(dest_path, config_folder)
+        self.image_paths.append(relative_path)
+        self.add_image_widget(relative_path)
+        return True
     
     def add_image_widget(self, image_path):
         
@@ -773,27 +836,38 @@ class KeywordDialog(QDialog):
             "Image Files (*.png *.jpg *.jpeg *.bmp *.gif);;All Files (*)"
         )
         if file_path:
-            import shutil
             config_folder = self.parent().config_folder if self.parent() else get_config_dir()
-
             images_folder = os.path.join(config_folder, "keyword_images")
             if not os.path.exists(images_folder):
                 os.makedirs(images_folder)
 
-            ext = os.path.splitext(file_path)[1]
+            ext = os.path.splitext(file_path)[1] or ".png"
             timestamp = int(time.time() * 1000)
-            # Use KEYWORD name in filename for 1:1 matching
-            keyword_safe = self.keyword_input.text().strip().replace(" ", "_")
+            keyword_safe = self.keyword_input.text().strip().replace(" ", "_") or "keyword"
             dest_filename = f"{keyword_safe}_{timestamp}{ext}"
             dest_path = os.path.join(images_folder, dest_filename)
 
             shutil.copy2(file_path, dest_path)
 
-            # Store RELATIVE path
             relative_path = os.path.relpath(dest_path, config_folder)
 
             self.image_paths.append(relative_path)
             self.add_image_widget(relative_path)
+
+    def paste_image_from_clipboard(self):
+        clipboard = self.clipboard or QApplication.clipboard()
+        if clipboard is None:
+            return
+
+        pixmap = clipboard.pixmap()
+        if pixmap.isNull():
+            try:
+                pixmap = QPixmap.fromImage(clipboard.image())
+            except Exception:
+                pixmap = QPixmap()
+
+        if self._add_image_from_pixmap(pixmap):
+            self.update_paste_image_button_visibility()
     
     def remove_image_widget(self, widget, image_path):
         idx = self.images_layout.indexOf(widget)
@@ -872,6 +946,10 @@ class KeywordDialog(QDialog):
 
         # All validation passed, accept the dialog
         super().accept()
+
+    def done(self, result):
+        self._disconnect_clipboard_monitor()
+        super().done(result)
         
 class DictionaryDialog(QDialog):
     def __init__(self, parent=None, config_folder=None):
