@@ -1,3 +1,4 @@
+import json
 import os
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QStackedWidget
@@ -207,6 +208,7 @@ class ChangelogPage(QWidget):
         # Add changelog entries here
         # Latest version should be first in the list for easier management
         self.changelog_entries = [
+            {"version": "1.0.35", "date": "July, 9, 2026", "features": ["Done docs.py added ideas page"]},
             {"version": "1.0.34", "date": "July, 8, 2026", "features": ["Preloads dictionary on opening project file", "Limits image loaded on the keyword image are to not overload the program. Works for keywords that has a lot of image. The image will show continously by scrolling.", "Removes animation on full definition and now allows full screen"]},
             {"version": "1.0.33", "date": "July, 4, 2026", "features": ["Supports multi-platform for main.py and setup.py", "Updated requirements.txt to support cross platform"]},
             {"version": "1.0.32", "date": "June, 28, 2026", "features": ["Added dictionary to welcome screen", "This dictionary won't auto save config files and force users to use the export function.", "Uses a temp module to temporarily save config files unlike when you open a dictionary under an lds project, the config was written directly on the project specified folder."]},
@@ -665,6 +667,388 @@ class ChangelogPage(QWidget):
             return
         super().mousePressEvent(event)
 
+class IdeaPage(QWidget):
+    # Idea page with right-side circles showing completion percentage and left-side descriptions
+    back_clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.circle_color = QColor(255, 85, 180)
+        self.circle_start_pos = (400, 250)  # Position from DocumentationDialog
+        self.circle_start_radius = 32
+        
+        # Animation
+        self.animation_duration = 500  # milliseconds
+        self.animation_progress = 0.0
+        self.animation_timer = QTimer()
+        self.animation_timer.timeout.connect(self._update_animation)
+        
+        # Content opacity (fades in after circle expands)
+        self.content_opacity = 0.0
+        
+        # Direction: True = expanding in, False = contracting out
+        self.is_animating_in = True
+        
+        # Idea data structure with stable ids so saved status remains correct when items are added.
+        self.ideas = [
+            {"id": "idea-mobile", "date": "July 9, 2026", "description": "Will make lds available on mobile.\nProbably develop on kotlin or swift - not so different ui but same functionality"},
+            {"id": "idea-ui-mode", "date": "July 9, 2026", "description": "Will update ui mode to make it usable seamlessly."},
+            {"id": "idea-my-ratings", "date": "July 9, 2026", "description": "Will create a new lds type.\nmyRatings - A collection of all stuffs user used and is rated by their standard - Can input image, comments and such"},
+            {"id": "idea-notes-checklists", "date": "July 9, 2026", "description": "Will create a new lds type.\nNotes and CheckLists"},
+        ]
+        self._ensure_idea_ids()
+        
+        # Scroll position, hover state, and per-item status
+        self.scroll_offset = 0
+        self.hovered_idea_index = None
+        self.status_config_path = os.path.join(os.path.dirname(__file__), "docs.json")
+        self.idea_statuses = {}
+        self._load_idea_statuses()
+        self.setMouseTracking(True)
+
+    def showEvent(self, event):
+        # Start animation when page becomes visible
+        self.animation_progress = 0.0
+        self.content_opacity = 0.0
+        self.is_animating_in = True
+        self.animation_timer.start(16)
+        super().showEvent(event)
+
+    def animate_out(self):
+        # Start reverse animation (circle contracts, content fades out).
+        self.is_animating_in = False
+        self.animation_progress = 1.0  # Start from fully expanded
+        self.animation_timer.start(16)
+
+    def _ease_out_cubic(self, t):
+        # Ease-out cubic easing curve
+        return 1 - (1 - t) ** 3
+
+    def _update_animation(self):
+        # Update animation progress (handles both in and out).
+        if self.is_animating_in:
+            # EXPANDING IN
+            if self.animation_progress < 1.0:
+                self.animation_progress += 16 / self.animation_duration
+                self.animation_progress = min(self.animation_progress, 1.0)
+            else:
+                # Keep content fading in after circle is done
+                if self.content_opacity < 1.0:
+                    self.content_opacity += 16 / 300  # 300ms fade
+                    self.content_opacity = min(self.content_opacity, 1.0)
+                else:
+                    self.animation_timer.stop()
+        else:
+            # CONTRACTING OUT (reverse)
+            if self.animation_progress > 0.0:
+                self.animation_progress -= 16 / self.animation_duration
+                self.animation_progress = max(self.animation_progress, 0.0)
+                # Fade content out as circle contracts
+                self.content_opacity = self.animation_progress
+            else:
+                self.animation_timer.stop()
+                # Animation complete, emit signal to switch pages
+                self.back_clicked.emit()
+        
+        self.update()
+
+    def _idea_at_pos(self, pos):
+        """Find the hovered idea by mouse position."""
+        viewport_top = 100
+        viewport_bottom = self.height()
+        entry_y_start = 100
+        entry_height = 140
+        circle_x = self.width() - 80
+        circle_radius = 28
+        text_width = 500
+        text_offset = 15
+
+        for idx, _idea in enumerate(self.ideas):
+            y = entry_y_start + (idx * entry_height) + self.scroll_offset
+            if y + entry_height < viewport_top or y > viewport_bottom:
+                continue
+            
+            text_x = circle_x - circle_radius - text_offset - text_width
+            text_rect = QRect(int(text_x), int(y - 8), text_width, 90)
+            if text_rect.contains(pos):
+                return idx
+        return None
+
+    def _ensure_idea_ids(self):
+        """Ensure every idea has a stable id for persistence."""
+        seen_ids = set()
+        for idx, idea in enumerate(self.ideas):
+            base_id = idea.get("id") or f"idea-{idx + 1}"
+            candidate_id = base_id
+            suffix = 1
+            while candidate_id in seen_ids:
+                candidate_id = f"{base_id}-{suffix}"
+                suffix += 1
+            idea["id"] = candidate_id
+            seen_ids.add(candidate_id)
+
+    def _get_idea_status(self, idx):
+        """Get the status for an idea by its stable id."""
+        if idx < 0 or idx >= len(self.ideas):
+            return "check"
+        idea_id = self.ideas[idx]["id"]
+        return self.idea_statuses.get(idea_id, "check")
+
+    def _load_idea_statuses(self):
+        """Load saved idea statuses from disk if available."""
+        if not os.path.exists(self.status_config_path):
+            return
+
+        try:
+            with open(self.status_config_path, "r", encoding="utf-8") as handle:
+                loaded = json.load(handle)
+        except (OSError, json.JSONDecodeError, TypeError):
+            self.idea_statuses = {}
+            return
+
+        if isinstance(loaded, dict):
+            self.idea_statuses = {str(key): value for key, value in loaded.items()}
+        elif isinstance(loaded, list):
+            self.idea_statuses = {}
+            for idx, status in enumerate(loaded):
+                if idx >= len(self.ideas):
+                    break
+                if isinstance(status, str):
+                    self.idea_statuses[self.ideas[idx]["id"]] = status
+        else:
+            self.idea_statuses = {}
+
+        valid_statuses = {"check", "exclamation", "on"}
+        for idea in self.ideas:
+            status = self.idea_statuses.get(idea["id"], "check")
+            if status not in valid_statuses:
+                status = "check"
+            self.idea_statuses[idea["id"]] = status
+
+    def _save_idea_statuses(self):
+        """Persist current idea statuses to disk."""
+        payload = {idea["id"]: self.idea_statuses.get(idea["id"], "check") for idea in self.ideas}
+        try:
+            with open(self.status_config_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2)
+        except OSError:
+            pass
+
+    def _toggle_idea_status(self, idx):
+        """Cycle the status of a single idea item."""
+        if idx < 0 or idx >= len(self.ideas):
+            return
+
+        status_cycle = ["check", "exclamation", "on"]
+        idea_id = self.ideas[idx]["id"]
+        current = self.idea_statuses.get(idea_id, "check")
+        next_index = (status_cycle.index(current) + 1) % len(status_cycle)
+        self.idea_statuses[idea_id] = status_cycle[next_index]
+        self._save_idea_statuses()
+        self.update()
+
+    def _idea_circle_rect(self, idx):
+        """Return the clickable circle rectangle for an idea row."""
+        entry_y_start = 100
+        entry_height = 140
+        circle_x = self.width() - 80
+        circle_radius = 28
+        y = entry_y_start + (idx * entry_height) + self.scroll_offset
+        return QRect(int(circle_x - circle_radius), int(y), circle_radius * 2, circle_radius * 2)
+
+    def _draw_module_entries(self, painter):
+        """Draw all idea entries with circles, percentages, and descriptions."""
+        entry_y_start = 100
+        entry_height = 140
+        circle_x = self.width() - 80
+        circle_radius = 28
+        text_width = 500
+        text_offset = 15
+
+        viewport_top = 100
+        viewport_bottom = self.height()
+        
+        painter.setClipRect(0, viewport_top, self.width(), viewport_bottom - viewport_top)
+
+        first_visible_y = None
+        last_visible_y = None
+
+        for idx, idea in enumerate(self.ideas):
+            y = entry_y_start + (idx * entry_height) + self.scroll_offset
+            
+            if y + entry_height < viewport_top or y > viewport_bottom:
+                continue
+            
+            if first_visible_y is None:
+                first_visible_y = y + circle_radius
+            last_visible_y = y + circle_radius
+
+        # Draw connecting vertical line
+        if first_visible_y is not None and last_visible_y is not None and len(self.ideas) > 1:
+            line_color = QColor(0, 0, 0)
+            line_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(QPen(line_color, 2))
+            painter.drawLine(circle_x, int(first_visible_y), circle_x, int(last_visible_y))
+
+        # Draw each idea entry
+        for idx, idea in enumerate(self.ideas):
+            y = entry_y_start + (idx * entry_height) + self.scroll_offset
+            
+            if y + entry_height < viewport_top or y > viewport_bottom:
+                continue
+            
+            # Draw clickable status circle
+            status = self._get_idea_status(idx)
+            if status == "check":
+                circle_fill = QColor(40, 180, 90)
+                label = "✓"
+                label_color = QColor(255, 255, 255)
+            elif status == "exclamation":
+                circle_fill = QColor(220, 53, 69)
+                label = "!"
+                label_color = QColor(255, 255, 255)
+            else:
+                circle_fill = QColor(255, 193, 7)
+                label = "ON"
+                label_color = QColor(0, 0, 0)
+
+            circle_color = QColor(circle_fill)
+            circle_color.setAlpha(int(255 * self.content_opacity))
+            painter.setBrush(circle_color)
+            painter.setPen(QPen(QColor(0, 0, 0), 2))
+            circle_rect = QRect(int(circle_x - circle_radius), int(y), circle_radius * 2, circle_radius * 2)
+            painter.drawEllipse(circle_rect)
+
+            label_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(label_color)
+            if label == "ON":
+                painter.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+            else:
+                painter.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+            painter.drawText(circle_rect, Qt.AlignmentFlag.AlignCenter, label)
+
+            # Draw hover background for text block
+            text_x = circle_x - circle_radius - text_offset - text_width
+            text_rect = QRect(int(text_x), int(y - 8), text_width, 90)
+            alignment = Qt.AlignmentFlag.AlignRight
+            
+            if idx == self.hovered_idea_index:
+                hover_rect = text_rect.adjusted(-10, -6, 10, 6)
+                hover_fill = QColor(255, 255, 255)
+                hover_fill.setAlpha(int(185 * self.content_opacity))
+                hover_border = QColor(0, 0, 0)
+                hover_border.setAlpha(int(60 * self.content_opacity))
+                painter.setBrush(hover_fill)
+                painter.setPen(QPen(hover_border, 1))
+                painter.drawRoundedRect(hover_rect, 10, 10)
+
+            # Draw idea name
+            name_color = QColor(0, 0, 0)
+            name_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(name_color)
+            painter.setFont(QFont("Inter SemiBold", 12, QFont.Weight.Bold))
+            painter.drawText(int(text_x), int(y - 5), text_width, 20, alignment, idea["date"])
+
+            # Draw idea description
+            description_color = QColor(80, 80, 80)
+            description_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(description_color)
+            painter.setFont(QFont("Arial", 10))
+            painter.drawText(int(text_x), int(y + 20), text_width, 60, alignment | Qt.TextFlag.TextWordWrap, idea["description"])
+
+        painter.setClipRect(self.rect())
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Fill background
+        painter.fillRect(self.rect(), QColor(255, 255, 255))
+        
+        eased_progress = self._ease_out_cubic(self.animation_progress)
+        
+        # Calculate expanding/contracting circle
+        start_x, start_y = self.circle_start_pos
+        start_radius = self.circle_start_radius
+        
+        # Maximum radius to cover screen
+        max_radius = int((self.width() ** 2 + self.height() ** 2) ** 0.5 / 2) + 200
+        
+        # Interpolate radius
+        current_radius = start_radius + (max_radius - start_radius) * eased_progress
+        
+        # Draw expanding/contracting circle
+        circle_opacity = 1.0 - (eased_progress * 0.4)  # Fade slightly as it expands
+        circle_color = QColor(self.circle_color)
+        circle_color.setAlpha(int(255 * circle_opacity))
+        painter.setBrush(circle_color)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(int(start_x - current_radius), int(start_y - current_radius),
+                            int(current_radius * 2), int(current_radius * 2))
+        
+        # Draw content (fades in/out)
+        if self.content_opacity > 0.0:
+            # Back button
+            back_button_rect = QRect(10, 20, 80, 40)
+            painter.setBrush(QColor(0, 0, 0, 0))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRect(back_button_rect)
+            
+            painter.setPen(QColor(0, 0, 0))
+            painter.setFont(QFont("Arial", 22))
+            painter.drawText(back_button_rect, Qt.AlignmentFlag.AlignCenter, "<")
+            
+            # Title
+            title_color = QColor(0, 0, 0)
+            title_color.setAlpha(int(255 * self.content_opacity))
+            painter.setPen(title_color)
+            painter.setFont(QFont("Inter SemiBold", 28, QFont.Weight.Bold))
+            title_rect = QRect(0, 25, self.width(), 50)
+            painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, "Ideas")
+            
+            # Draw idea entries
+            self._draw_module_entries(painter)
+        
+        painter.end()
+
+    def wheelEvent(self, event):
+        """Handle mouse wheel for scrolling."""
+        delta = event.angleDelta().y()
+        self.scroll_offset += delta // 6  # Smooth scrolling
+        self.update()
+        super().wheelEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Track hovered idea."""
+        hovered_idx = self._idea_at_pos(event.position().toPoint())
+        if hovered_idx != self.hovered_idea_index:
+            self.hovered_idea_index = hovered_idx
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        """Clear hover state when leaving widget."""
+        if self.hovered_idea_index is not None:
+            self.hovered_idea_index = None
+            self.update()
+        super().leaveEvent(event)
+        
+    def mousePressEvent(self, event):
+        pos = event.position().toPoint()
+
+        for idx in range(len(self.ideas)):
+            if self._idea_circle_rect(idx).contains(pos):
+                self._toggle_idea_status(idx)
+                return
+
+        # Handle back button click - start reverse animation
+        back_button_rect = QRect(10, 20, 80, 40)
+        if back_button_rect.contains(pos):
+            # Only trigger if we're not already animating out
+            if self.is_animating_in and self.content_opacity > 0.5:
+                self.animate_out()
+        super().mousePressEvent(event)
+        
 class ModulePage(QWidget):
     # Module page with left-side circles showing completion percentage and right-side descriptions
     back_clicked = pyqtSignal()
@@ -690,9 +1074,9 @@ class ModulePage(QWidget):
         # Module data structure with name, description, and percentage completion
         self.modules = [
             {"name": "docs.py", "description": "Document Page\nModified Module Page", "percentage": 75},
-            {"name": "main.py", "description": "LDSD and LDSG\nFormat saved image to use UTC Format", "percentage": 60},
+            {"name": "main.py", "description": "LDSD and LDSG\nPreload Dictionary", "percentage": 80},
             {"name": "UIMode.py", "description": "LDSU - User Interface Design Mode", "percentage": 80},
-            {"name": "setup.py", "description": "Welcome Page\nRearrange recent files on nav pane", "percentage": 90},
+            {"name": "setup.py", "description": "Welcome Page\nAdd Dictionary besides git icon", "percentage": 90},
             {"name": "gui.py", "description": "Setup Wizard", "percentage": 40},
         ]
         
@@ -930,145 +1314,6 @@ class ModulePage(QWidget):
             self.hovered_module_index = None
             self.update()
         super().leaveEvent(event)
-        
-    def mousePressEvent(self, event):
-        # Handle back button click - start reverse animation
-        back_button_rect = QRect(10, 20, 80, 40)
-        if back_button_rect.contains(event.position().toPoint()):
-            # Only trigger if we're not already animating out
-            if self.is_animating_in and self.content_opacity > 0.5:
-                self.animate_out()
-        super().mousePressEvent(event)
-        
-class IdeaPage(QWidget):
-    # Module page with expanding circle animation and reverse animation on back
-    back_clicked = pyqtSignal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.circle_color = QColor(255, 105, 180)
-        self.circle_start_pos = (560, 250)  # Position from DocumentationDialog
-        self.circle_start_radius = 32
-        
-        # Animation
-        self.animation_duration = 500  # milliseconds
-        self.animation_progress = 0.0
-        self.animation_timer = QTimer()
-        self.animation_timer.timeout.connect(self._update_animation)
-        
-        # Content opacity (fades in after circle expands)
-        self.content_opacity = 0.0
-        
-        # Direction: True = expanding in, False = contracting out
-        self.is_animating_in = True
-
-    def showEvent(self, event):
-        # Start animation when page becomes visible
-        self.animation_progress = 0.0
-        self.content_opacity = 0.0
-        self.is_animating_in = True
-        self.animation_timer.start(16)
-        super().showEvent(event)
-
-    def animate_out(self):
-        # Start reverse animation (circle contracts, content fades out).
-        self.is_animating_in = False
-        self.animation_progress = 1.0  # Start from fully expanded
-        self.animation_timer.start(16)
-
-    def _ease_out_cubic(self, t):
-        # Ease-out cubic easing curve
-        return 1 - (1 - t) ** 3
-
-    def _update_animation(self):
-        # Update animation progress (handles both in and out).
-        if self.is_animating_in:
-            # EXPANDING IN
-            if self.animation_progress < 1.0:
-                self.animation_progress += 16 / self.animation_duration
-                self.animation_progress = min(self.animation_progress, 1.0)
-            else:
-                # Keep content fading in after circle is done
-                if self.content_opacity < 1.0:
-                    self.content_opacity += 16 / 300  # 300ms fade
-                    self.content_opacity = min(self.content_opacity, 1.0)
-                else:
-                    self.animation_timer.stop()
-        else:
-            # CONTRACTING OUT (reverse)
-            if self.animation_progress > 0.0:
-                self.animation_progress -= 16 / self.animation_duration
-                self.animation_progress = max(self.animation_progress, 0.0)
-                # Fade content out as circle contracts
-                self.content_opacity = self.animation_progress
-            else:
-                self.animation_timer.stop()
-                # Animation complete, emit signal to switch pages
-                self.back_clicked.emit()
-        
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Fill background
-        painter.fillRect(self.rect(), QColor(255, 255, 255))
-        
-        eased_progress = self._ease_out_cubic(self.animation_progress)
-        
-        # Calculate expanding/contracting circle
-        start_x, start_y = self.circle_start_pos
-        start_radius = self.circle_start_radius
-        
-        # Maximum radius to cover screen
-        max_radius = int((self.width() ** 2 + self.height() ** 2) ** 0.5 / 2) + 200
-        
-        # Interpolate radius
-        current_radius = start_radius + (max_radius - start_radius) * eased_progress
-        
-        # Draw expanding/contracting circle
-        circle_opacity = 1.0 - (eased_progress * 0.4)  # Fade slightly as it expands
-        circle_color = QColor(self.circle_color)
-        circle_color.setAlpha(int(255 * circle_opacity))
-        painter.setBrush(circle_color)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(int(start_x - current_radius), int(start_y - current_radius),
-                            int(current_radius * 2), int(current_radius * 2))
-        
-        # Draw content (fades in/out)
-        if self.content_opacity > 0.0:
-            # Back button
-            back_button_rect = QRect(10, 20, 80, 40)
-            painter.setBrush(QColor(0, 0, 0, 0))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRect(back_button_rect)
-            
-            painter.setPen(QColor(0, 0, 0))
-            painter.setFont(QFont("Arial", 22))
-            painter.drawText(back_button_rect, Qt.AlignmentFlag.AlignCenter, "<")
-            
-            # Title
-            title_color = QColor(0, 0, 0)
-            title_color.setAlpha(int(255 * self.content_opacity))
-            painter.setPen(title_color)
-            painter.setFont(QFont("Inter SemiBold", 28, QFont.Weight.Bold))
-            title_rect = QRect(0, 25, self.width(), 50)
-            painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, "Ideas")
-            
-            # Placeholder content
-            content_color = QColor(100, 100, 100)
-            content_color.setAlpha(int(255 * self.content_opacity))
-            painter.setPen(content_color)
-            painter.setFont(QFont("Arial", 14))
-            content_rect = QRect(50, 180, self.width() - 100, 200)
-            painter.drawText(content_rect, Qt.TextFlag.TextWordWrap,
-                           "v1.0.0 - Initial Release\n\n"
-                           "• Added core logging features\n"
-                           "• Support for multiple log types\n"
-                           "• PDF export functionality")
-        
-        painter.end()
         
     def mousePressEvent(self, event):
         # Handle back button click - start reverse animation
