@@ -8,12 +8,44 @@ from PyQt6.QtWidgets import (
     QGraphicsBlurEffect, QMessageBox, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QSettings, QPropertyAnimation, QEasingCurve, QEvent, QRect, QUrl
-from PyQt6.QtGui import QFont, QAction, QPixmap, QDesktopServices
+from PyQt6.QtGui import QFont, QAction, QPixmap, QDesktopServices, QIcon
 from gui import SetupWizard
 from main import LogApp
 import shutil
 
 package_data={"": ["assets/*.png"]},
+
+
+def get_asset_path(filename):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    asset_dir = os.path.join(base_dir, "assets")
+    candidates = [
+        os.path.join(asset_dir, filename),
+        os.path.join(os.getcwd(), "assets", filename),
+        os.path.join(os.getcwd(), filename),
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return os.path.join(asset_dir, filename)
+
+
+def load_icon_pixmap(filename, size=(36, 36)):
+    path = get_asset_path(filename)
+    if not os.path.exists(path):
+        return None
+
+    if os.path.splitext(path)[1].lower() == ".svg":
+        icon = QIcon(path)
+        if not icon.isNull():
+            return icon.pixmap(size[0], size[1])
+        return None
+
+    pixmap = QPixmap(path)
+    if pixmap.isNull():
+        return None
+    return pixmap.scaled(size[0], size[1], Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+
 
 class NavigationPane(QFrame):
     fileDoubleClicked = pyqtSignal(str)
@@ -265,22 +297,42 @@ class WelcomeWindow(QMainWindow):
         self.docs_label = _make_menu_label("Documentations", self.open_documentations)
         content_layout.addWidget(self.docs_label, alignment=Qt.AlignmentFlag.AlignHCenter)
         
-        # GitHub logo under "Documentations"
-        logo_path = os.path.join(os.path.dirname(__file__), "assets", "Github-Dark.svg")
-        if os.path.exists(logo_path):
-            pixmap = QPixmap(logo_path)
-            pixmap = pixmap.scaled(36, 36, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        # Icons under "Documentations" (GitHub + Dictionary)
+        icons_widget = QWidget()
+        icons_layout = QHBoxLayout(icons_widget)
+        icons_layout.setContentsMargins(4, 4, 4, 4)
+        icons_layout.setSpacing(8)
+
+        # GitHub icon
+        pixmap = load_icon_pixmap("Github-Dark.png")
+        if pixmap is not None:
             self.github_label = AnimatedClickableLabel()
             self.github_label.setStyleSheet("padding: 4px; border-radius: 8px;")
             self.github_label.setPixmap(pixmap)
             self.github_label.setFixedSize(pixmap.width() + 8, pixmap.height() + 8)
             self.github_label.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/Ndkorr")))
-            content_layout.addWidget(self.github_label, alignment=Qt.AlignmentFlag.AlignHCenter)
+            icons_layout.addWidget(self.github_label, alignment=Qt.AlignmentFlag.AlignHCenter)
         else:
             # Optional fallback: simple text link
             fallback = AnimatedClickableLabel("GitHub")
             fallback.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/Ndkorr")))
-            content_layout.addWidget(fallback, alignment=Qt.AlignmentFlag.AlignHCenter)
+            icons_layout.addWidget(fallback, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        # Dictionary icon (opens an empty dictionary by default)
+        dict_pix = load_icon_pixmap("dict-icon.png")
+        if dict_pix is not None:
+            self.dict_label = AnimatedClickableLabel()
+            self.dict_label.setStyleSheet("padding: 4px; border-radius: 8px;")
+            self.dict_label.setPixmap(dict_pix)
+            self.dict_label.setFixedSize(dict_pix.width() + 8, dict_pix.height() + 8)
+            self.dict_label.clicked.connect(self.open_dictionary)
+            icons_layout.addWidget(self.dict_label, alignment=Qt.AlignmentFlag.AlignHCenter)
+        else:
+            dict_fallback = AnimatedClickableLabel("Dictionary")
+            dict_fallback.clicked.connect(self.open_dictionary)
+            icons_layout.addWidget(dict_fallback, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        content_layout.addWidget(icons_widget, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         content_layout.addStretch()
 
@@ -465,6 +517,24 @@ class WelcomeWindow(QMainWindow):
         from docs import DocumentationDialog
         dlg = DocumentationDialog(self)
         dlg.exec()
+
+    def open_dictionary(self):
+        # Open the built-in dictionary dialog in setup mode, with no project save state.
+        try:
+            from main import DictionaryDialog
+
+            dlg = DictionaryDialog(self, is_setup_mode=True)
+            dlg.dictionary = {}
+            dlg.keyword_images = {}
+            dlg.refresh_keyword_list()
+            try:
+                dlg.definition_label.setText("No keywords yet.")
+                dlg.definition_label.full_definition = ""
+            except Exception:
+                pass
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open Dictionary: {e}")
 
     def launch_main_app(self, setup_data):
         from main import LogApp  # Import your LogApp class

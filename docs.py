@@ -207,6 +207,9 @@ class ChangelogPage(QWidget):
         # Add changelog entries here
         # Latest version should be first in the list for easier management
         self.changelog_entries = [
+            {"version": "1.0.34", "date": "July, 8, 2026", "features": ["Preloads dictionary on opening project file", "Limits image loaded on the keyword image are to not overload the program. Works for keywords that has a lot of image. The image will show continously by scrolling.", "Removes animation on full definition and now allows full screen"]},
+            {"version": "1.0.33", "date": "July, 4, 2026", "features": ["Supports multi-platform for main.py and setup.py", "Updated requirements.txt to support cross platform"]},
+            {"version": "1.0.32", "date": "June, 28, 2026", "features": ["Added dictionary to welcome screen", "This dictionary won't auto save config files and force users to use the export function.", "Uses a temp module to temporarily save config files unlike when you open a dictionary under an lds project, the config was written directly on the project specified folder."]},
             {"version": "1.0.31", "date": "June, 11, 2026", "features": ["Format images saved on dictonary to use UTC format", "Rearrange recent files correctly on nav pane"]},
             {"version": "1.0.30", "date": "May 29, 2026", "features": ["Added clipboard support for editing keywords on dictionary"]},
             {"version": "1.0.29", "date": "May 22, 2026", "features": ["Documentation window | changelog - module - idea", "Modified dictionary to support multiple image", "Allows import/export of dictionary/ldsdict"]},

@@ -25,7 +25,8 @@ import sys
 import psutil
 from typing import Optional
 import json
-import wmi
+import tempfile
+
 #from pynvml import nvmlInit, nvmlDeviceGetHandleByIndex, nvmlDeviceGetUtilizationRates, nvmlShutdown
 from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
 import os
@@ -39,7 +40,10 @@ import time
 import uuid
 import difflib
 import zipfile
-
+try:
+    import wmi
+except Exception:
+    wmi = None
 
 def get_config_dir(base_path=None):
     if base_path:
@@ -394,12 +398,25 @@ class ClickableLabel(QLabel):
     
     def mousePressEvent(self, ev):
         # Use the stored original pixmap if available, otherwise fall back to the current pixmap
+        image_parent = self.window() or self.parent()
         if hasattr(self, "original_pixmap") and self.original_pixmap:
-            self.viewer = ImageViewerWindow(self.original_pixmap)
-            self.viewer.show()
+            self.viewer = ImageViewerWindow(self.original_pixmap, parent=image_parent)
+        elif hasattr(self, "image_path") and self.image_path:
+            pixmap = QPixmap(self.image_path)
+            if not pixmap.isNull():
+                self.original_pixmap = pixmap
+                self.viewer = ImageViewerWindow(self.original_pixmap, parent=image_parent)
+            else:
+                self.viewer = None
         elif self.pixmap():
-            self.viewer = ImageViewerWindow(self.pixmap())
+            self.viewer = ImageViewerWindow(self.pixmap(), parent=image_parent)
+        else:
+            self.viewer = None
+
+        if self.viewer:
             self.viewer.show()
+            self.viewer.raise_()
+            self.viewer.activateWindow()
         super().mousePressEvent(ev)
 
 
@@ -586,56 +603,20 @@ class DefinitionViewer(QDialog):
     def __init__(self, full_text, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Full Definition")
-        self.resize(400, 300)
+        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+        self.resize(700, 500)
+        self.setMinimumSize(420, 320)
         apply_neutral_dialog_style(self)
         
         layout = QVBoxLayout(self)
         
-        # Use a scroll area to handle very long text
-        scroll_area = QScrollArea(self)
-        scroll_area.setWidgetResizable(True)
-        layout.addWidget(scroll_area)
-        
-        content_widget = QLabel(full_text, self)
-        content_widget.setWordWrap(True)
-        content_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        scroll_area.setWidget(content_widget)
+        content_widget = QTextEdit(self)
+        content_widget.setReadOnly(True)
+        content_widget.setPlainText(full_text)
+        layout.addWidget(content_widget)
 
         self.setLayout(layout)
-        self.center() 
-        
-        # Start the zoom-in animation when the dialog is shown
-        self.start_zoom_animation()   
-            
-    def start_zoom_animation(self):
-        """Animate the zoom-in effect for the dialog."""
-        screen = get_screen_at_cursor()
-        screen_geometry = screen.availableGeometry() if screen else QApplication.primaryScreen().availableGeometry()
-        center_point = screen_geometry.center()
-
-        # Start with a small size at the center of the screen
-        start_geometry = QRect(
-            center_point.x() - 50,  # Small width
-            center_point.y() - 50,  # Small height
-            100,  # Initial width
-            100   # Initial height
-        )
-
-        # End with the dialog's normal geometry
-        end_geometry = self.geometry()
-
-        # Set the dialog's initial geometry
-        self.setGeometry(start_geometry)
-
-        # Create the animation
-        self.animation = QPropertyAnimation(self, b"geometry")
-        self.animation.setDuration(500)  # Animation duration in milliseconds
-        self.animation.setStartValue(start_geometry)
-        self.animation.setEndValue(end_geometry)
-        self.animation.setEasingCurve(QEasingCurve.Type.OutQuad)  # Smooth easing curve
-
-        # Start the animation
-        self.animation.start()
+        self.center()
         
     def center(self):
         """Center the dialog on the screen."""
@@ -655,6 +636,7 @@ class KeywordDialog(QDialog):
         self.is_editing = bool(keyword)  # True if editing existing keyword
         self.clipboard = QApplication.clipboard()
         self._clipboard_monitor_connected = False
+        self._has_unsaved_changes = False
         
         self.init_ui()
         self._connect_clipboard_monitor()
@@ -682,6 +664,9 @@ class KeywordDialog(QDialog):
         self.definition_input.setPlainText(self.definition)
         self.definition_input.setFixedHeight(150)
         layout.addWidget(self.definition_input)
+
+        self.keyword_input.textChanged.connect(self._mark_changed)
+        self.definition_input.textChanged.connect(self._mark_changed)
         
         # Images section
         layout.addWidget(QLabel("Examples (Images):"))
@@ -853,6 +838,7 @@ class KeywordDialog(QDialog):
 
             self.image_paths.append(relative_path)
             self.add_image_widget(relative_path)
+            self._mark_changed()
 
     def paste_image_from_clipboard(self):
         clipboard = self.clipboard or QApplication.clipboard()
@@ -868,6 +854,7 @@ class KeywordDialog(QDialog):
 
         if self._add_image_from_pixmap(pixmap):
             self.update_paste_image_button_visibility()
+            self._mark_changed()
     
     def remove_image_widget(self, widget, image_path):
         idx = self.images_layout.indexOf(widget)
@@ -888,6 +875,8 @@ class KeywordDialog(QDialog):
         if image_path in self.image_paths:
             self.image_paths.remove(image_path)
 
+        self._mark_changed()
+
     
     def move_image_up(self, widget):
         # Move image up in the list
@@ -895,6 +884,7 @@ class KeywordDialog(QDialog):
         if idx > 0:
             self.images_layout.insertWidget(idx - 1, self.images_layout.takeAt(idx).widget())
             self.image_widgets[idx], self.image_widgets[idx - 1] = self.image_widgets[idx - 1], self.image_widgets[idx]
+            self._mark_changed()
     
     def move_image_down(self, widget):
         # Move image down in the list
@@ -902,6 +892,10 @@ class KeywordDialog(QDialog):
         if idx < len(self.image_widgets) - 1:
             self.images_layout.insertWidget(idx + 1, self.images_layout.takeAt(idx).widget())
             self.image_widgets[idx], self.image_widgets[idx + 1] = self.image_widgets[idx + 1], self.image_widgets[idx]
+            self._mark_changed()
+    
+    def _mark_changed(self):
+        self._has_unsaved_changes = True
     
     def get_data(self):
         # Return the keyword, definition, and image paths
@@ -947,18 +941,47 @@ class KeywordDialog(QDialog):
         # All validation passed, accept the dialog
         super().accept()
 
+    def reject(self):
+        if self._has_unsaved_changes:
+            reply = show_neutral_message_box(
+                self,
+                QMessageBox.Icon.Question,
+                "Unsaved Changes",
+                "You have made changes. Are you sure you want to close this window? Any unsaved changes will be lost.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        super().reject()
+
     def done(self, result):
         self._disconnect_clipboard_monitor()
         super().done(result)
         
 class DictionaryDialog(QDialog):
-    def __init__(self, parent=None, config_folder=None):
+    def __init__(
+        self,
+        parent=None,
+        config_folder=None,
+        is_setup_mode=False,
+        initial_dictionary=None,
+        initial_keyword_images=None,
+        initial_thumbnail_cache=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Dictionary")
-        self.setGeometry(100, 100, 700, 450)
-        self.setFixedSize(700, 450)
+        self.setGeometry(100, 100, 700, 580)
+        self.setFixedSize(700, 580)
         apply_neutral_dialog_style(self)
-        self.config_folder = config_folder or get_config_dir()
+        self.is_setup_mode = is_setup_mode
+        if self.is_setup_mode:
+            self.config_folder = config_folder or tempfile.mkdtemp(prefix="lds_setup_dict_")
+            os.makedirs(self.config_folder, exist_ok=True)
+        else:
+            self.config_folder = config_folder or get_config_dir()
+
+        self._has_unsaved_changes = False
+        self._exported = False
 
         self.main_layout = QHBoxLayout()
         
@@ -1001,11 +1024,12 @@ class DictionaryDialog(QDialog):
         self.image_scroll_area = QScrollArea(self)
         self.image_scroll_area.setWidgetResizable(True)
         self.image_scroll_area.setWidget(self.image_container_widget)
-        #self.image_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        # hide vertical scroll bar
         self.image_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.image_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.image_scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.image_scroll_area.verticalScrollBar().valueChanged.connect(
+            self.on_dictionary_image_scroll
+        )
         
         # Limit the visual height of the image box (adjust value as needed)
         self.image_scroll_area.setFixedHeight(220)
@@ -1024,11 +1048,22 @@ class DictionaryDialog(QDialog):
         self.image_label.setStyleSheet("border: none; background: none;")
         self.image_label.setVisible(False)
         self.image_container_layout.addWidget(self.image_label)
+
+        self.load_more_images_button = QPushButton("Load More Images", self)
+        self.load_more_images_button.clicked.connect(self.load_more_dictionary_images)
+        self.load_more_images_button.setVisible(False)
+        self.image_container_layout.addWidget(self.load_more_images_button)
         
         # Add the container layout to the definition layout.
         self.definition_layout.addWidget(self.image_scroll_area)
         
         self._dynamic_image_widgets = []
+        self._dictionary_thumbnail_cache = dict(initial_thumbnail_cache or {})
+        self._active_image_paths = []
+        self._displayed_image_count = 0
+        self._initial_preview_batch_size = 8
+        self._preview_batch_size = 12
+        self._dictionary_scroll_load_threshold = 24
         
         # Buttons
         self.button_layout = QHBoxLayout()
@@ -1058,9 +1093,14 @@ class DictionaryDialog(QDialog):
         self.setLayout(self.main_layout)
         self.dictionary = {}  # Store definitions
         self.keyword_images = {}
-        
-        # Load previously saved definitions and images.
-        self.load_keyword_definitions()
+
+        if initial_dictionary is not None or initial_keyword_images is not None:
+            self.dictionary = dict(initial_dictionary or {})
+            self.keyword_images = self._normalize_keyword_images(initial_keyword_images or {})
+            self.refresh_keyword_list()
+        else:
+            # Load previously saved definitions and images.
+            self.load_keyword_definitions()
         
         
         self.center()
@@ -1146,7 +1186,10 @@ class DictionaryDialog(QDialog):
             if keyword.strip():
                 self.dictionary[keyword] = definition
                 self.keyword_images[keyword] = image_paths
-                self.save_keyword_definitions()
+                if self.is_setup_mode:
+                    self._has_unsaved_changes = True
+                else:
+                    self.save_keyword_definitions()
                 self.refresh_keyword_list()
     
     def select_keyword(self, word):
@@ -1182,7 +1225,10 @@ class DictionaryDialog(QDialog):
             if word in self.keyword_images:
                 del self.keyword_images[word]
 
-            self.save_keyword_definitions()
+            if self.is_setup_mode:
+                self._has_unsaved_changes = True
+            else:
+                self.save_keyword_definitions()
             self.refresh_keyword_list()
 
             # Clear the definition display
@@ -1201,8 +1247,18 @@ class DictionaryDialog(QDialog):
         formatted_definition = f"<b>{word}:</b><br>{preview_text}"
         self.definition_label.setText(formatted_definition)
         self.definition_label.full_definition = full_def
-        
-        # Remove previous dynamic thumbnails safely
+
+        self._clear_dynamic_image_widgets()
+        image_paths = self.keyword_images.get(word, [])
+        if image_paths:
+            self.example_label.setVisible(True)
+            self._active_image_paths = list(image_paths)
+            self._displayed_image_count = 0
+            self._render_dictionary_image_batch(self._initial_preview_batch_size)
+        else:
+            self.example_label.setVisible(False)
+
+    def _clear_dynamic_image_widgets(self):
         for w in getattr(self, "_dynamic_image_widgets", []):
             try:
                 self.image_container_layout.removeWidget(w)
@@ -1211,29 +1267,80 @@ class DictionaryDialog(QDialog):
             except Exception:
                 pass
         self._dynamic_image_widgets = []
-        
-        # Clear/hide static preview
+        self._active_image_paths = []
+        self._displayed_image_count = 0
+        self.load_more_images_button.setVisible(False)
+
         self.image_label.clear()
         self.image_label.setVisible(False)
-    
-        image_paths = self.keyword_images.get(word, [])
-        if image_paths:
-            self.example_label.setVisible(True)
-            # Show ALL images
-            for rel_path in image_paths:
-                full_path = os.path.join(self.config_folder, rel_path)
-                if os.path.exists(full_path):
-                    pixmap = QPixmap(full_path)
-                    if not pixmap.isNull():
-                        image_label = ClickableLabel(self)
-                        image_label.original_pixmap = pixmap
-                        scaled = pixmap.scaledToHeight(150, Qt.TransformationMode.SmoothTransformation)
-                        image_label.setPixmap(scaled)
-                        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                        self.image_container_layout.addWidget(image_label)
-                        self._dynamic_image_widgets.append(image_label)
+
+    def _get_dictionary_thumbnail(self, full_path):
+        if full_path in self._dictionary_thumbnail_cache:
+            return self._dictionary_thumbnail_cache.get(full_path)
+
+        pixmap = QPixmap(full_path)
+        if pixmap.isNull():
+            self._dictionary_thumbnail_cache[full_path] = None
+            return None
+
+        thumbnail = pixmap.scaledToHeight(150, Qt.TransformationMode.SmoothTransformation)
+        self._dictionary_thumbnail_cache[full_path] = thumbnail
+        return thumbnail
+
+    def _add_dictionary_image_widget(self, full_path, thumbnail):
+        image_label = ClickableLabel(self)
+        image_label.image_path = full_path
+        image_label.setPixmap(thumbnail)
+        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        image_label.setFixedHeight(150)
+        image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.image_container_layout.insertWidget(
+            self.image_container_layout.indexOf(self.load_more_images_button),
+            image_label,
+        )
+        self._dynamic_image_widgets.append(image_label)
+
+    def _render_dictionary_image_batch(self, batch_size):
+        if batch_size <= 0:
+            return
+
+        rendered = 0
+        while (
+            self._displayed_image_count < len(self._active_image_paths)
+            and rendered < batch_size
+        ):
+            rel_path = self._active_image_paths[self._displayed_image_count]
+            self._displayed_image_count += 1
+
+            full_path = os.path.join(self.config_folder, rel_path)
+            if not os.path.exists(full_path):
+                continue
+
+            thumbnail = self._get_dictionary_thumbnail(full_path)
+            if thumbnail is not None:
+                self._add_dictionary_image_widget(full_path, thumbnail)
+                rendered += 1
+
+        remaining = len(self._active_image_paths) - self._displayed_image_count
+        if remaining > 0:
+            self.load_more_images_button.setText(f"Load More Images ({remaining} remaining)")
+            self.load_more_images_button.setVisible(True)
         else:
-            self.example_label.setVisible(False)
+            self.load_more_images_button.setVisible(False)
+
+    def load_more_dictionary_images(self):
+        self._render_dictionary_image_batch(self._preview_batch_size)
+
+    def on_dictionary_image_scroll(self, value):
+        if not self.load_more_images_button.isVisible():
+            return
+
+        scrollbar = self.image_scroll_area.verticalScrollBar()
+        if scrollbar.maximum() <= 0:
+            return
+
+        if value >= scrollbar.maximum() - self._dictionary_scroll_load_threshold:
+            self.load_more_dictionary_images()
     
     def edit_keyword(self):
         selected_item = self.keyword_list.currentItem()
@@ -1290,7 +1397,10 @@ class DictionaryDialog(QDialog):
                     self.dictionary[new_keyword] = new_definition
                     self.keyword_images[new_keyword] = new_image_paths
 
-                self.save_keyword_definitions()
+                if self.is_setup_mode:
+                    self._has_unsaved_changes = True
+                else:
+                    self.save_keyword_definitions()
                 self.refresh_keyword_list()
     
     def search_keywords(self, text):
@@ -1324,6 +1434,19 @@ class DictionaryDialog(QDialog):
         with open(images_file, "w", encoding="utf-8") as file:
             json.dump(self.keyword_images, file, ensure_ascii=False, indent=2)
 
+    def _normalize_keyword_images(self, keyword_images):
+        normalized = {}
+        if not isinstance(keyword_images, dict):
+            return normalized
+        for key, value in keyword_images.items():
+            if isinstance(value, list):
+                normalized[key] = value
+            elif value:
+                normalized[key] = [value]
+            else:
+                normalized[key] = []
+        return normalized
+
     def load_keyword_definitions(self):
         # Load keyword definitions and image paths from separate JSON files
         definitions_file = os.path.join(self.config_folder, "keyword_definitions.json")
@@ -1339,11 +1462,7 @@ class DictionaryDialog(QDialog):
         # Load image paths (now stores lists)
         if os.path.exists(images_file):
             with open(images_file, "r", encoding="utf-8") as file:
-                self.keyword_images = json.load(file)
-                # Ensure all values are lists for backward compatibility
-                for key in self.keyword_images:
-                    if not isinstance(self.keyword_images[key], list):
-                        self.keyword_images[key] = [self.keyword_images[key]]
+                self.keyword_images = self._normalize_keyword_images(json.load(file))
         else:
             self.keyword_images = {}
 
@@ -1378,6 +1497,8 @@ class DictionaryDialog(QDialog):
                         arcname = f"images/{os.path.basename(rel_path)}"
                         zf.write(full_path, arcname=arcname)
 
+            self._exported = True
+            self._has_unsaved_changes = False
             show_neutral_message_box(
                 self,
                 QMessageBox.Icon.Information,
@@ -1408,7 +1529,7 @@ class DictionaryDialog(QDialog):
             self,
             QMessageBox.Icon.Question,
             "Import Dictionary",
-            "Import will replace the current dictionary entries in this project. Continue?",
+            "Import will replace the current dictionary. Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
@@ -1457,9 +1578,13 @@ class DictionaryDialog(QDialog):
                         new_rel_paths.append(os.path.relpath(target_full, self.config_folder))
                     normalized_images_map[str(keyword)] = new_rel_paths
 
-                self.dictionary = {str(k): str(v) for k, v in imported_dictionary.items()}
+                    self.dictionary = {str(k): str(v) for k, v in imported_dictionary.items()}
                 self.keyword_images = normalized_images_map
-                self.save_keyword_definitions()
+                if not self.is_setup_mode:
+                    self.save_keyword_definitions()
+                else:
+                    self._has_unsaved_changes = True
+                    self._exported = False
                 self.refresh_keyword_list()
 
                 self.definition_label.setText("Select a keyword to view its definition.")
@@ -1482,7 +1607,33 @@ class DictionaryDialog(QDialog):
                 f"Failed to import dictionary package:\n{e}",
                 QMessageBox.StandardButton.Ok,
             )
-    
+
+    def closeEvent(self, event):
+        if self.is_setup_mode and self._has_unsaved_changes and not self._exported:
+            reply = show_neutral_message_box(
+                self,
+                QMessageBox.Icon.Warning,
+                "Dictionary Not Exported",
+                "This dictionary session is not saved to a project yet. If you close now without exporting, your imported or edited dictionary and images will be lost.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.export_dictionary_package()
+                if not self._exported:
+                    event.ignore()
+                    return
+            elif reply == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+
+        if self.is_setup_mode:
+            try:
+                shutil.rmtree(self.config_folder)
+            except Exception:
+                pass
+
+        event.accept()
+
     def center(self):
         # Center the dialog on the screen where cursor is located
         screen = get_screen_at_cursor()
@@ -1720,10 +1871,22 @@ class HardwareMonitor(QThread):
 
     def __init__(self):
         super().__init__()
-        self.wmi_interface = wmi.WMI()  # Initialize WMI interface
+        self.wmi_interface = None
+        if sys.platform.startswith("win") and wmi is not None:
+            try:
+                self.wmi_interface = wmi.WMI()  # Initialize WMI interface when available
+            except Exception:
+                self.wmi_interface = None
     
     def get_gpu_usage(self):
         try:
+            from pynvml import (
+                nvmlInit,
+                nvmlDeviceGetHandleByIndex,
+                nvmlDeviceGetUtilizationRates,
+                nvmlShutdown,
+            )
+
             nvmlInit()
             handle = nvmlDeviceGetHandleByIndex(0)  # GPU 0
             utilization = nvmlDeviceGetUtilizationRates(handle)
@@ -1731,7 +1894,7 @@ class HardwareMonitor(QThread):
             nvmlShutdown()
             return gpu_usage
         except Exception as e:
-            return f"GPU Usage: Error ({e})"
+            return f"GPU Usage: N/A ({e})"
     
     def run(self):
         while True:
@@ -2431,6 +2594,8 @@ class LogApp(QWidget):
         self.init_ui()
         self.custom_dictionary = getattr(self, "custom_dictionary", "")
         self.keyword_definitions = {}
+        self.keyword_images = {}
+        self.dictionary_thumbnail_cache = {}
         self.keyword_definitions_file = self.get_keyword_definitions_file()
         self.load_keyword_definitions()  # Load keyword definitions
 
@@ -3517,7 +3682,9 @@ class LogApp(QWidget):
 
     def create_menu_bar(self, layout):
         menu_bar = QMenuBar(self)
-        layout.setMenuBar(menu_bar)  # Attach menu bar to layout
+        menu_bar.setNativeMenuBar(False)
+        menu_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout.addWidget(menu_bar, 0)
 
         # Recent Files Menu
         self.recent_menu = QMenu("Recent", self)
@@ -3960,6 +4127,8 @@ class LogApp(QWidget):
         self.center()
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 0, 8, 8)
+        layout.setSpacing(8)
 
         self.create_menu_bar(layout)  # Create the menu bar and add it to layout
         self.setLayout(layout)
@@ -3970,6 +4139,8 @@ class LogApp(QWidget):
         layout.addWidget(self.log_input)
 
         combo_layout = QHBoxLayout()
+        combo_layout.setContentsMargins(0, 0, 0, 0)
+        combo_layout.setSpacing(8)
 
         log_type_label = QLabel(f"Log Type: {self.log_type}", self)
         if self.log_type == "General":
@@ -4005,6 +4176,8 @@ class LogApp(QWidget):
         layout.addLayout(combo_layout)
 
         button_layout = QHBoxLayout()
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(8)
 
         self.add_log_button = QPushButton("Add Log", self)
         self.add_log_button.clicked.connect(self.add_log)
@@ -4547,7 +4720,7 @@ class LogApp(QWidget):
         else:
             self.restore_points = {}
 
-        # Load keyword definitions
+        # Load keyword definitions and image mappings
         keywords_path = os.path.join(config_folder, "keyword_definitions.json")
         if os.path.exists(keywords_path):
             try:
@@ -4559,12 +4732,49 @@ class LogApp(QWidget):
         else:
             self.keyword_definitions = {}
 
+        keyword_images_path = os.path.join(config_folder, "keyword_images.json")
+        if os.path.exists(keyword_images_path):
+            try:
+                with open(keyword_images_path, "r", encoding="utf-8") as f:
+                    loaded_images = json.load(f)
+                if isinstance(loaded_images, dict):
+                    self.keyword_images = {
+                        key: value if isinstance(value, list) else [value]
+                        for key, value in loaded_images.items()
+                    }
+                else:
+                    self.keyword_images = {}
+            except Exception as e:
+                print(f"Error loading keyword image mappings: {e}")
+                self.keyword_images = {}
+        else:
+            self.keyword_images = {}
+        self.dictionary_thumbnail_cache = {}
+
         try:
             with open(file_path, "r", encoding="utf-8") as file:
                 lines = file.readlines()  # Read all lines from the file
 
             # Create a progress dialog
-            progress_dialog = QProgressDialog("Loading Please Wait...", "Cancel", 0, len(lines), self)
+            dictionary_image_count = 0
+            seen_dictionary_paths = set()
+            for image_paths in self.keyword_images.values():
+                if not isinstance(image_paths, list):
+                    continue
+                for rel_path in image_paths:
+                    full_path = os.path.normpath(os.path.join(config_folder, rel_path))
+                    if full_path in seen_dictionary_paths or not os.path.exists(full_path):
+                        continue
+                    seen_dictionary_paths.add(full_path)
+                    dictionary_image_count += 1
+
+            progress_dialog = QProgressDialog(
+                "Loading Please Wait...",
+                "Cancel",
+                0,
+                len(lines) + dictionary_image_count,
+                self,
+            )
             progress_dialog.setWindowTitle("Loading Logs")
             progress_dialog.setFixedSize(300, 100)
             apply_neutral_dialog_style(progress_dialog)
@@ -4630,6 +4840,30 @@ class LogApp(QWidget):
                 # Update the progress dialog
                 progress_dialog.setValue(i + 1)
                 QApplication.processEvents()  # Allow the UI to update
+
+            if dictionary_image_count:
+                preload_completed = self.preload_dictionary_assets(progress_dialog, start_value=len(lines))
+                if not preload_completed:
+                    self._load_was_canceled = True
+                    self.log_list.clear()
+                    self.current_file = None
+                    progress_dialog.close()
+                    box = QMessageBox(self)
+                    box.setIcon(QMessageBox.Icon.Information)
+                    box.setWindowTitle("Loading Cancelled")
+                    box.setText("The loading process has been cancelled.")
+                    box.setStandardButtons(QMessageBox.StandardButton.Ok)
+                    apply_neutral_dialog_style(box)
+                    box.exec()
+                    print("Loading canceled by user during dictionary preload.")
+
+                    try:
+                        if hasattr(self, "logs_viewer") and self.logs_viewer:
+                            self.logs_viewer.close()
+                    except Exception:
+                        pass
+
+                    return
 
             progress_dialog.close()
             self.update_importance_counter()
@@ -5633,8 +5867,14 @@ class LogApp(QWidget):
         else:
             config_folder = get_config_dir()
 
-        self.dictionary_dialog = DictionaryDialog(self, config_folder=config_folder)
-        # Sync LogApp's keyword data with what was loaded from disk
+        self.dictionary_dialog = DictionaryDialog(
+            self,
+            config_folder=config_folder,
+            initial_dictionary=getattr(self, "keyword_definitions", {}),
+            initial_keyword_images=getattr(self, "keyword_images", {}),
+            initial_thumbnail_cache=getattr(self, "dictionary_thumbnail_cache", {}),
+        )
+        # Sync LogApp's keyword data with what the dialog is now using.
         self.keyword_definitions = self.dictionary_dialog.dictionary
         self.keyword_images = self.dictionary_dialog.keyword_images
 
@@ -5667,14 +5907,73 @@ class LogApp(QWidget):
         print(f"Keyword definitions saved to {file_path}")
 
     def load_keyword_definitions(self):
-        """Load keyword definitions from a JSON file."""
+        """Load keyword definitions and keyword image mappings from project config."""
         file_path = self.get_keyword_definitions_file()
+        images_path = os.path.join(os.path.dirname(file_path), "keyword_images.json")
         if os.path.exists(file_path):
             with open(file_path, "r", encoding="utf-8") as file:
                 self.keyword_definitions = json.load(file)
             print(f"Keyword definitions loaded from {file_path}")
         else:
             self.keyword_definitions = {}
+
+        if os.path.exists(images_path):
+            with open(images_path, "r", encoding="utf-8") as file:
+                loaded_images = json.load(file)
+            if isinstance(loaded_images, dict):
+                self.keyword_images = {
+                    key: value if isinstance(value, list) else [value]
+                    for key, value in loaded_images.items()
+                }
+            else:
+                self.keyword_images = {}
+            print(f"Keyword image mappings loaded from {images_path}")
+        else:
+            self.keyword_images = {}
+
+    def preload_dictionary_assets(self, progress_dialog=None, start_value=0):
+        self.dictionary_thumbnail_cache = {}
+        unique_paths = []
+        seen_paths = set()
+
+        for image_paths in getattr(self, "keyword_images", {}).values():
+            if not isinstance(image_paths, list):
+                continue
+            for rel_path in image_paths:
+                full_path = os.path.join(self.get_config_dir_for_current_project(), rel_path)
+                normalized_path = os.path.normpath(full_path)
+                if normalized_path in seen_paths or not os.path.exists(normalized_path):
+                    continue
+                seen_paths.add(normalized_path)
+                unique_paths.append(normalized_path)
+
+        for index, full_path in enumerate(unique_paths, start=1):
+            if progress_dialog is not None and progress_dialog.wasCanceled():
+                return False
+
+            pixmap = QPixmap(full_path)
+            if not pixmap.isNull():
+                self.dictionary_thumbnail_cache[full_path] = pixmap.scaledToHeight(
+                    150,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            else:
+                self.dictionary_thumbnail_cache[full_path] = None
+
+            if progress_dialog is not None:
+                progress_dialog.setLabelText(
+                    f"Loading dictionary assets... {index}/{len(unique_paths)}"
+                )
+                progress_dialog.setValue(start_value + index)
+                QApplication.processEvents()
+
+        return True
+
+    def get_config_dir_for_current_project(self):
+        if getattr(self, "current_file", None):
+            project_folder = os.path.dirname(self.current_file)
+            return get_config_dir(project_folder)
+        return get_config_dir()
 
     def open_filter_dialog(self):
         dialog = FilterDialog(self, self.get_filterable_category_options())

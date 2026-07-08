@@ -2,7 +2,6 @@ PyQt6>=6.8.1
 PyQt6-Qt6>=6.8.2
 PyQt6-sip>=13.10.0
 psutil>=7.0.0
-WMI>=1.5.1
 nvidia-ml-py>=12.535.108
 names>=0.3.0
 pytest>=7.4.0
