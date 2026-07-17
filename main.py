@@ -66,29 +66,83 @@ def get_screen_at_cursor():
     return screen
 
 
+def get_editor_theme_owner(widget):
+    current = widget
+    while current is not None:
+        if hasattr(current, "editor_dark_mode"):
+            return current
+        current = current.parent() if hasattr(current, "parent") else None
+    return None
+
+
 def apply_neutral_dialog_style(widget):
     if widget is None:
         return
-    widget.setStyleSheet("""
-        QDialog, QProgressDialog {
-            background-color: #f5f5f5;
-            color: #111111;
-        }
-        QLabel, QCheckBox {
-            color: #111111;
-        }
-        QLineEdit, QTextEdit, QPlainTextEdit, QListWidget, QComboBox, QDateEdit {
-            background-color: #ffffff;
-            color: #111111;
-            border: 1px solid #b8b8b8;
+    owner = get_editor_theme_owner(widget)
+    dark_mode = bool(getattr(owner, "editor_dark_mode", False))
+
+    if dark_mode:
+        body_background = str(getattr(owner, "editor_body_background_color", "#2b3038"))
+        editor_background = str(getattr(owner, "editor_background_color", "#1f2329"))
+        button_foreground = str(getattr(owner, "editor_button_foreground_color", "#f4f4f4"))
+        button_background = str(getattr(owner, "editor_button_background_color", "#3a414c"))
+        hover_color = str(getattr(owner, "editor_hover_color", "#3d5572"))
+        text_color = "#f4f4f4"
+        border_color = "#5c6673"
+        muted_background = "#353c46"
+        muted_text = "#d2d7de"
+    else:
+        body_background = "#f5f5f5"
+        editor_background = "#ffffff"
+        button_foreground = "#111111"
+        button_background = "#f0f0f0"
+        hover_color = "#cde8ff"
+        text_color = "#111111"
+        border_color = "#b8b8b8"
+        muted_background = "#ececec"
+        muted_text = "#444444"
+
+    widget.setStyleSheet(f"""
+        QDialog, QProgressDialog, QMessageBox {{
+            background-color: {body_background};
+            color: {text_color};
+        }}
+        QLabel, QCheckBox {{
+            color: {text_color};
+        }}
+        QLineEdit, QTextEdit, QPlainTextEdit, QListWidget, QComboBox, QDateEdit, QSpinBox, QFontComboBox, QScrollArea {{
+            background-color: {editor_background};
+            color: {text_color};
+            border: 1px solid {border_color};
             padding: 4px;
-        }
-        QPushButton {
-            background-color: #f0f0f0;
-            color: #111111;
-            border: 1px solid #b8b8b8;
+        }}
+        QListWidget::item:selected, QComboBox QAbstractItemView::item:selected {{
+            background-color: {hover_color};
+            color: {button_foreground};
+        }}
+        QPushButton, QToolButton {{
+            background-color: {button_background};
+            color: {button_foreground};
+            border: 1px solid {border_color};
             padding: 6px;
-        }
+        }}
+        QPushButton:hover, QToolButton:hover {{
+            background-color: {hover_color};
+        }}
+        QMenu {{
+            background-color: {body_background};
+            color: {text_color};
+            border: 1px solid {border_color};
+        }}
+        QMenu::item:selected {{
+            background-color: {hover_color};
+            color: {button_foreground};
+        }}
+        QWidget[dialogRole="muted"] {{
+            background-color: {muted_background};
+            color: {muted_text};
+            border: 1px solid {border_color};
+        }}
     """)
 
 
@@ -569,6 +623,7 @@ class ClickableDefinitionLabel(QLabel):
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         # Store the original stylesheet so we can revert back on hover out.
         self.base_style = "font-size: 15px; padding: 5px;"
+        self.hover_style = self.base_style + "background-color: #f0f0f0;"
         self.setStyleSheet(self.base_style)
         # Optionally, prepare a drop shadow effect
         self.shadow = QGraphicsDropShadowEffect(self)
@@ -577,8 +632,7 @@ class ClickableDefinitionLabel(QLabel):
         self.shadow.setOffset(0, 0)
 
     def enterEvent(self, event):
-        hover_style = self.base_style + "background-color: #f0f0f0;"
-        self.setStyleSheet(hover_style)
+        self.setStyleSheet(self.hover_style)
         # Create a new drop shadow effect every time on hover
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(20)
@@ -592,6 +646,17 @@ class ClickableDefinitionLabel(QLabel):
         self.setStyleSheet(self.base_style)
         self.setGraphicsEffect(None)
         super().leaveEvent(event)    
+
+    def apply_theme(self, dark_mode=False, text_color="#111111", hover_color="#f0f0f0", border_color="#b8b8b8"):
+        self.base_style = (
+            f"font-size: 15px; padding: 5px; color: {text_color}; "
+            f"background-color: transparent; border: 1px solid {border_color};"
+        )
+        self.hover_style = (
+            f"font-size: 15px; padding: 5px; color: {text_color}; "
+            f"background-color: {hover_color}; border: 1px solid {border_color};"
+        )
+        self.setStyleSheet(self.base_style)
     
     def mousePressEvent(self, event):
         viewer = DefinitionViewer(self.full_definition, self)
@@ -674,6 +739,7 @@ class KeywordDialog(QDialog):
         # Image list with scroll area
         scroll_area = QScrollArea(self)
         scroll_area.setWidgetResizable(True)
+        self.images_scroll_area = scroll_area
         self.images_container = QWidget()
         self.images_layout = QVBoxLayout(self.images_container)
         self.images_layout.setSpacing(8)
@@ -709,6 +775,29 @@ class KeywordDialog(QDialog):
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
+        self.apply_dialog_theme()
+
+    def apply_dialog_theme(self):
+        apply_neutral_dialog_style(self)
+        owner = get_editor_theme_owner(self)
+        dark_mode = bool(getattr(owner, "editor_dark_mode", False))
+        border_color = "#5c6673" if dark_mode else "#b8b8b8"
+        container_background = "#2b3038" if dark_mode else "#ffffff"
+        row_background = "#353c46" if dark_mode else "#f5f5f5"
+        text_color = "#f4f4f4" if dark_mode else "#111111"
+
+        if hasattr(self, "images_scroll_area"):
+            self.images_scroll_area.setStyleSheet(
+                f"QScrollArea {{ background-color: {container_background}; border: 1px solid {border_color}; }}"
+            )
+        if hasattr(self, "images_container"):
+            self.images_container.setStyleSheet(f"background-color: {container_background};")
+
+        for img_widget, _path in getattr(self, "image_widgets", []):
+            if img_widget is not None:
+                img_widget.setStyleSheet(
+                    f"background-color: {row_background}; color: {text_color}; border: 1px solid {border_color};"
+                )
 
     def _connect_clipboard_monitor(self):
         if self.clipboard is None or self._clipboard_monitor_connected:
@@ -759,7 +848,7 @@ class KeywordDialog(QDialog):
         if not pixmap.save(dest_path, "PNG"):
             return False
 
-        relative_path = os.path.relpath(dest_path, config_folder)
+        relative_path = os.path.relpath(dest_path, config_folder).replace("\\", "/")
         self.image_paths.append(relative_path)
         self.add_image_widget(relative_path)
         return True
@@ -768,10 +857,11 @@ class KeywordDialog(QDialog):
         
         # Construct full path if relative path is provided
         config_folder = self.parent().config_folder if self.parent() else get_config_dir()
-        if not os.path.isabs(image_path):
-            full_path = os.path.join(config_folder, image_path)
+        normalized_image_path = str(image_path).replace("\\", "/")
+        if not os.path.isabs(normalized_image_path):
+            full_path = os.path.normpath(os.path.join(config_folder, normalized_image_path))
         else:
-            full_path = image_path
+            full_path = os.path.normpath(normalized_image_path)
         
         # Create a widget for displaying and managing a single image
         img_widget = QWidget()
@@ -788,7 +878,7 @@ class KeywordDialog(QDialog):
                 img_layout.addWidget(thumb_label)
         
         # Image path label
-        path_label = QLabel(os.path.basename(image_path))
+        path_label = QLabel(os.path.basename(normalized_image_path))
         img_layout.addWidget(path_label)
         img_layout.addStretch()
         
@@ -811,7 +901,8 @@ class KeywordDialog(QDialog):
         
         img_widget.setLayout(img_layout)
         self.images_layout.insertWidget(len(self.image_widgets), img_widget)
-        self.image_widgets.append((img_widget, image_path))
+        self.image_widgets.append((img_widget, normalized_image_path))
+        self.apply_dialog_theme()
     
     def add_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -834,7 +925,7 @@ class KeywordDialog(QDialog):
 
             shutil.copy2(file_path, dest_path)
 
-            relative_path = os.path.relpath(dest_path, config_folder)
+            relative_path = os.path.relpath(dest_path, config_folder).replace("\\", "/")
 
             self.image_paths.append(relative_path)
             self.add_image_widget(relative_path)
@@ -865,15 +956,20 @@ class KeywordDialog(QDialog):
         self.image_widgets = [(w, p) for w, p in self.image_widgets if w is not widget]
 
         config_folder = self.parent().config_folder if self.parent() else get_config_dir()
-        full_path = os.path.join(config_folder, image_path) if not os.path.isabs(image_path) else image_path
+        normalized_image_path = str(image_path).replace("\\", "/")
+        full_path = (
+            os.path.normpath(os.path.join(config_folder, normalized_image_path))
+            if not os.path.isabs(normalized_image_path)
+            else os.path.normpath(normalized_image_path)
+        )
         try:
             if os.path.exists(full_path):
                 os.remove(full_path)
         except Exception as e:
             print(f"Error deleting image {full_path}: {e}")
 
-        if image_path in self.image_paths:
-            self.image_paths.remove(image_path)
+        if normalized_image_path in self.image_paths:
+            self.image_paths.remove(normalized_image_path)
 
         self._mark_changed()
 
@@ -1006,7 +1102,6 @@ class DictionaryDialog(QDialog):
         self.definition_label = ClickableDefinitionLabel(self)
         self.definition_label.setWordWrap(True)
         self.definition_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.definition_label.setStyleSheet("font-size: 15px; padding: 5px;")
         self.definition_label.setText("Select a keyword to view its definition.")
         # Store the full definition text separately
         self.definition_label.full_definition = "Select a keyword to view its definition."
@@ -1058,6 +1153,7 @@ class DictionaryDialog(QDialog):
         self.definition_layout.addWidget(self.image_scroll_area)
         
         self._dynamic_image_widgets = []
+        self.apply_dialog_theme()
         self._dictionary_thumbnail_cache = dict(initial_thumbnail_cache or {})
         self._active_image_paths = []
         self._displayed_image_count = 0
@@ -1105,6 +1201,23 @@ class DictionaryDialog(QDialog):
         
         self.center()
 
+    def apply_dialog_theme(self):
+        apply_neutral_dialog_style(self)
+        owner = get_editor_theme_owner(self)
+        dark_mode = bool(getattr(owner, "editor_dark_mode", False))
+        text_color = "#f4f4f4" if dark_mode else "#111111"
+        hover_color = str(getattr(owner, "editor_hover_color", "#3d5572" if dark_mode else "#cde8ff"))
+        border_color = "#5c6673" if dark_mode else "#b8b8b8"
+        self.definition_label.apply_theme(
+            dark_mode=dark_mode,
+            text_color=text_color,
+            hover_color=hover_color,
+            border_color=border_color,
+        )
+        self.example_label.setStyleSheet(f"font-weight: bold; color: {text_color};")
+        self.image_scroll_area.setStyleSheet("border: none; background: transparent;")
+        self.image_label.setStyleSheet("border: none; background: transparent;")
+
     def add_list_item(self, word):
         item_widget = QWidget()
         layout = QHBoxLayout()
@@ -1122,12 +1235,14 @@ class DictionaryDialog(QDialog):
     
     def add_static_item(self, text):
         # Adds a non-clickable, non-deletable item to the list
+        owner = get_editor_theme_owner(self)
+        dark_mode = bool(getattr(owner, "editor_dark_mode", False))
         static_item = QListWidgetItem(text)
         static_item.setFlags(Qt.ItemFlag.NoItemFlags)  # Disable interactions
         static_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft)  # Center text
-        static_item.setBackground(QBrush(QColor(220, 220, 220)))
+        static_item.setBackground(QBrush(QColor("#353c46" if dark_mode else "#dcdcdc")))
         static_item.setFont(QLabel().font())  # Use default font
-        static_item.setForeground(QBrush(QColor(0, 0, 0)))  # Black text color
+        static_item.setForeground(QBrush(QColor("#f4f4f4" if dark_mode else "#000000")))
         static_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))  # Bold font
         static_item.setData(Qt.ItemDataRole.UserRole, "static")  # Mark as static
         self.keyword_list.addItem(static_item)  # Add to list
@@ -1431,8 +1546,12 @@ class DictionaryDialog(QDialog):
 
         # Now keyword_images stores lists of paths
         images_file = os.path.join(self.config_folder, "keyword_images.json")
+        serializable_keyword_images = {
+            str(key): [str(path).replace("\\", "/") for path in paths]
+            for key, paths in self._normalize_keyword_images(self.keyword_images).items()
+        }
         with open(images_file, "w", encoding="utf-8") as file:
-            json.dump(self.keyword_images, file, ensure_ascii=False, indent=2)
+            json.dump(serializable_keyword_images, file, ensure_ascii=False, indent=2)
 
     def _normalize_keyword_images(self, keyword_images):
         normalized = {}
@@ -1440,9 +1559,9 @@ class DictionaryDialog(QDialog):
             return normalized
         for key, value in keyword_images.items():
             if isinstance(value, list):
-                normalized[key] = value
+                normalized[key] = [str(path).replace("\\", "/") for path in value if path]
             elif value:
-                normalized[key] = [value]
+                normalized[key] = [str(value).replace("\\", "/")]
             else:
                 normalized[key] = []
         return normalized
@@ -1816,6 +1935,258 @@ class RestorePointWindow(QDialog):  # Change QWidget to QDialog
         self.move(window_geometry.topLeft())
 
 
+class HelpWindow(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("How to Use")
+        self.resize(920, 720)
+        self.setMinimumSize(640, 420)
+        apply_neutral_dialog_style(self)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                width: 0px;
+                background: transparent;
+            }
+            QScrollBar::handle:vertical {
+                background: transparent;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: transparent;
+                height: 0px;
+            }
+        """)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(8, 8, 8, 8)
+        content_layout.setSpacing(10)
+
+        title = QLabel("How to use window")
+        title.setWordWrap(True)
+        title.setStyleSheet("font-size: 28px; font-weight: bold; margin-bottom: 10px;")
+        content_layout.addWidget(title)
+
+        def add_heading(text, level):
+            label = QLabel(text)
+            label.setWordWrap(True)
+            if level == 1:
+                label.setStyleSheet("font-size: 24px; font-weight: bold; margin: 8px 0px 4px 0px;")
+            elif level == 2:
+                label.setStyleSheet("font-size: 18px; font-weight: bold; margin: 6px 0px 2px 18px;")
+            else:
+                label.setStyleSheet("font-size: 15px; font-weight: bold; margin: 4px 0px 2px 40px;")
+            content_layout.addWidget(label)
+            return label
+
+        def add_body(text="", indent=56):
+            label = QLabel(text)
+            label.setWordWrap(True)
+            label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            label.setStyleSheet(f"font-size: 14px; margin: 0px 0px 2px {indent}px;")
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            content_layout.addWidget(label)
+            return label
+
+        add_heading("Tabs", 1) 
+
+        add_heading("Recent", 2)
+        add_body("Lists of lds files you recently opened. Limited to 5 recent files only")
+        
+        add_heading("View", 2)
+
+        add_heading("Important", 3)
+        add_body("""View all marked important logs by default it was set to off
+                Note: A superscript style number indicates on the view tab so that users
+                are aware of the number of important log entries""", indent=64)
+        
+        add_heading("Preferences", 3)
+        add_body("Change style/s on logs viewer window", indent=64)
+        
+        add_heading("Editor's Playground", 3)
+        add_body("Change style/s on overall (dictionary, version control, etc) excluding the viewer window", indent=64)
+
+        add_heading("Help", 2)
+        
+        add_heading("How to use", 3)
+        add_body("Open user's manual (this window)", indent=64)
+        
+        add_heading("Dictionary", 3)
+        add_body("Integrated dictionary, allows multiple keywords with each keywords containing multiple images", indent=64)
+        
+        add_heading("Filter Logs", 3)
+        add_body("Filter logs by their date and log category", indent=64)
+        
+        add_heading("Clear Filters", 3)
+        add_body("Clear all filters applied", indent=64)
+        
+        add_heading("Version Control", 2)
+        
+        add_heading("View Log Versions", 3)
+        add_body("opens a window to view and compare saved log versions to the current [unsaved] version", indent=64)
+        
+        add_heading("Create restore points", 3)
+        add_body("Manually creates a restore point", indent=64)
+        
+        add_heading("Text Box Area", 1)
+        
+        add_heading("enter your log entry here...", 2)
+        add_body("This is where you input texts to add on your log entry")
+        
+        add_heading("Log Type Area", 1)
+        
+        add_heading("Log Type: General/Debugging", 2)
+        add_body("Specifies the log type you are currently using")
+        
+        add_heading("Just Details", 2)
+        add_body("A log category selector, configurable via editor's playground")
+        
+        add_heading("Add log", 2)
+        add_body("For mouse users, enter log entry from the text box to the main log viewer")
+        
+        add_heading("Clear logs(not recommended)", 2)
+        add_body("Clears all log entries and drops the current file")
+        add_body("""Dropping the current file makes the main ui go to its default state where:
+                1) It also drop the configuration
+                2) you need to manually save it again in order to run features like auto save and auto create restore points
+                3) it will drop the dictionary""")
+        
+        add_heading("Main Log Viewer", 1)
+        add_body("Container of all log entries (text  not wrapped) sorted from oldest to latest", indent=0)
+        
+        add_heading("Save Area", 1)
+        
+        add_heading("Save Logs", 2)
+        add_body("For mouse users, save log entries and users configuration")
+        
+        add_heading("Open Logs", 2)
+        add_body("Open an lds file")
+        
+        add_heading("Customize", 2)
+        add_body("Configurations for document exportation")
+        
+        add_heading("Export to", 2)
+        add_body("Export the lds contents into document pdf/html")
+        
+        add_heading("Components Event Handling", 1)
+        
+        add_heading("Tabs", 2)
+        add_body("Mouse click and mouse hover (changes the components color)")
+        
+        add_heading("Text Box Area", 2)
+        add_body("""Shift + Arrow up/down key - change log category
+                Shift + Enter key - Shortcut for Add Log""")
+        
+        add_heading("Log Type", 2)
+        add_body("None")
+        
+        add_heading("Just Details", 2)
+        add_body("Mouse click, mouse hover, arrow up/down key to navigate and enter key to select")
+        
+        add_heading("Add log", 2)
+        add_body("Mouse click and mouse hover")
+        
+        add_heading("Main Log Viewer", 2)
+        add_body("Mouse click, mouse double click, mouse right click (context menu), mouse hover, [shift] arrow keys")
+        
+        add_heading("Save Logs", 2)
+        add_body("Mouse click and mouse hover")
+        
+        add_heading("Open Logs", 2)
+        add_body("Mouse click and mouse hover")
+        
+        add_heading("Customize", 2)
+        add_body("Mouse click and mouse hover")
+        
+        add_heading("Export to", 2)
+        add_body("Mouse click, mouse hover, arrow up/down and enter keys")
+        
+        add_heading("State", 1)
+        
+        add_heading("Auto save", 2)
+        add_body("an lds file will run auto save function provided that the file is already saved")
+        
+        add_heading("Auto Restore Points", 2)
+        add_body("same condition, the auto create restore points function will only run when the condition is met")
+        
+        add_heading("Unsaved state", 2)
+        add_body("prevents user to immediately close the program when the (latest version) file is not yet saved")
+        
+        add_heading("Filter", 2)
+        add_body("Important and Filter logs provides more precise filter state")
+        
+        add_heading("Keyword capture", 2)
+        add_body("defined keywords on dictionary will provide a clickable link on log entries that contain the keyword (inline keywords)")
+        
+        add_heading("Logs Viewer", 1)
+        
+        add_heading("""Contains all log entries on a vertical view layout and text size/spacing/wrapping is adjustable
+                    Double clicking on a log entry will jump to main log viewer same log entry location
+                    Clicking on inline keywords open the full definition window
+                    Log Viewer vertical size dynamically change based on the user's current display size (height)""", 2)
+        
+        add_heading("Window Formats", 1)
+        
+        add_heading("""By default ldsg/ldsd window is not resizable. Logs viewer shares the same properties but Logs Viewer is built to view log entries on a more clean and readable ui so it supports line spacing, text size and text wrapping
+                    Everytime you load a ldsg/ldsd file the main window and the logs viewer window will open based on where your mouse cursor is
+                    Main window is set to open on center and Logs Viewer window is set to open on the rightmost part of the active screen from where the mouse is""", 2)
+        
+        add_heading("Markups", 1)
+        
+        add_heading("Inline usage on before and after the word you want to format", 2)
+        add_body("_underlineword_")
+        add_body("*italicword*")
+        add_body("**boldword**")
+        add_body("keyword - automatic markup from dictionary")
+        
+        add_heading("Controls", 1)
+        
+        add_heading("Ctrl + S Key", 2)
+        add_body("Save logs")
+        
+        add_heading("Ctrl + O Key", 2)
+        add_body("Open logs")
+        
+        add_heading("Ctrl + E Key", 2)
+        add_body("Clear logs")
+        
+        add_heading("Cursor active at Text Box", 2)
+        add_heading("Ctrl + Z Key", 2)
+        add_body("Undo")
+        
+        add_heading("Ctrl + Y Key", 2)
+        add_body("Redo")
+        
+        add_heading("Shift + Arrow Up/Down Key", 2)
+        add_body("Change Log Category")
+        
+        content_layout.addStretch()
+        scroll_area.setWidget(content)
+        layout.addWidget(scroll_area)
+
+        self.center()
+
+    def center(self):
+        screen = get_screen_at_cursor()
+        screen_geometry = screen.availableGeometry() if screen else QApplication.primaryScreen().availableGeometry()
+        window_geometry = self.frameGeometry()
+        window_geometry.moveCenter(screen_geometry.center())
+        self.move(window_geometry.topLeft())
+
+
 class LogTextEdit(QTextEdit):
     logSubmitted = pyqtSignal()
     
@@ -2176,6 +2547,12 @@ class LogsViewerWindow(QMainWindow):
         log_label.setTextFormat(Qt.TextFormat.RichText)
         log_label.setWordWrap(bool(self.viewer_pref("viewer_word_wrap", True)))
         log_label.setOpenExternalLinks(False)
+        if self.parent_widget and hasattr(self.parent_widget, "handle_internal_link"):
+            try:
+                log_label.linkActivated.disconnect(self.parent_widget.handle_internal_link)
+            except TypeError:
+                pass
+            log_label.linkActivated.connect(self.parent_widget.handle_internal_link)
         log_label.setProperty("source_index", source_index)
         log_label.setProperty("viewer_text_size", int(self.viewer_pref("viewer_text_size", 11)))
         log_label.setProperty("viewer_font_family", self.viewer_pref("viewer_font_family", "Arial"))
@@ -2568,10 +2945,10 @@ class LogApp(QWidget):
     def __init__(self, setup_data=None, log_mode="General", file_path=None, parent=None):
         super().__init__(parent)
         if file_path:
-            filename, ext = os.path.splitext(os.path.basename(file_path))
-            self.current_file = filename   # just the name without extension
+            filename = os.path.basename(file_path)
+            _, ext = os.path.splitext(filename)
             self.current_ext = ext
-            self.fileName = self.current_file
+            self.fileName = filename
         self.current_file = file_path
         self._load_was_canceled = False
         # Use setup_data to initialize user/project config
@@ -3187,12 +3564,7 @@ class LogApp(QWidget):
         dialog = QDialog(self)
         dialog.setWindowTitle("Categories")
         dialog.setFixedSize(640, 320)
-        dialog.setStyleSheet("""
-            QDialog { background-color: #f5f5f5; color: #111111; }
-            QLabel { color: #111111; }
-            QPushButton { padding: 6px; }
-            QLineEdit { padding: 4px; }
-        """)
+        apply_neutral_dialog_style(dialog)
 
         layout = QVBoxLayout(dialog)
 
@@ -3767,12 +4139,7 @@ class LogApp(QWidget):
         dialog = QDialog(self)
         dialog.setWindowTitle("Log Viewer Preferences")
         dialog.setFixedSize(360, 380)
-        # Keep this dialog readable regardless of the viewer theme.
-        dialog.setStyleSheet("""
-            QDialog { background-color: #f5f5f5; color: #111111; }
-            QLabel, QCheckBox { color: #111111; }
-            QPushButton { padding: 6px; }
-        """)
+        apply_neutral_dialog_style(dialog)
 
         layout = QVBoxLayout(dialog)
 
@@ -3934,12 +4301,7 @@ class LogApp(QWidget):
         dialog = QDialog(self)
         dialog.setWindowTitle("Editor's Playground")
         dialog.setFixedSize(360, 320)
-        # Keep this dialog readable regardless of the main UI theme.
-        dialog.setStyleSheet("""
-            QDialog { background-color: #f5f5f5; color: #111111; }
-            QLabel, QCheckBox { color: #111111; }
-            QPushButton { padding: 6px; }
-        """)
+        apply_neutral_dialog_style(dialog)
 
         layout = QVBoxLayout(dialog)
 
@@ -4071,6 +4433,11 @@ class LogApp(QWidget):
             self.save_user_config()
             self.apply_editor_theme()
             self.refresh_log_label_styles()
+            if hasattr(self, "dictionary_dialog") and self.dictionary_dialog:
+                self.dictionary_dialog.apply_dialog_theme()
+                self.dictionary_dialog.refresh_keyword_list()
+            if hasattr(self, "restore_window") and self.restore_window:
+                apply_neutral_dialog_style(self.restore_window)
             dialog.accept()
 
         save_button.clicked.connect(save_editor_preferences)
@@ -4114,7 +4481,8 @@ class LogApp(QWidget):
         self.update_recent_files_menu()  # Update the menu dynamically
 
     def show_help(self):
-        QMessageBox.information(self, "How to Use", "1. Open or create a log file.\n2. Add logs using the text input.\n3. Save logs to keep them.\n4. Use 'Recent' to quickly access previous logs.")
+        self.help_window = HelpWindow(self)
+        self.help_window.show()
 
     def init_ui(self):  
         print("Setting up UI...")
@@ -4305,8 +4673,9 @@ class LogApp(QWidget):
     def set_user_name(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Customize")
-        dialog.setGeometry(100, 100, 400, 300)
-        dialog.setFixedSize(400, 300)  # Make dialog not resizable
+        dialog.setGeometry(100, 100, 400, 400)
+        dialog.setFixedSize(400, 400)  # Make dialog not resizable
+        apply_neutral_dialog_style(dialog)
         dialog_layout = QVBoxLayout(dialog)
 
         # Center the dialog on the screen where cursor is located
@@ -4654,10 +5023,20 @@ class LogApp(QWidget):
             return
 
         self.current_file = file_path
+        filename = os.path.basename(file_path)
+        _, ext = os.path.splitext(filename)
+        self.current_ext = ext
+        self.fileName = filename
+        self.setWindowTitle(self.fileName)
         self.save_recent_file(file_path)
         self.log_list.clear()
         self.load_user_config()
+        self.load_color_from_config()
         self.apply_editor_theme()
+        self.keyword_definitions_file = self.get_keyword_definitions_file()
+        self.load_keyword_definitions()
+        if hasattr(self, "logs_viewer") and self.logs_viewer:
+            self.logs_viewer.apply_viewer_theme()
 
         # Use project folder and config subfolder
         project_folder = os.path.dirname(file_path)
@@ -4739,7 +5118,11 @@ class LogApp(QWidget):
                     loaded_images = json.load(f)
                 if isinstance(loaded_images, dict):
                     self.keyword_images = {
-                        key: value if isinstance(value, list) else [value]
+                        key: [
+                            str(path).replace("\\", "/")
+                            for path in (value if isinstance(value, list) else [value])
+                            if path
+                        ]
                         for key, value in loaded_images.items()
                     }
                 else:
@@ -4871,6 +5254,9 @@ class LogApp(QWidget):
             self.refresh_log_label_styles()
             self.normalize_logs_to_categories_and_rebuild_counters()
             self.reapply_active_filter()
+            if hasattr(self, "logs_viewer") and self.logs_viewer:
+                self.logs_viewer.apply_viewer_theme()
+                self.logs_viewer.refresh_logs()
             print(f"Logs loaded successfully from {file_path}")
             
             if hasattr(self, 'logs_viewer') and self.logs_viewer:
@@ -5253,19 +5639,68 @@ class LogApp(QWidget):
                 print(f"PDF exported successfully to {file_path}")
 
     def clear_logs(self):
-        # Confirm the action with the user (optional)
-        reply = QMessageBox.question(self, "Clear Logs", 
-                                    "Are you sure you want to clear all logs and drop the current file?",
-                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
-            self.log_list.clear()   # Clear all log items
-            self.current_file = None  # Reset the current file reference
-            # Reset log counters
-            self.log_counters = {key: 0 for key in self.log_counters}
-            self.save_log_counters()
-            # Emit signal for real-time sync with LogsViewerWindow
-            self.logsCleared.emit()
-            print("Logs cleared and current file dropped.")
+        reply = show_neutral_message_box(
+            self,
+            QMessageBox.Icon.Warning,
+            "Clear Logs",
+            "Are you sure you want to clear all logs and reset this window to a default untitled state? Saved files and configuration on disk will not be deleted.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.log_list.clear()
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+        self.restore_points = {}
+        self.keyword_definitions = {}
+        self.keyword_images = {}
+        self.dictionary_thumbnail_cache = {}
+        self.active_filter = None
+        self.important_filter_active = False
+        self.editor_selected_log_label = None
+        self.unsaved_changes = False
+        self._important_sort_backup = None
+        self.log_counters = dict(self.DEFAULT_COUNTERS)
+        self.clear_filter_preferences()
+
+        if hasattr(self, "dictionary_dialog") and self.dictionary_dialog:
+            try:
+                self.dictionary_dialog.close()
+            except Exception:
+                pass
+            self.dictionary_dialog = None
+
+        self.user_name = ""
+        self.pdf_title = "Log Documentation"
+        self.pdf_font_size = 12
+        self.pdf_line_spacing = 1.5
+        self.pdf_font = "Arial"
+        self.custom_dictionary = ""
+        self.text_color = QColor("#008000")
+        self.load_default_log_theme_colors()
+        for key, default_value in self.DEFAULT_VIEWER_PREFERENCES.items():
+            setattr(self, key, default_value)
+        for key, default_value in self.DEFAULT_EDITOR_PREFERENCES.items():
+            setattr(self, key, default_value)
+        self.editor_categories_default = list(self.DEFAULT_EDITOR_CATEGORIES)
+        self.editor_categories = list(self.DEFAULT_EDITOR_CATEGORIES)
+
+        self.current_file = None
+        self.fileName = "Untitled"
+        self.current_ext = ""
+        self.setWindowTitle(self.fileName)
+        self.apply_editor_theme()
+        self.refresh_log_label_styles()
+        self.refresh_category_selector()
+
+        self.logsCleared.emit()
+        self.update_important_menu_label()
+        self.reapply_all_filters()
+        if hasattr(self, "logs_viewer") and self.logs_viewer:
+            self.logs_viewer.apply_viewer_theme()
+            self.logs_viewer.refresh_logs()
+        print("Logs cleared and window reset to default state.")
 
     def auto_save_logs(self):
         if self.current_file:
@@ -5431,6 +5866,7 @@ class LogApp(QWidget):
 
     def format_text(self, text):
         """Convert Markdown-like syntax into HTML for QLabel."""
+        text = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", text)  # **bold** -> <b>bold</b>
         text = re.sub(r"\*([^*]+)\*", r"<i>\1</i>", text)  # *italic* â†’ <i>italic</i>
         text = re.sub(r"_([^_]+)_", r"<u>\1</u>", text)    # _underline_ â†’ <u>underline</u>
         text = re.sub(r"\[([^\]]+)\]\((#.*?)\)", r'<a href="\2">\1</a>', text)  # Internal links only
@@ -5447,10 +5883,21 @@ class LogApp(QWidget):
 
         keyword = link.lstrip("#")  # Remove '#' from link
         if keyword in getattr(self, 'keyword_definitions', {}):
-            definition = self.keyword_definitions[keyword]
-            QMessageBox.information(self, f"Definition: {keyword}", definition)
+            self.open_keyword_definition_viewer(keyword)
         else:
             QMessageBox.warning(self, "Keyword Not Found", f"No definition found for '{keyword}'.")
+
+    def open_keyword_definition_viewer(self, keyword):
+        keyword = str(keyword or "").strip()
+        if not keyword:
+            return
+        definition = getattr(self, "keyword_definitions", {}).get(keyword)
+        if definition is None:
+            QMessageBox.warning(self, "Keyword Not Found", f"No definition found for '{keyword}'.")
+            return
+        viewer = DefinitionViewer(definition, self)
+        viewer.setWindowTitle(f"Definition: {keyword}")
+        viewer.exec()
 
     def export_to_html(self):
         # Get user-defined values
@@ -5878,6 +6325,7 @@ class LogApp(QWidget):
         self.keyword_definitions = self.dictionary_dialog.dictionary
         self.keyword_images = self.dictionary_dialog.keyword_images
 
+        self.dictionary_dialog.apply_dialog_theme()
         self.dictionary_dialog.show()
     
     def open_logs_viewer(self):
@@ -5922,7 +6370,11 @@ class LogApp(QWidget):
                 loaded_images = json.load(file)
             if isinstance(loaded_images, dict):
                 self.keyword_images = {
-                    key: value if isinstance(value, list) else [value]
+                    key: [
+                        str(path).replace("\\", "/")
+                        for path in (value if isinstance(value, list) else [value])
+                        if path
+                    ]
                     for key, value in loaded_images.items()
                 }
             else:

@@ -208,6 +208,8 @@ class ChangelogPage(QWidget):
         # Add changelog entries here
         # Latest version should be first in the list for easier management
         self.changelog_entries = [
+            {"version": "1.0.37", "date": "July, 17, 2026", "features": ["dynamic style on popup windows (ldsg/ldsd also applied on integrated dictionary)", "Fix cursor pointer on UIMode.py", "How to use window - main.py", "Connect inline keywords on log entries to open full definition window"]},
+            {"version": "1.0.36", "date": "July, 11, 2026", "features": ["Fix keyword images not showing on other os like linux"]},
             {"version": "1.0.35", "date": "July, 9, 2026", "features": ["Done docs.py added ideas page"]},
             {"version": "1.0.34", "date": "July, 8, 2026", "features": ["Preloads dictionary on opening project file", "Limits image loaded on the keyword image are to not overload the program. Works for keywords that has a lot of image. The image will show continously by scrolling.", "Removes animation on full definition and now allows full screen"]},
             {"version": "1.0.33", "date": "July, 4, 2026", "features": ["Supports multi-platform for main.py and setup.py", "Updated requirements.txt to support cross platform"]},
@@ -691,6 +693,9 @@ class IdeaPage(QWidget):
         
         # Idea data structure with stable ids so saved status remains correct when items are added.
         self.ideas = [
+            {"id": "idea-general-mode-changes", "date": "July 17, 2026", "description": "How to use window"},
+            {"id": "idea-wizard-changes", "date": "July 17, 2026", "description": "Will edit wizard to include UIMode and configure dictionary."},
+            {"id": "idea-ui-mode-changes", "date": "July 17, 2026", "description": "Connect UI mode to setup.py and on wizard"},
             {"id": "idea-mobile", "date": "July 9, 2026", "description": "Will make lds available on mobile.\nProbably develop on kotlin or swift - not so different ui but same functionality"},
             {"id": "idea-ui-mode", "date": "July 9, 2026", "description": "Will update ui mode to make it usable seamlessly."},
             {"id": "idea-my-ratings", "date": "July 9, 2026", "description": "Will create a new lds type.\nmyRatings - A collection of all stuffs user used and is rated by their standard - Can input image, comments and such"},
@@ -1073,7 +1078,7 @@ class ModulePage(QWidget):
         
         # Module data structure with name, description, and percentage completion
         self.modules = [
-            {"name": "docs.py", "description": "Document Page\nModified Module Page", "percentage": 75},
+            {"name": "docs.py", "description": "Document Page\nModified Module Page", "percentage": 100},
             {"name": "main.py", "description": "LDSD and LDSG\nPreload Dictionary", "percentage": 80},
             {"name": "UIMode.py", "description": "LDSU - User Interface Design Mode", "percentage": 80},
             {"name": "setup.py", "description": "Welcome Page\nAdd Dictionary besides git icon", "percentage": 90},

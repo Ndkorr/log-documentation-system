@@ -1,4 +1,7 @@
 {
+  "idea-general-mode-changes": "on",
+  "idea-wizard-changes": "on",
+  "idea-ui-mode-changes": "on",
   "idea-mobile": "exclamation",
   "idea-ui-mode": "exclamation",
   "idea-my-ratings": "on",

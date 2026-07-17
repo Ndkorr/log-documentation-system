@@ -76,7 +76,7 @@ def _pointing_cursor():
         px = QPixmap(os.path.join(_ASSETS_DIR, "cursor-pointing.png"))
         if not px.isNull():
             px = px.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            _pointing_cursor_cache = QCursor(px, 25, 20)
+            _pointing_cursor_cache = QCursor(px, 2, 2)
         else:
             _pointing_cursor_cache = QCursor(Qt.CursorShape.PointingHandCursor)
     return _pointing_cursor_cache
@@ -1931,7 +1931,7 @@ class _LabelTextOverlay(QWidget):
             px = QPixmap(os.path.join(_ASSETS_DIR, name))
             if not px.isNull():
                 px = px.scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                return QCursor(px, 20, 20)
+                return QCursor(px, 22, 22)
             return QCursor(fallback)
 
         self._RESIZE_CURSORS = [
@@ -4269,14 +4269,14 @@ class DrawingArea(QFrame):
         # idx: 0-7 for 8 handles (corners and edges)
         # Map to appropriate resize cursors
         cursors = [
-            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizediagonalleft.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),   # Top-left
-            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizevertical.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),    # Top-middle
-            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizediagonalright.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),   # Top-right
-            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizehorizontal.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),     # Right-middle
-            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizediagonalleft.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),   # Bottom-right
-            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizevertical.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),    # Bottom-middle
-            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizediagonalright.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),   # Bottom-left
-            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizehorizontal.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 18, 18),     # Left-middle
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizediagonalleft.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 22, 22),   # Top-left
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizevertical.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 22, 22),    # Top-middle
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizediagonalright.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 22, 22),   # Top-right
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizehorizontal.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 22, 22),     # Right-middle
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizediagonalleft.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 22, 22),   # Bottom-right
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizevertical.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 22, 22),    # Bottom-middle
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizediagonalright.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 22, 22),   # Bottom-left
+            QCursor(QPixmap(os.path.join(_ASSETS_DIR, "cursor-sizehorizontal.png")).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation), 22, 22),     # Left-middle
         ]
         if 0 <= idx < len(cursors):
             self.setCursor(cursors[idx])
