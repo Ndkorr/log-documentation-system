@@ -18,7 +18,8 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QColor, QFont, QBrush, QShortcut, 
     QKeySequence, QAction, QTextDocument, 
-    QPixmap, QCursor, QIntValidator, QPalette
+    QPixmap, QCursor, QIntValidator, QPalette,
+    QImageReader, QImageWriter
     )
 from datetime import datetime, timezone
 import sys
@@ -45,6 +46,8 @@ try:
 except Exception:
     wmi = None
 
+APP_LAUNCH_MONOTONIC = time.monotonic()
+
 def get_config_dir(base_path=None):
     if base_path:
         config_dir = os.path.join(base_path, "config")
@@ -54,6 +57,8 @@ def get_config_dir(base_path=None):
     else:
         # Only return, do not create in root
         return os.path.join(os.getcwd(), "config")
+
+
 
 
 def get_screen_at_cursor():
@@ -80,23 +85,24 @@ def apply_neutral_dialog_style(widget):
         return
     owner = get_editor_theme_owner(widget)
     dark_mode = bool(getattr(owner, "editor_dark_mode", False))
+    preset = (
+        getattr(owner, "DEFAULT_EDITOR_DARK_PRESET", None)
+        if dark_mode
+        else getattr(owner, "DEFAULT_EDITOR_PREFERENCES", None)
+    ) or {}
+
+    body_background = str(getattr(owner, "editor_body_background_color", preset.get("editor_body_background_color", "#2b3038" if dark_mode else "#f5f5f5")))
+    editor_background = str(getattr(owner, "editor_background_color", preset.get("editor_background_color", "#1f2329" if dark_mode else "#ffffff")))
+    button_foreground = str(getattr(owner, "editor_button_foreground_color", preset.get("editor_button_foreground_color", "#f4f4f4" if dark_mode else "#111111")))
+    button_background = str(getattr(owner, "editor_button_background_color", preset.get("editor_button_background_color", "#3a414c" if dark_mode else "#f0f0f0")))
+    hover_color = str(getattr(owner, "editor_hover_color", preset.get("editor_hover_color", "#3d5572" if dark_mode else "#cde8ff")))
 
     if dark_mode:
-        body_background = str(getattr(owner, "editor_body_background_color", "#2b3038"))
-        editor_background = str(getattr(owner, "editor_background_color", "#1f2329"))
-        button_foreground = str(getattr(owner, "editor_button_foreground_color", "#f4f4f4"))
-        button_background = str(getattr(owner, "editor_button_background_color", "#3a414c"))
-        hover_color = str(getattr(owner, "editor_hover_color", "#3d5572"))
         text_color = "#f4f4f4"
         border_color = "#5c6673"
         muted_background = "#353c46"
         muted_text = "#d2d7de"
     else:
-        body_background = "#f5f5f5"
-        editor_background = "#ffffff"
-        button_foreground = "#111111"
-        button_background = "#f0f0f0"
-        hover_color = "#cde8ff"
         text_color = "#111111"
         border_color = "#b8b8b8"
         muted_background = "#ececec"
@@ -665,6 +671,9 @@ class ClickableDefinitionLabel(QLabel):
 
 
 class DefinitionViewer(QDialog):
+    MIN_TEXT_SIZE = 8
+    MAX_TEXT_SIZE = 32
+
     def __init__(self, full_text, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Full Definition")
@@ -672,16 +681,64 @@ class DefinitionViewer(QDialog):
         self.resize(700, 500)
         self.setMinimumSize(420, 320)
         apply_neutral_dialog_style(self)
+        owner = get_editor_theme_owner(self)
+        self.definition_text_size = int(getattr(owner, "definition_viewer_text_size", 15))
         
         layout = QVBoxLayout(self)
         
-        content_widget = QTextEdit(self)
-        content_widget.setReadOnly(True)
-        content_widget.setPlainText(full_text)
-        layout.addWidget(content_widget)
+        self.content_widget = QTextEdit(self)
+        self.content_widget.setReadOnly(True)
+        self.content_widget.setPlainText(full_text)
+        self.content_widget.installEventFilter(self)
+        self.apply_text_size()
+        layout.addWidget(self.content_widget)
 
         self.setLayout(layout)
         self.center()
+
+    def apply_text_size(self):
+        font = self.content_widget.font()
+        font.setPointSize(self.definition_text_size)
+        self.content_widget.setFont(font)
+
+    def adjust_text_size(self, delta):
+        next_size = max(self.MIN_TEXT_SIZE, min(self.MAX_TEXT_SIZE, self.definition_text_size + delta))
+        if next_size == self.definition_text_size:
+            return
+        self.definition_text_size = next_size
+        self.apply_text_size()
+        owner = get_editor_theme_owner(self)
+        if owner is not None:
+            owner.definition_viewer_text_size = self.definition_text_size
+
+    def eventFilter(self, watched, event):
+        if watched is self.content_widget and event.type() == QEvent.Type.Wheel:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                self.adjust_text_size(1 if event.angleDelta().y() > 0 else -1)
+                event.accept()
+                return True
+        if watched is self.content_widget and event.type() == QEvent.Type.KeyPress:
+            if self.handle_text_size_key_event(event):
+                return True
+        return super().eventFilter(watched, event)
+
+    def handle_text_size_key_event(self, event):
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            key = event.key()
+            if key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+                self.adjust_text_size(1)
+                event.accept()
+                return True
+            if key == Qt.Key.Key_Minus:
+                self.adjust_text_size(-1)
+                event.accept()
+                return True
+        return False
+
+    def keyPressEvent(self, event):
+        if self.handle_text_size_key_event(event):
+            return
+        super().keyPressEvent(event)
         
     def center(self):
         """Center the dialog on the screen."""
@@ -702,6 +759,13 @@ class KeywordDialog(QDialog):
         self.clipboard = QApplication.clipboard()
         self._clipboard_monitor_connected = False
         self._has_unsaved_changes = False
+        self._initial_image_batch_size = 5
+        self._image_batch_size = 5
+        self._image_scroll_load_threshold = 24
+        self._displayed_image_count = 0
+        self._loading_remaining_images = False
+        self._thumbnail_max_size = QSize(56, 44)
+        self._last_pasted_clipboard_sequence = None
         
         self.init_ui()
         self._connect_clipboard_monitor()
@@ -743,11 +807,17 @@ class KeywordDialog(QDialog):
         self.images_container = QWidget()
         self.images_layout = QVBoxLayout(self.images_container)
         self.images_layout.setSpacing(8)
+        scroll_area.verticalScrollBar().valueChanged.connect(self.on_image_scroll)
         
         # Populate existing images
         self.image_widgets = []
-        for img_path in self.image_paths:
-            self.add_image_widget(img_path)
+        self.load_more_image_widgets(self._initial_image_batch_size)
+
+        self.load_more_images_btn = QPushButton("Load More Images")
+        self.load_more_images_btn.clicked.connect(self.load_remaining_image_widgets)
+        self.load_more_images_btn.setVisible(False)
+        self.images_layout.addWidget(self.load_more_images_btn)
+        self.update_load_more_images_button()
         
         self.images_layout.addStretch()
         scroll_area.setWidget(self.images_container)
@@ -803,7 +873,7 @@ class KeywordDialog(QDialog):
         if self.clipboard is None or self._clipboard_monitor_connected:
             return
         try:
-            self.clipboard.dataChanged.connect(self.update_paste_image_button_visibility)
+            self.clipboard.dataChanged.connect(self.on_clipboard_changed)
             self._clipboard_monitor_connected = True
         except Exception:
             self._clipboard_monitor_connected = False
@@ -812,10 +882,20 @@ class KeywordDialog(QDialog):
         if self.clipboard is None or not self._clipboard_monitor_connected:
             return
         try:
-            self.clipboard.dataChanged.disconnect(self.update_paste_image_button_visibility)
+            self.clipboard.dataChanged.disconnect(self.on_clipboard_changed)
         except Exception:
             pass
         self._clipboard_monitor_connected = False
+
+    def on_clipboard_changed(self):
+        self._last_pasted_clipboard_sequence = None
+        self.update_paste_image_button_visibility()
+
+    def _clipboard_sequence(self):
+        try:
+            return self.clipboard.mimeData()
+        except Exception:
+            return None
 
     def _clipboard_has_image(self):
         try:
@@ -829,7 +909,11 @@ class KeywordDialog(QDialog):
 
     def update_paste_image_button_visibility(self):
         if hasattr(self, "paste_image_btn"):
-            self.paste_image_btn.setVisible(self._clipboard_has_image())
+            has_new_image = (
+                self._clipboard_has_image()
+                and self._clipboard_sequence() is not self._last_pasted_clipboard_sequence
+            )
+            self.paste_image_btn.setVisible(has_new_image)
 
     def _add_image_from_pixmap(self, pixmap, ext=".png"):
         if pixmap.isNull():
@@ -849,11 +933,119 @@ class KeywordDialog(QDialog):
             return False
 
         relative_path = os.path.relpath(dest_path, config_folder).replace("\\", "/")
-        self.image_paths.append(relative_path)
+        insert_at = min(self._displayed_image_count, len(self.image_paths))
+        self.image_paths.insert(insert_at, relative_path)
+        self._displayed_image_count = insert_at + 1
         self.add_image_widget(relative_path)
+        self.update_load_more_images_button()
         return True
     
-    def add_image_widget(self, image_path):
+    def update_load_more_images_button(self):
+        if not hasattr(self, "load_more_images_btn"):
+            return
+
+        remaining = len(self.image_paths) - self._displayed_image_count
+        if remaining > 0:
+            self.load_more_images_btn.setText(f"Load More Images ({remaining} remaining)")
+            self.load_more_images_btn.setVisible(True)
+        else:
+            self.load_more_images_btn.setVisible(False)
+
+    def load_more_image_widgets(self, batch_size=None):
+        if batch_size is None or isinstance(batch_size, bool):
+            batch_size = self._image_batch_size
+
+        rendered = 0
+        while self._displayed_image_count < len(self.image_paths) and rendered < batch_size:
+            image_path = self.image_paths[self._displayed_image_count]
+            self._displayed_image_count += 1
+            self.add_image_widget(image_path, apply_theme=False)
+            rendered += 1
+
+        if rendered:
+            self.apply_dialog_theme()
+        self.update_load_more_images_button()
+
+    def load_remaining_image_widgets(self):
+        if self._loading_remaining_images:
+            return
+
+        remaining = len(self.image_paths) - self._displayed_image_count
+        if remaining <= 0:
+            self.update_load_more_images_button()
+            return
+
+        self._loading_remaining_images = True
+        progress = QProgressDialog(
+            f"Loading {remaining} remaining image{'s' if remaining != 1 else ''}...",
+            None,
+            0,
+            remaining,
+            self,
+        )
+        progress.setWindowTitle("Loading Images")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        loaded = 0
+        try:
+            while self._displayed_image_count < len(self.image_paths):
+                image_path = self.image_paths[self._displayed_image_count]
+                self._displayed_image_count += 1
+                self.add_image_widget(image_path, apply_theme=False)
+                loaded += 1
+                progress.setValue(loaded)
+                progress.setLabelText(
+                    f"Loading image {loaded} of {remaining}..."
+                )
+                QApplication.processEvents()
+        finally:
+            progress.setValue(remaining)
+            progress.close()
+            self._loading_remaining_images = False
+
+        if loaded:
+            self.apply_dialog_theme()
+        self.update_load_more_images_button()
+
+    def on_image_scroll(self, value):
+        if not hasattr(self, "load_more_images_btn") or not self.load_more_images_btn.isVisible():
+            return
+
+        scrollbar = self.images_scroll_area.verticalScrollBar()
+        if scrollbar.maximum() <= 0:
+            return
+
+        if value >= scrollbar.maximum() - self._image_scroll_load_threshold:
+            self.load_remaining_image_widgets()
+
+    def _load_fast_thumbnail(self, full_path):
+        if not os.path.exists(full_path):
+            return None
+
+        reader = QImageReader(full_path)
+        reader.setAutoTransform(True)
+        image_size = reader.size()
+        if image_size.isValid():
+            image_size.scale(self._thumbnail_max_size, Qt.AspectRatioMode.KeepAspectRatio)
+            reader.setScaledSize(image_size)
+
+        image = reader.read()
+        if not image.isNull():
+            return QPixmap.fromImage(image)
+
+        pixmap = QPixmap(full_path)
+        if pixmap.isNull():
+            return None
+        return pixmap.scaled(
+            self._thumbnail_max_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
+
+    def add_image_widget(self, image_path, apply_theme=True):
         
         # Construct full path if relative path is provided
         config_folder = self.parent().config_folder if self.parent() else get_config_dir()
@@ -868,14 +1060,14 @@ class KeywordDialog(QDialog):
         img_layout = QHBoxLayout(img_widget)
         img_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Display image thumbnail
-        if os.path.exists(full_path):
-            pixmap = QPixmap(full_path)
-            if not pixmap.isNull():
-                thumbnail = pixmap.scaledToHeight(40, Qt.TransformationMode.SmoothTransformation)
-                thumb_label = QLabel()
-                thumb_label.setPixmap(thumbnail)
-                img_layout.addWidget(thumb_label)
+        thumb_label = QLabel()
+        thumb_label.setFixedSize(56, 44)
+        thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        img_layout.addWidget(thumb_label)
+
+        thumbnail = self._load_fast_thumbnail(full_path)
+        if thumbnail is not None:
+            thumb_label.setPixmap(thumbnail)
         
         # Image path label
         path_label = QLabel(os.path.basename(normalized_image_path))
@@ -900,9 +1092,16 @@ class KeywordDialog(QDialog):
         img_layout.addWidget(delete_btn)
         
         img_widget.setLayout(img_layout)
-        self.images_layout.insertWidget(len(self.image_widgets), img_widget)
+        insert_index = len(self.image_widgets)
+        if hasattr(self, "load_more_images_btn"):
+            load_more_index = self.images_layout.indexOf(self.load_more_images_btn)
+            if load_more_index >= 0:
+                insert_index = load_more_index
+
+        self.images_layout.insertWidget(insert_index, img_widget)
         self.image_widgets.append((img_widget, normalized_image_path))
-        self.apply_dialog_theme()
+        if apply_theme:
+            self.apply_dialog_theme()
     
     def add_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -927,8 +1126,11 @@ class KeywordDialog(QDialog):
 
             relative_path = os.path.relpath(dest_path, config_folder).replace("\\", "/")
 
-            self.image_paths.append(relative_path)
+            insert_at = min(self._displayed_image_count, len(self.image_paths))
+            self.image_paths.insert(insert_at, relative_path)
+            self._displayed_image_count = insert_at + 1
             self.add_image_widget(relative_path)
+            self.update_load_more_images_button()
             self._mark_changed()
 
     def paste_image_from_clipboard(self):
@@ -944,6 +1146,7 @@ class KeywordDialog(QDialog):
                 pixmap = QPixmap()
 
         if self._add_image_from_pixmap(pixmap):
+            self._last_pasted_clipboard_sequence = self._clipboard_sequence()
             self.update_paste_image_button_visibility()
             self._mark_changed()
     
@@ -970,7 +1173,9 @@ class KeywordDialog(QDialog):
 
         if normalized_image_path in self.image_paths:
             self.image_paths.remove(normalized_image_path)
+            self._displayed_image_count = max(0, self._displayed_image_count - 1)
 
+        self.update_load_more_images_button()
         self._mark_changed()
 
     
@@ -980,6 +1185,7 @@ class KeywordDialog(QDialog):
         if idx > 0:
             self.images_layout.insertWidget(idx - 1, self.images_layout.takeAt(idx).widget())
             self.image_widgets[idx], self.image_widgets[idx - 1] = self.image_widgets[idx - 1], self.image_widgets[idx]
+            self.image_paths[idx], self.image_paths[idx - 1] = self.image_paths[idx - 1], self.image_paths[idx]
             self._mark_changed()
     
     def move_image_down(self, widget):
@@ -988,15 +1194,13 @@ class KeywordDialog(QDialog):
         if idx < len(self.image_widgets) - 1:
             self.images_layout.insertWidget(idx + 1, self.images_layout.takeAt(idx).widget())
             self.image_widgets[idx], self.image_widgets[idx + 1] = self.image_widgets[idx + 1], self.image_widgets[idx]
+            self.image_paths[idx], self.image_paths[idx + 1] = self.image_paths[idx + 1], self.image_paths[idx]
             self._mark_changed()
     
     def _mark_changed(self):
         self._has_unsaved_changes = True
     
     def get_data(self):
-        # Return the keyword, definition, and image paths
-        # Update image_paths from current widget order
-        self.image_paths = [p for _, p in self.image_widgets]
         return self.keyword_input.text().strip(), self.definition_input.toPlainText(), self.image_paths
     
     def center(self):
@@ -1942,6 +2146,20 @@ class HelpWindow(QDialog):
         self.resize(920, 720)
         self.setMinimumSize(640, 420)
         apply_neutral_dialog_style(self)
+        dark_mode = bool(getattr(parent, "editor_dark_mode", False))
+        owner = get_editor_theme_owner(self)
+        preset = (
+            getattr(owner, "DEFAULT_EDITOR_DARK_PRESET", None)
+            if dark_mode
+            else getattr(owner, "DEFAULT_EDITOR_PREFERENCES", None)
+        ) or {}
+        editor_background = str(getattr(
+            owner,
+            "editor_background_color",
+            preset.get("editor_background_color", "#1f2329" if dark_mode else "#ffffff"),
+        ))
+        text_color = "#f4f4f4" if dark_mode else "#111111"
+        muted_text_color = "#d2d7de" if dark_mode else "#333333"
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -1954,6 +2172,9 @@ class HelpWindow(QDialog):
         scroll_area.setStyleSheet("""
             QScrollArea {
                 border: none;
+                background: transparent;
+            }
+            QScrollArea > QWidget > QWidget {
                 background: transparent;
             }
             QScrollBar:vertical {
@@ -1971,24 +2192,25 @@ class HelpWindow(QDialog):
         """)
 
         content = QWidget()
+        content.setStyleSheet(f"background-color: {editor_background};")
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(8, 8, 8, 8)
         content_layout.setSpacing(10)
 
         title = QLabel("How to use window")
         title.setWordWrap(True)
-        title.setStyleSheet("font-size: 28px; font-weight: bold; margin-bottom: 10px;")
+        title.setStyleSheet(f"font-size: 28px; font-weight: bold; margin-bottom: 10px; color: {text_color};")
         content_layout.addWidget(title)
 
         def add_heading(text, level):
             label = QLabel(text)
             label.setWordWrap(True)
             if level == 1:
-                label.setStyleSheet("font-size: 24px; font-weight: bold; margin: 8px 0px 4px 0px;")
+                label.setStyleSheet(f"font-size: 24px; font-weight: bold; margin: 8px 0px 4px 0px; color: {text_color};")
             elif level == 2:
-                label.setStyleSheet("font-size: 18px; font-weight: bold; margin: 6px 0px 2px 18px;")
+                label.setStyleSheet(f"font-size: 18px; font-weight: bold; margin: 6px 0px 2px 18px; color: {text_color};")
             else:
-                label.setStyleSheet("font-size: 15px; font-weight: bold; margin: 4px 0px 2px 40px;")
+                label.setStyleSheet(f"font-size: 15px; font-weight: bold; margin: 4px 0px 2px 40px; color: {text_color};")
             content_layout.addWidget(label)
             return label
 
@@ -1996,7 +2218,7 @@ class HelpWindow(QDialog):
             label = QLabel(text)
             label.setWordWrap(True)
             label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-            label.setStyleSheet(f"font-size: 14px; margin: 0px 0px 2px {indent}px;")
+            label.setStyleSheet(f"font-size: 14px; margin: 0px 0px 2px {indent}px; color: {muted_text_color};")
             label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             content_layout.addWidget(label)
             return label
@@ -2991,6 +3213,7 @@ class LogApp(QWidget):
         self.important_filter_active = False
         
         self._important_sort_backup = None
+        self.definition_viewer_text_size = 15
 
         # Start the hardware monitoring thread
         self.hw_monitor = HardwareMonitor()
@@ -4043,6 +4266,14 @@ class LogApp(QWidget):
                 border: 1px solid {border_color};
                 padding: 4px;
             }}
+            QWidget#LogAppRoot QComboBox QAbstractItemView {{
+                background-color: {editor_background};
+                color: {editor_text};
+                border: 1px solid {border_color};
+                selection-background-color: {hover_color};
+                selection-color: {button_foreground};
+                outline: none;
+            }}
             QWidget#LogAppRoot QPushButton:hover {{
                 background-color: {hover_color};
             }}
@@ -4104,6 +4335,10 @@ class LogApp(QWidget):
         help_action = QAction("How to Use", self)
         help_action.triggered.connect(self.show_help)
         help_menu.addAction(help_action)
+
+        app_usage_action = QAction("App Usage", self)
+        app_usage_action.triggered.connect(self.show_app_usage)
+        help_menu.addAction(app_usage_action)
 
         # Dictionary Menu
         dictionary_action = QAction("Dictionary", self)
@@ -4483,6 +4718,30 @@ class LogApp(QWidget):
     def show_help(self):
         self.help_window = HelpWindow(self)
         self.help_window.show()
+
+    def show_app_usage(self):
+        elapsed_seconds = max(0, int(time.monotonic() - APP_LAUNCH_MONOTONIC))
+        days, remainder = divmod(elapsed_seconds, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        parts = []
+        if days:
+            parts.append(f"{days} day{'s' if days != 1 else ''}")
+        if hours:
+            parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+        if minutes:
+            parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+        if seconds or not parts:
+            parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
+
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("App Usage")
+        dialog.setIcon(QMessageBox.Icon.Information)
+        dialog.setText("Application usage time")
+        dialog.setInformativeText("You have used the application for " + ", ".join(parts) + ".")
+        apply_neutral_dialog_style(dialog)
+        dialog.exec()
 
     def init_ui(self):  
         print("Setting up UI...")
@@ -5019,19 +5278,30 @@ class LogApp(QWidget):
         if not file_path:
             return
         if not os.path.exists(file_path):
-            QMessageBox.warning(self, "File Not Found", f"Log file was not found:\n{file_path}")
+            show_neutral_message_box(
+                self,
+                QMessageBox.Icon.Warning,
+                "File Not Found",
+                f"Log file was not found:\n{file_path}",
+                QMessageBox.StandardButton.Ok,
+            )
             return
 
         self.current_file = file_path
         filename = os.path.basename(file_path)
         _, ext = os.path.splitext(filename)
         self.current_ext = ext
+        if ext.lower() == ".ldsd":
+            self.log_type = "Debugging"
+        elif ext.lower() == ".ldsg":
+            self.log_type = "General"
         self.fileName = filename
         self.setWindowTitle(self.fileName)
         self.save_recent_file(file_path)
         self.log_list.clear()
         self.load_user_config()
         self.load_color_from_config()
+        self.refresh_category_selector()
         self.apply_editor_theme()
         self.keyword_definitions_file = self.get_keyword_definitions_file()
         self.load_keyword_definitions()
@@ -5269,7 +5539,13 @@ class LogApp(QWidget):
                 print("Scrolled to the latest log entry.")
 
         except FileNotFoundError:
-            QMessageBox.warning(self, "File Not Found", f"Log file was not found:\n{file_path}\n\nReturning to welcome screen.")
+            show_neutral_message_box(
+                self,
+                QMessageBox.Icon.Warning,
+                "File Not Found",
+                f"Log file was not found:\n{file_path}\n\nReturning to welcome screen.",
+                QMessageBox.StandardButton.Ok,
+            )
             try:
                 from setup import WelcomeWindow
                 self.welcome_window = WelcomeWindow()
@@ -6637,7 +6913,3 @@ class LogApp(QWidget):
 
 if __name__ == "__main__":
     pass
-
-
-
-
