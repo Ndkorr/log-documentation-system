@@ -26,6 +26,20 @@ Source: "..\dist\LogDocumentationSystem\*"; DestDir: "{app}"; Flags: ignoreversi
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
+[Registry]
+Root: HKA; Subkey: "Software\Classes\.ldsg"; ValueType: string; ValueName: ""; ValueData: "LogDocumentationSystem.ldsg"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.ldsd"; ValueType: string; ValueName: ""; ValueData: "LogDocumentationSystem.ldsd"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.ldsu"; ValueType: string; ValueName: ""; ValueData: "LogDocumentationSystem.ldsu"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.ldsdict"; ValueType: string; ValueName: ""; ValueData: "LogDocumentationSystem.ldsdict"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsg"; ValueType: string; ValueName: ""; ValueData: "LDS General Log"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsd"; ValueType: string; ValueName: ""; ValueData: "LDS Debugging Log"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsu"; ValueType: string; ValueName: ""; ValueData: "LDS UI Mode File"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsdict"; ValueType: string; ValueName: ""; ValueData: "LDS Dictionary Package"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsg\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsd\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsu\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsdict\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 

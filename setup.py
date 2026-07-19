@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect, QFrame, QListWidget, QListWidgetItem, QToolButton,
     QGraphicsBlurEffect, QMessageBox, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QSettings, QPropertyAnimation, QEasingCurve, QEvent, QRect, QUrl
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QSettings, QPropertyAnimation, QEasingCurve, QEvent, QRect, QUrl, QTimer
 from PyQt6.QtGui import QFont, QAction, QPixmap, QDesktopServices, QIcon
 from gui import SetupWizard
 from main import LogApp
@@ -436,17 +436,27 @@ class WelcomeWindow(QMainWindow):
 
     def open_project(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open Project", "", "LDS Files (*.lds *.ldsg *.ldsd)"
+            self,
+            "Open Project",
+            "",
+            "LDS Files (*.lds *.ldsg *.ldsd *.ldsu *.ldsdict)"
         )
         if file_path:
-            self.update_recent_files(file_path)
-            setup_data = self.get_setup_data_for_file(file_path)
-            self.launch_main_app(setup_data)
+            self.open_file(file_path)
 
     def open_logs(self, file_path):
+        self.open_file(file_path)
+
+    def open_file(self, file_path):
+        ext = os.path.splitext(file_path)[1].lower()
         self.update_recent_files(file_path)
-        setup_data = self.get_setup_data_for_file(file_path)
-        self.launch_main_app(setup_data)
+        if ext == ".ldsu":
+            self.launch_ui_mode(file_path)
+        elif ext == ".ldsdict":
+            self.launch_dictionary_package(file_path)
+        else:
+            setup_data = self.get_setup_data_for_file(file_path)
+            self.launch_main_app(setup_data)
     
     def update_recent_files(self, file_path):
         # Move opened file to the top of recent files list
@@ -487,9 +497,10 @@ class WelcomeWindow(QMainWindow):
 
     def get_setup_data_for_file(self, file_path):
         # Determine log type by extension
-        if file_path.endswith("ldsg"):
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == ".ldsg":
             log_mode = "General"
-        elif file_path.endswith("ldsd"):
+        elif ext == ".ldsd":
             log_mode = "Debugging"
         else:
             log_mode = "General"
@@ -535,6 +546,37 @@ class WelcomeWindow(QMainWindow):
             dlg.exec()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open Dictionary: {e}")
+
+    def launch_dictionary_package(self, file_path):
+        if not os.path.exists(file_path):
+            QMessageBox.warning(self, "File Not Found", f"Dictionary file was not found:\n{file_path}")
+            return
+        try:
+            from main import DictionaryDialog
+
+            dlg = DictionaryDialog(self, is_setup_mode=True)
+            if hasattr(dlg, "load_dictionary_package"):
+                dlg.load_dictionary_package(file_path, ask_replace=False, show_success=False)
+            else:
+                QMessageBox.warning(self, "Unsupported File", "This dictionary package cannot be opened by this version.")
+                return
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open Dictionary:\n{e}")
+
+    def launch_ui_mode(self, file_path):
+        if not os.path.exists(file_path):
+            QMessageBox.warning(self, "File Not Found", f"UI Mode file was not found:\n{file_path}")
+            return
+        try:
+            from UIMode import UIMode
+
+            self.ui_window = UIMode()
+            self.ui_window.show()
+            QTimer.singleShot(50, lambda: self.ui_window.open_canvas(file_path))
+            self.close()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open UI Mode file:\n{e}")
 
     def launch_main_app(self, setup_data):
         from main import LogApp  # Import your LogApp class
@@ -619,14 +661,51 @@ class WelcomeWindow(QMainWindow):
         super().resizeEvent(a0)
 
 
+def open_startup_file(file_path):
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in (".ldsg", ".ldsd", ".lds"):
+        setup_data = WelcomeWindow().get_setup_data_for_file(file_path)
+        window = LogApp(log_mode=setup_data.get("log_type", "General"), file_path=file_path)
+        window.user_name = setup_data.get("user_name", "")
+        window.pdf_title = setup_data.get("pdf_title", "Log Documentation")
+        window.show()
+        return window
+
+    if ext == ".ldsu":
+        from UIMode import UIMode
+
+        window = UIMode()
+        window.show()
+        QTimer.singleShot(50, lambda: window.open_canvas(file_path))
+        return window
+
+    if ext == ".ldsdict":
+        from main import DictionaryDialog
+
+        dialog = DictionaryDialog(is_setup_mode=True)
+        dialog.load_dictionary_package(file_path, ask_replace=False, show_success=False)
+        dialog.show()
+        return dialog
+
+    return None
+
+
 def main():
     app = QApplication(sys.argv)
-    window = WelcomeWindow()
-    window.show()
+    window = None
+    if len(sys.argv) > 1:
+        file_path = os.path.abspath(sys.argv[1])
+        if os.path.exists(file_path):
+            window = open_startup_file(file_path)
+        else:
+            QMessageBox.warning(None, "File Not Found", f"File was not found:\n{file_path}")
+
+    if window is None:
+        window = WelcomeWindow()
+        window.show()
     sys.exit(app.exec())
 
 
 if __name__ == "__main__":
     main()
-
 

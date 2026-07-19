@@ -1838,25 +1838,17 @@ class DictionaryDialog(QDialog):
                 QMessageBox.StandardButton.Ok,
             )
 
-    def import_dictionary_package(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Import Dictionary Package",
-            "",
-            "LDS Dictionary (*.ldsdict)"
-        )
-        if not file_path:
-            return
-
-        reply = show_neutral_message_box(
-            self,
-            QMessageBox.Icon.Question,
-            "Import Dictionary",
-            "Import will replace the current dictionary. Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
+    def load_dictionary_package(self, file_path, ask_replace=True, show_success=True):
+        if ask_replace:
+            reply = show_neutral_message_box(
+                self,
+                QMessageBox.Icon.Question,
+                "Import Dictionary",
+                "Import will replace the current dictionary. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return False
 
         try:
             with zipfile.ZipFile(file_path, "r") as zf:
@@ -1901,7 +1893,7 @@ class DictionaryDialog(QDialog):
                         new_rel_paths.append(os.path.relpath(target_full, self.config_folder))
                     normalized_images_map[str(keyword)] = new_rel_paths
 
-                    self.dictionary = {str(k): str(v) for k, v in imported_dictionary.items()}
+                self.dictionary = {str(k): str(v) for k, v in imported_dictionary.items()}
                 self.keyword_images = normalized_images_map
                 if not self.is_setup_mode:
                     self.save_keyword_definitions()
@@ -1915,13 +1907,15 @@ class DictionaryDialog(QDialog):
                 self.example_label.setVisible(False)
                 self.image_label.setVisible(False)
 
-            show_neutral_message_box(
-                self,
-                QMessageBox.Icon.Information,
-                "Import Complete",
-                "Dictionary package imported successfully.",
-                QMessageBox.StandardButton.Ok,
-            )
+            if show_success:
+                show_neutral_message_box(
+                    self,
+                    QMessageBox.Icon.Information,
+                    "Import Complete",
+                    "Dictionary package imported successfully.",
+                    QMessageBox.StandardButton.Ok,
+                )
+            return True
         except Exception as e:
             show_neutral_message_box(
                 self,
@@ -1930,6 +1924,18 @@ class DictionaryDialog(QDialog):
                 f"Failed to import dictionary package:\n{e}",
                 QMessageBox.StandardButton.Ok,
             )
+            return False
+
+    def import_dictionary_package(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Dictionary Package",
+            "",
+            "LDS Dictionary (*.ldsdict)"
+        )
+        if not file_path:
+            return
+        self.load_dictionary_package(file_path, ask_replace=True, show_success=True)
 
     def closeEvent(self, event):
         if self.is_setup_mode and self._has_unsaved_changes and not self._exported:
