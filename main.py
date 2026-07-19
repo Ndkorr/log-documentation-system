@@ -6135,7 +6135,9 @@ class LogApp(QWidget):
         try:
             if os.name == 'nt':  # Windows
                 os.startfile(file_path)
-            elif os.name == 'posix':  # macOS/Linux
+            elif sys.platform == "darwin":  # macOS
+                subprocess.call(["open", file_path])
+            elif os.name == 'posix':  # Linux and other POSIX desktops
                 subprocess.call(["xdg-open", file_path])
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open PDF:\n{str(e)}")
