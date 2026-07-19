@@ -147,37 +147,76 @@ jobs:
         run: |
           pyinstaller --noconfirm --windowed --name LogDocumentationSystem --add-data "assets${{ matrix.data_separator }}assets" --add-data "docs.json${{ matrix.data_separator }}." setup.py
 
-      - name: Package app
-        shell: python
+      - name: Install Inno Setup
+        if: runner.os == 'Windows'
+        run: |
+          choco install innosetup --yes --no-progress
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
         env:
           APP_VERSION: ${{ needs.prepare.outputs.version }}
-          APP_PLATFORM: ${{ matrix.platform }}
         run: |
-          import os
-          import shutil
-          import tarfile
-          from pathlib import Path
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\windows.iss
 
-          version = os.environ["APP_VERSION"]
-          platform = os.environ["APP_PLATFORM"]
-          dist = Path("dist")
-          base_name = f"log-documentation-system-{version}-{platform}"
+      - name: Build macOS disk image
+        if: runner.os == 'macOS'
+        env:
+          APP_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          mkdir -p dist/dmg
+          cp -R "dist/LogDocumentationSystem.app" "dist/dmg/LogDocumentationSystem.app"
+          hdiutil create -volname "Log Documentation System" -srcfolder dist/dmg -ov -format UDZO "dist/log-documentation-system-${APP_VERSION}-macos.dmg"
 
-          if platform == "linux":
-              output = dist / f"{base_name}.tar.gz"
-              with tarfile.open(output, "w:gz") as archive:
-                  archive.add(dist / "LogDocumentationSystem", arcname="LogDocumentationSystem")
-          else:
-              source = dist / ("LogDocumentationSystem.app" if platform == "macos" else "LogDocumentationSystem")
-              shutil.make_archive(str(dist / base_name), "zip", root_dir=source.parent, base_dir=source.name)
+      - name: Build Linux deb installer
+        if: runner.os == 'Linux'
+        env:
+          APP_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          PACKAGE_ROOT="dist/deb/log-documentation-system"
+          INSTALL_ROOT="${PACKAGE_ROOT}/opt/log-documentation-system"
+          BIN_ROOT="${PACKAGE_ROOT}/usr/local/bin"
+          DESKTOP_ROOT="${PACKAGE_ROOT}/usr/share/applications"
 
-      - name: Upload package
+          mkdir -p "${INSTALL_ROOT}" "${BIN_ROOT}" "${DESKTOP_ROOT}" "${PACKAGE_ROOT}/DEBIAN"
+          cp -R dist/LogDocumentationSystem/* "${INSTALL_ROOT}/"
+
+          cat > "${BIN_ROOT}/log-documentation-system" <<'EOF'
+          #!/usr/bin/env sh
+          exec /opt/log-documentation-system/LogDocumentationSystem "$@"
+          EOF
+          chmod +x "${BIN_ROOT}/log-documentation-system"
+
+          cat > "${DESKTOP_ROOT}/log-documentation-system.desktop" <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Log Documentation System
+          Exec=/usr/local/bin/log-documentation-system
+          Terminal=false
+          Categories=Office;Utility;
+          EOF
+
+          cat > "${PACKAGE_ROOT}/DEBIAN/control" <<EOF
+          Package: log-documentation-system
+          Version: ${APP_VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Ndkorr
+          Description: Log Documentation System desktop application
+          EOF
+
+          dpkg-deb --build "${PACKAGE_ROOT}" "dist/log-documentation-system-${APP_VERSION}-linux-amd64.deb"
+
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: log-documentation-system-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}
           path: |
-            dist/log-documentation-system-*.zip
-            dist/log-documentation-system-*.tar.gz
+            dist/Output/*.exe
+            dist/log-documentation-system-*.dmg
+            dist/log-documentation-system-*.deb
           if-no-files-found: error
 
   release:

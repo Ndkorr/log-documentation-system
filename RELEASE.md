@@ -8,9 +8,9 @@ Push to `main` or `develop`, or run the `Build and Release` workflow manually wi
 
 The workflow uploads build artifacts for each OS:
 
-- `log-documentation-system-<version>-windows.zip`
-- `log-documentation-system-<version>-macos.zip`
-- `log-documentation-system-<version>-linux.tar.gz`
+- `log-documentation-system-<version>-windows-installer.exe`
+- `log-documentation-system-<version>-macos.dmg`
+- `log-documentation-system-<version>-linux-amd64.deb`
 
 ## Create a Release
 
