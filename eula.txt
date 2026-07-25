@@ -1,0 +1,7 @@
+Log Documentation System End User License Agreement
+
+This software is distributed under the terms of the GNU General Public License
+as provided in the LICENSE file included with this project.
+
+By installing or using Log Documentation System, you acknowledge that you have
+reviewed and accepted those license terms.

@@ -208,6 +208,7 @@ class ChangelogPage(QWidget):
         # Add changelog entries here
         # Latest version should be first in the list for easier management
         self.changelog_entries = [
+            {"version": "1.0.41", "date": "July, 25, 2026", "features": ["Icon, EULA and Author"]},
             {"version": "1.0.40", "date": "July, 20, 2026", "features": ["Allows standalone lds file type to open without opening the main(welcome screen)app"]},
             {"version": "1.0.39", "date": "July, 19, 2026", "features": ["Installer package automated using CI/CD"]},
             {"version": "1.0.38", "date": "July, 17, 2026", "features": ["App usage - Shows how much time you use the app", "Fix combo selector not affected by dark mode", "Fix how to use not affected by dark mode", "Add zoom effect on full definition viewer that will enlarge text size using ctrl + mouse scroll wheel/+/-"]},

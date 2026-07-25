@@ -34,6 +34,7 @@ from datetime import datetime
 from pathlib import Path
 
 _ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+_APP_ICON_PATH = os.path.join(_ASSETS_DIR, "lds.svg")
 
 TOOL_MENU = [
     {
@@ -10269,6 +10270,7 @@ class UIMode(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setCursor(_default_cursor())
+        self.setWindowIcon(QIcon(_APP_ICON_PATH))
 
         screen = QApplication.primaryScreen()
         if screen:
@@ -13674,6 +13676,7 @@ class SettingsDialog(QDialog):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(_APP_ICON_PATH))
     win = UIMode()
     win.show()
     sys.exit(app.exec())

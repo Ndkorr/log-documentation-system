@@ -13,7 +13,7 @@ from gui import SetupWizard
 from main import LogApp
 import shutil
 
-package_data={"": ["assets/*.png"]},
+package_data={"": ["assets/*.png", "assets/*.svg", "assets/*.ico"]},
 
 
 def get_asset_path(filename):
@@ -45,6 +45,10 @@ def load_icon_pixmap(filename, size=(36, 36)):
     if pixmap.isNull():
         return None
     return pixmap.scaled(size[0], size[1], Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+
+
+def get_app_icon():
+    return QIcon(get_asset_path("lds.svg"))
 
 
 class NavigationPane(QFrame):
@@ -220,6 +224,7 @@ class WelcomeWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Welcome to LDS")
+        self.setWindowIcon(get_app_icon())
         self.resize(800, 450)
         self.setFixedSize(800, 450)
         self.setStyleSheet("background-color: #FFFFFF;")
@@ -692,6 +697,7 @@ def open_startup_file(file_path):
 
 def main():
     app = QApplication(sys.argv)
+    app.setWindowIcon(get_app_icon())
     window = None
     if len(sys.argv) > 1:
         file_path = os.path.abspath(sys.argv[1])
@@ -708,4 +714,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

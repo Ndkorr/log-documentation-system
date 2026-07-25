@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="47.999996"
+   height="47.999996"
+   viewBox="0 0 12.699999 12.699999"
+   version="1.1"
+   id="svg5"
+   inkscape:export-filename="ldsg.svg"
+   inkscape:export-xdpi="96.699997"
+   inkscape:export-ydpi="96.699997"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <title
+     id="title6297">LDS Icon</title>
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="1"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="true"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="px"
+     showgrid="false">
+    <inkscape:grid
+       type="xygrid"
+       id="grid638"
+       originx="0"
+       originy="0" />
+  </sodipodi:namedview>
+  <defs
+     id="defs2">
+    <rect
+       x="4.7500453"
+       y="13.51497"
+       width="33.827827"
+       height="26.593822"
+       id="rect524" />
+    <rect
+       x="4.7500453"
+       y="13.51497"
+       width="33.827827"
+       height="26.593822"
+       id="rect644" />
+    <rect
+       x="4.7500453"
+       y="13.51497"
+       width="33.827827"
+       height="26.593822"
+       id="rect650" />
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipPath18272">
+      <rect
+         style="display:inline;mix-blend-mode:normal;fill:#ffffff;fill-opacity:1;stroke:none;stroke-width:0.264583;stroke-dasharray:none;stroke-opacity:1;paint-order:fill markers stroke"
+         id="rect18274"
+         width="12.7"
+         height="12.7"
+         x="3.0374756e-07"
+         y="20.128984"
+         ry="3.4270473"
+         rx="3.4270473" />
+    </clipPath>
+  </defs>
+  <g
+     inkscape:groupmode="layer"
+     id="layer2"
+     inkscape:label="main"
+     style="display:inline"
+     transform="translate(-6.67572e-7,-20.128984)">
+    <g
+       id="g16912">
+      <g
+         id="g18021"
+         inkscape:label="g18021"
+         clip-path="url(#clipPath18272)">
+        <g
+           id="g852"
+           style="display:inline;mix-blend-mode:normal;fill:#000000;fill-opacity:1;paint-order:fill markers stroke"
+           transform="translate(-4.2480151,9.125358)">
+          <text
+             xml:space="preserve"
+             transform="matrix(0.87332124,0.87332124,-0.87332124,0.87332124,18.990916,-10.804888)"
+             id="text522"
+             style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Liberation Mono';-inkscape-font-specification:'Liberation Mono';white-space:pre;shape-inside:url(#rect524);fill:#000000;fill-opacity:1;paint-order:fill markers stroke"><tspan
+               x="4.75"
+               y="24.192956"
+               id="tspan18487"><tspan
+                 style="font-weight:bold"
+                 id="tspan18485">L</tspan></tspan></text>
+          <text
+             xml:space="preserve"
+             transform="matrix(0.62049144,1.0256854,-1.0502041,0.5780239,29.631011,2.0087459)"
+             id="text642"
+             style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Liberation Mono';-inkscape-font-specification:'Liberation Mono';white-space:pre;shape-inside:url(#rect644);fill:#000000;fill-opacity:1;paint-order:fill markers stroke"
+             inkscape:transform-center-x="-0.0086701185"
+             inkscape:transform-center-y="-0.052796747"><tspan
+               x="4.75"
+               y="24.192956"
+               id="tspan18491"><tspan
+                 style="font-weight:bold"
+                 id="tspan18489">S</tspan></tspan></text>
+          <text
+             xml:space="preserve"
+             transform="matrix(0.70506533,0.70506533,-0.70506533,0.70506533,20.336726,-5.2827501)"
+             id="text648"
+             style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Liberation Mono';-inkscape-font-specification:'Liberation Mono';white-space:pre;shape-inside:url(#rect650);fill:#000000;fill-opacity:1;paint-order:fill markers stroke"><tspan
+               x="4.75"
+               y="24.192956"
+               id="tspan18495"><tspan
+                 style="font-weight:bold"
+                 id="tspan18493">D</tspan></tspan></text>
+        </g>
+      </g>
+    </g>
+  </g>
+  <metadata
+     id="metadata6295">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:title>LDS Icon</dc:title>
+        <dc:date>07/25/2026</dc:date>
+        <dc:creator>
+          <cc:Agent>
+            <dc:title>mathewsa</dc:title>
+          </cc:Agent>
+        </dc:creator>
+        <dc:publisher>
+          <cc:Agent>
+            <dc:title>mathewsa</dc:title>
+          </cc:Agent>
+        </dc:publisher>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+</svg>

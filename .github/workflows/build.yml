@@ -143,7 +143,13 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
+      - name: Build Windows app
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --noconfirm --windowed --name LogDocumentationSystem --icon assets/lds.ico --add-data "assets${{ matrix.data_separator }}assets" --add-data "docs.json${{ matrix.data_separator }}." setup.py
+
       - name: Build app
+        if: runner.os != 'Windows'
         run: |
           pyinstaller --noconfirm --windowed --name LogDocumentationSystem --add-data "assets${{ matrix.data_separator }}assets" --add-data "docs.json${{ matrix.data_separator }}." setup.py
 
@@ -178,9 +184,11 @@ jobs:
           INSTALL_ROOT="${PACKAGE_ROOT}/opt/log-documentation-system"
           BIN_ROOT="${PACKAGE_ROOT}/usr/local/bin"
           DESKTOP_ROOT="${PACKAGE_ROOT}/usr/share/applications"
+          ICON_ROOT="${PACKAGE_ROOT}/usr/share/icons/hicolor/scalable/apps"
 
-          mkdir -p "${INSTALL_ROOT}" "${BIN_ROOT}" "${DESKTOP_ROOT}" "${PACKAGE_ROOT}/DEBIAN"
+          mkdir -p "${INSTALL_ROOT}" "${BIN_ROOT}" "${DESKTOP_ROOT}" "${ICON_ROOT}" "${PACKAGE_ROOT}/DEBIAN"
           cp -R dist/LogDocumentationSystem/* "${INSTALL_ROOT}/"
+          cp assets/lds.svg "${ICON_ROOT}/log-documentation-system.svg"
 
           cat > "${BIN_ROOT}/log-documentation-system" <<'EOF'
           #!/usr/bin/env sh
@@ -193,6 +201,7 @@ jobs:
           Type=Application
           Name=Log Documentation System
           Exec=/usr/local/bin/log-documentation-system
+          Icon=log-documentation-system
           Terminal=false
           Categories=Office;Utility;
           EOF
@@ -231,12 +240,18 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release-assets
-          merge-multiple: true
+          merge-multiple: false
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          mkdir -p release-assets/flat
+          find release-assets -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.deb' \) -exec cp {} release-assets/flat/ \;
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.release_tag }}
           name: Log Documentation System ${{ needs.prepare.outputs.version }}
-          files: release-assets/*
+          files: release-assets/flat/*
           generate_release_notes: true

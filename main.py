@@ -19,7 +19,7 @@ from PyQt6.QtGui import (
     QColor, QFont, QBrush, QShortcut, 
     QKeySequence, QAction, QTextDocument, 
     QPixmap, QCursor, QIntValidator, QPalette,
-    QImageReader, QImageWriter
+    QImageReader, QImageWriter, QIcon
     )
 from datetime import datetime, timezone
 import sys
@@ -47,6 +47,7 @@ except Exception:
     wmi = None
 
 APP_LAUNCH_MONOTONIC = time.monotonic()
+APP_ICON_PATH = os.path.join(os.path.dirname(__file__), "assets", "lds.svg")
 
 def get_config_dir(base_path=None):
     if base_path:
@@ -3172,6 +3173,7 @@ class LogApp(QWidget):
     
     def __init__(self, setup_data=None, log_mode="General", file_path=None, parent=None):
         super().__init__(parent)
+        self.setWindowIcon(QIcon(APP_ICON_PATH))
         if file_path:
             filename = os.path.basename(file_path)
             _, ext = os.path.splitext(filename)
