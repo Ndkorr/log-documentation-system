@@ -13,7 +13,7 @@ from gui import SetupWizard
 from main import LogApp
 import shutil
 
-package_data={"": ["assets/*.png", "assets/*.svg", "assets/*.ico"]},
+package_data={"": ["assets/*.png", "assets/*.svg", "assets/*.ico", "assets/*.icns"]},
 
 
 def get_asset_path(filename):

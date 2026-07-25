@@ -10,6 +10,7 @@
    inkscape:export-filename="ldsg.svg"
    inkscape:export-xdpi="96.699997"
    inkscape:export-ydpi="96.699997"
+   sodipodi:docname="ldsu.svg"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -103,11 +104,13 @@
        x="22.699999"
        y="-2.0724169e-16"
        ry="3.4270482"
-       rx="3.4270482" />
+       rx="3.4270482"
+       sodipodi:insensitive="true" />
     <g
        id="g10870"
        transform="translate(22.7)"
-       clip-path="url(#clipPath18947)">
+       clip-path="url(#clipPath18947)"
+       sodipodi:insensitive="true">
       <text
          xml:space="preserve"
          transform="matrix(0.87332124,0.87332124,-0.87332124,0.87332124,14.742901,-21.808513)"
@@ -115,9 +118,9 @@
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Liberation Mono';-inkscape-font-specification:'Liberation Mono';white-space:pre;shape-inside:url(#rect10874);mix-blend-mode:normal;fill:#f5f5f5;fill-opacity:1;paint-order:fill markers stroke;filter:url(#filter2014)"><tspan
            x="4.75"
            y="24.192956"
-           id="tspan19129"><tspan
+           id="tspan18103"><tspan
              style="font-weight:bold"
-             id="tspan19127">L</tspan></tspan></text>
+             id="tspan18101">L</tspan></tspan></text>
       <text
          xml:space="preserve"
          transform="matrix(0.62049144,1.0256854,-1.0502041,0.5780239,25.382996,-8.9948791)"
@@ -127,9 +130,9 @@
          inkscape:transform-center-y="-0.052796747"><tspan
            x="4.75"
            y="24.192956"
-           id="tspan19133"><tspan
+           id="tspan18107"><tspan
              style="font-weight:bold"
-             id="tspan19131">S</tspan></tspan></text>
+             id="tspan18105">S</tspan></tspan></text>
       <text
          xml:space="preserve"
          transform="matrix(0.70506533,0.70506533,-0.70506533,0.70506533,16.088711,-16.286375)"
@@ -137,9 +140,9 @@
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Liberation Mono';-inkscape-font-specification:'Liberation Mono';white-space:pre;shape-inside:url(#rect10878);mix-blend-mode:normal;fill:#f5f5f5;fill-opacity:1;paint-order:fill markers stroke;filter:url(#filter2014)"><tspan
            x="4.75"
            y="24.192956"
-           id="tspan19137"><tspan
+           id="tspan18111"><tspan
              style="font-weight:bold"
-             id="tspan19135">D</tspan></tspan></text>
+             id="tspan18109">D</tspan></tspan></text>
       <text
          xml:space="preserve"
          transform="matrix(1.1561476,0,0,1.1561476,-3.4501575,-16.869092)"
@@ -147,8 +150,17 @@
          style="font-style:italic;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:12px;font-family:'Liberation Mono';-inkscape-font-specification:'Liberation Mono, Bold Italic';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;white-space:pre;shape-inside:url(#rect10880);mix-blend-mode:normal;fill:#000000;fill-opacity:1;stroke:#57ff43;stroke-width:1.00028;stroke-linecap:round;stroke-dasharray:1.00028, 8.00226;stroke-dashoffset:0;stroke-opacity:1"><tspan
            x="4.75"
            y="24.038234"
-           id="tspan19139">U</tspan></text>
+           id="tspan18113">U</tspan></text>
     </g>
+    <rect
+       style="display:inline;fill:none;fill-opacity:1;stroke:#000000;stroke-width:0.259184;stroke-dasharray:none;stroke-opacity:1"
+       id="rect17610"
+       width="12.440816"
+       height="12.440816"
+       x="22.82959"
+       y="0.129592"
+       ry="3.3571086"
+       rx="3.3571086" />
   </g>
   <metadata
      id="metadata6295">

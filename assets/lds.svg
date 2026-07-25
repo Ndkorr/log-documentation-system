@@ -7,9 +7,11 @@
    viewBox="0 0 12.699999 12.699999"
    version="1.1"
    id="svg5"
-   inkscape:export-filename="ldsg.svg"
-   inkscape:export-xdpi="96.699997"
-   inkscape:export-ydpi="96.699997"
+   inkscape:export-filename="lds.svg"
+   inkscape:export-xdpi="96.000008"
+   inkscape:export-ydpi="96.000008"
+   sodipodi:docname="lds.svg"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -29,7 +31,16 @@
      inkscape:pagecheckerboard="true"
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="px"
-     showgrid="false">
+     showgrid="false"
+     inkscape:zoom="7.163054"
+     inkscape:cx="-3.8391446"
+     inkscape:cy="14.937763"
+     inkscape:window-width="1920"
+     inkscape:window-height="1056"
+     inkscape:window-x="0"
+     inkscape:window-y="24"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer2">
     <inkscape:grid
        type="xygrid"
        id="grid638"
@@ -76,8 +87,18 @@
      inkscape:label="main"
      style="display:inline"
      transform="translate(-6.67572e-7,-20.128984)">
+    <rect
+       style="display:inline;fill:#ffffff;fill-opacity:1;stroke:#000000;stroke-width:0.324;stroke-dasharray:none;stroke-opacity:1"
+       id="rect19537"
+       width="12.376457"
+       height="12.376457"
+       x="0.16177145"
+       y="20.290754"
+       ry="3.3397417"
+       rx="3.3397417" />
     <g
-       id="g16912">
+       id="g16912"
+       sodipodi:insensitive="true">
       <g
          id="g18021"
          inkscape:label="g18021"
@@ -93,9 +114,9 @@
              style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Liberation Mono';-inkscape-font-specification:'Liberation Mono';white-space:pre;shape-inside:url(#rect524);fill:#000000;fill-opacity:1;paint-order:fill markers stroke"><tspan
                x="4.75"
                y="24.192956"
-               id="tspan18487"><tspan
+               id="tspan1125"><tspan
                  style="font-weight:bold"
-                 id="tspan18485">L</tspan></tspan></text>
+                 id="tspan1123">L</tspan></tspan></text>
           <text
              xml:space="preserve"
              transform="matrix(0.62049144,1.0256854,-1.0502041,0.5780239,29.631011,2.0087459)"
@@ -105,9 +126,9 @@
              inkscape:transform-center-y="-0.052796747"><tspan
                x="4.75"
                y="24.192956"
-               id="tspan18491"><tspan
+               id="tspan1129"><tspan
                  style="font-weight:bold"
-                 id="tspan18489">S</tspan></tspan></text>
+                 id="tspan1127">S</tspan></tspan></text>
           <text
              xml:space="preserve"
              transform="matrix(0.70506533,0.70506533,-0.70506533,0.70506533,20.336726,-5.2827501)"
@@ -115,9 +136,9 @@
              style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Liberation Mono';-inkscape-font-specification:'Liberation Mono';white-space:pre;shape-inside:url(#rect650);fill:#000000;fill-opacity:1;paint-order:fill markers stroke"><tspan
                x="4.75"
                y="24.192956"
-               id="tspan18495"><tspan
+               id="tspan1133"><tspan
                  style="font-weight:bold"
-                 id="tspan18493">D</tspan></tspan></text>
+                 id="tspan1131">D</tspan></tspan></text>
         </g>
       </g>
     </g>

@@ -208,6 +208,7 @@ class ChangelogPage(QWidget):
         # Add changelog entries here
         # Latest version should be first in the list for easier management
         self.changelog_entries = [
+            {"version": "1.0.42", "date": "July, 26, 2026", "features": ["Configured registry, MIME and info.plist to tell operating systems that hey its my file type - put this icon on"]},
             {"version": "1.0.41", "date": "July, 25, 2026", "features": ["Icon, EULA and Author"]},
             {"version": "1.0.40", "date": "July, 20, 2026", "features": ["Allows standalone lds file type to open without opening the main(welcome screen)app"]},
             {"version": "1.0.39", "date": "July, 19, 2026", "features": ["Installer package automated using CI/CD"]},
