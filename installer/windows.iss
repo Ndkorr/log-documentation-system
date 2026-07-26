@@ -26,10 +26,14 @@ ChangesAssociations=yes
 
 [Files]
 Source: "..\dist\LogDocumentationSystem\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\assets\lds.ico"; DestDir: "{app}\icons"; Flags: ignoreversion
+Source: "..\assets\ldsg.ico"; DestDir: "{app}\icons"; Flags: ignoreversion
+Source: "..\assets\ldsd.ico"; DestDir: "{app}\icons"; Flags: ignoreversion
+Source: "..\assets\ldsu.ico"; DestDir: "{app}\icons"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\lds.ico"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\lds.ico"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icons\lds.ico"; IconIndex: 0
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icons\lds.ico"; IconIndex: 0; Tasks: desktopicon
 
 [Registry]
 Root: HKA; Subkey: "Software\Classes\.lds"; ValueType: string; ValueName: ""; ValueData: "LogDocumentationSystem.lds"; Flags: uninsdeletevalue
@@ -44,10 +48,10 @@ Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.lds"; ValueType: str
 Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsg"; ValueType: string; ValueName: ""; ValueData: "LDS General Log"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsd"; ValueType: string; ValueName: ""; ValueData: "LDS Debugging Log"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsu"; ValueType: string; ValueName: ""; ValueData: "LDS UI Mode File"; Flags: uninsdeletekey
-Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.lds\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\assets\lds.ico"",0"
-Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsg\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\assets\ldsg.ico"",0"
-Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsd\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\assets\ldsd.ico"",0"
-Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsu\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\assets\ldsu.ico"",0"
+Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.lds\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\icons\lds.ico"",0"
+Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsg\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\icons\ldsg.ico"",0"
+Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsd\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\icons\ldsd.ico"",0"
+Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsu\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\icons\ldsu.ico"",0"
 Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.lds\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsg\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\LogDocumentationSystem.ldsd\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
