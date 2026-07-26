@@ -34,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 
 _ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
-_APP_ICON_PATH = os.path.join(_ASSETS_DIR, "lds.svg")
+_APP_ICON_PATH = os.path.join(_ASSETS_DIR, "lds.png")
 
 TOOL_MENU = [
     {

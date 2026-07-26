@@ -48,7 +48,11 @@ def load_icon_pixmap(filename, size=(36, 36)):
 
 
 def get_app_icon():
-    return QIcon(get_asset_path("lds.svg"))
+    for filename in ("lds.png", "lds.ico", "lds.svg"):
+        icon = QIcon(get_asset_path(filename))
+        if not icon.isNull():
+            return icon
+    return QIcon()
 
 
 class NavigationPane(QFrame):

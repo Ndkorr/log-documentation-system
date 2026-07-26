@@ -47,7 +47,7 @@ except Exception:
     wmi = None
 
 APP_LAUNCH_MONOTONIC = time.monotonic()
-APP_ICON_PATH = os.path.join(os.path.dirname(__file__), "assets", "lds.svg")
+APP_ICON_PATH = os.path.join(os.path.dirname(__file__), "assets", "lds.png")
 
 def get_config_dir(base_path=None):
     if base_path:
