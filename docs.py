@@ -208,6 +208,7 @@ class ChangelogPage(QWidget):
         # Add changelog entries here
         # Latest version should be first in the list for easier management
         self.changelog_entries = [
+            {"version": "1.0.44", "date": "July, 28, 2026", "features": ["Update setup wizard"]},
             {"version": "1.0.43", "date": "July, 27, 2026", "features": ["Windows ico fix"]},
             {"version": "1.0.42", "date": "July, 26, 2026", "features": ["Configured registry, MIME and info.plist to tell operating systems that hey its my file type - put this icon on"]},
             {"version": "1.0.41", "date": "July, 25, 2026", "features": ["Icon, EULA and Author"]},
@@ -699,6 +700,8 @@ class IdeaPage(QWidget):
         
         # Idea data structure with stable ids so saved status remains correct when items are added.
         self.ideas = [
+            {"id": "idea-myratings-uidesign", "date": "July 27, 2026", "description": "UI Design for myRating/ldsr"},
+            {"id": "idea-overall-encryption", "date": "July 27, 2026", "description": "Will add encryption on file types. Can also add a support to compress a project folder and add an encryption on top. Can also open zipped/compressed project folder."},
             {"id": "idea-general-mode-changes", "date": "July 17, 2026", "description": "How to use window"},
             {"id": "idea-wizard-changes", "date": "July 17, 2026", "description": "Will edit wizard to include UIMode and configure dictionary."},
             {"id": "idea-ui-mode-changes", "date": "July 17, 2026", "description": "Connect UI mode to setup.py and on wizard"},

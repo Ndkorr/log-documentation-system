@@ -3,10 +3,10 @@ from PyQt6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QGraphicsDropShadowEffect, QPushButton, QMessageBox, QSpacerItem,
     QSizePolicy, QGraphicsOpacityEffect, QStackedWidget, QWidget,
-    QTextEdit, QPlainTextEdit, QLineEdit, QComboBox
+    QTextEdit, QPlainTextEdit, QLineEdit, QComboBox, QScrollArea, QFrame
 )
-from PyQt6.QtCore import Qt, QPropertyAnimation, pyqtSignal
-from PyQt6.QtGui import QIntValidator
+from PyQt6.QtCore import Qt, QPropertyAnimation, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QIntValidator
 
 
 class AnimatedPushButton(QPushButton):
@@ -430,6 +430,10 @@ class SetupWizard(QDialog):
         self.setFixedSize(550, 450)
         self.setStyleSheet("background-color: #FFFFFF;")
         self.selected_option = None
+        self._title_labels = []
+        self._title_gradient_offset = 0
+        self._title_gradient_start = QColor("#d4acfa")
+        self._title_gradient_end = QColor("#f27cc3")
 
         # Initialize text box references to None
         self.name_text_box = None
@@ -456,15 +460,7 @@ class SetupWizard(QDialog):
 
         # Title label
         title_label = QLabel("Log Documentation Setup Wizard")
-        title_label.setStyleSheet("""
-            font-size: 25px;
-            font-weight: bold;
-            background: qlineargradient(
-            x1: 0, y1: 0, x2: 1, y2: 0,
-            stop: 0 #d4acfa, stop: 1 #f27cc3
-            );
-            font-family: Segoe UI;
-        """)
+        self._register_title_label(title_label)
         title_label.setContentsMargins(0, 10, 0, 10)
         title_label.setFixedHeight(80)
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -550,19 +546,25 @@ class SetupWizard(QDialog):
 
         # Title label
         title_label2 = QLabel("Log Documentation Setup Wizard")
-        title_label2.setStyleSheet("""
-            font-size: 25px;
-            font-weight: bold;
-            background: qlineargradient(
-            x1: 0, y1: 0, x2: 1, y2: 0,
-            stop: 0 #d4acfa, stop: 1 #f27cc3
-            );
-            font-family: Segoe UI;
-        """)
+        self._register_title_label(title_label2)
         title_label2.setContentsMargins(0, 10, 0, 10)
         title_label2.setFixedHeight(80)
         title_label2.setAlignment(Qt.AlignmentFlag.AlignCenter)
         page2_layout.addWidget(title_label2)
+
+        choices_scroll_area = QScrollArea(self.page2)
+        choices_scroll_area.setWidgetResizable(True)
+        choices_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        choices_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        choices_scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        choices_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        choices_scroll_area.viewport().setAutoFillBackground(False)
+
+        choices_widget = QWidget()
+        choices_widget.setAutoFillBackground(False)
+        choices_layout = QVBoxLayout(choices_widget)
+        choices_layout.setSpacing(15)
+        choices_layout.setContentsMargins(0, 0, 0, 0)
 
         # Instruction label
         instruction_label2 = QLabel("On each lds, I want to:")
@@ -571,9 +573,9 @@ class SetupWizard(QDialog):
             font-weight: bold;
             font-family: Segoe UI;
             margin-top: 0px;
-            margin-left: 25px;    
+            margin-left: 25px;
         """)
-        page2_layout.addWidget(instruction_label2)
+        choices_layout.addWidget(instruction_label2)
 
         # Option layouts
         self.option_layouts2 = []
@@ -590,15 +592,79 @@ class SetupWizard(QDialog):
 
             # Replace OptionLabel with AnimatedClickableLabel2
             option_label2 = AnimatedClickableLabel2(text, self, wizard=self)
+            option_label2.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             option_label2.clicked.connect(lambda text=text: self.option_clicked2(text))
             option_layout2.addWidget(option_label2)
 
-            page2_layout.addLayout(option_layout2)
+            choices_layout.addLayout(option_layout2)
             self.option_layouts2.append(option_layout2)
             self.options2.append(option_label2)
 
+        instruction_label3 = QLabel("On exporting document, I want to:")
+        instruction_label3.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            font-family: Segoe UI;
+            margin-top: 0px;
+            margin-left: 25px;    
+        """)
+        choices_layout.addWidget(instruction_label3)
+
+        self.option_layouts3 = []
+        self.options3 = []
+        option_texts3 = [
+            "Set the font size to",
+            "Set the line spacing to",
+            "Proceed on default"
+        ]
+        for text in option_texts3:
+            option_layout3 = QVBoxLayout()
+            option_layout3.setSpacing(5)
+
+            option_label3 = AnimatedClickableLabel3(text, self, wizard=self)
+            option_label3.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            option_label3.clicked.connect(lambda text=text: self.option_clicked3(text))
+            option_layout3.addWidget(option_label3)
+
+            choices_layout.addLayout(option_layout3)
+            self.option_layouts3.append(option_layout3)
+            self.options3.append(option_label3)
+
+        instruction_label4 = QLabel("On exporting document, Set font:")
+        instruction_label4.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            font-family: Segoe UI;
+            margin-top: 0px;
+            margin-left: 25px;    
+        """)
+        choices_layout.addWidget(instruction_label4)
+
+        self.option_layouts4 = []
+        self.options4 = []
+        option_texts4 = [
+            "Set font to:",
+            "Proceed on default"
+        ]
+        for text in option_texts4:
+            option_layout4 = QVBoxLayout()
+            option_layout4.setSpacing(5)
+
+            option_label4 = AnimatedClickableLabel4(text, self, wizard=self)
+            option_label4.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            option_label4.clicked.connect(lambda text=text: self.option_clicked4(text))
+            option_layout4.addWidget(option_label4)
+
+            choices_layout.addLayout(option_layout4)
+            self.option_layouts4.append(option_layout4)
+            self.options4.append(option_label4)
+
+        choices_layout.addStretch()
+        choices_scroll_area.setWidget(choices_widget)
+        page2_layout.addWidget(choices_scroll_area)
+
         # Add a spacer before the navigation buttons to push them to the bottom.
-        spacer2 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        spacer2 = QSpacerItem(20, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         page2_layout.addItem(spacer2)
 
         # Navigation buttons for page2.
@@ -630,192 +696,11 @@ class SetupWizard(QDialog):
         self.next_button2.setEnabled(False)  # Disable by default
         self.next_button2.clicked.connect(self.on_next_clicked2)
         btn_layout2.addWidget(self.next_button2)
+        self.next_button3 = self.next_button2
+        self.next_button4 = self.next_button2
 
         page2_layout.addLayout(btn_layout2)
         self.stacked_widget.addWidget(self.page2)
-
-        # Create the third page (options page).
-        self.page3 = QWidget()
-        page3_layout = QVBoxLayout(self.page3)
-        page3_layout.setSpacing(15)
-        page3_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Title label
-        title_label3 = QLabel("Log Documentation Setup Wizard")
-        title_label3.setStyleSheet("""
-            font-size: 25px;
-            font-weight: bold;
-            background: qlineargradient(
-            x1: 0, y1: 0, x2: 1, y2: 0,
-            stop: 0 #d4acfa, stop: 1 #f27cc3
-            );
-            font-family: Segoe UI;
-        """)
-        title_label3.setContentsMargins(0, 10, 0, 10)
-        title_label3.setFixedHeight(80)
-        title_label3.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        page3_layout.addWidget(title_label3)
-
-        # Instruction label
-        instruction_label3 = QLabel("On exporting document, I want to:")
-        instruction_label3.setStyleSheet("""
-            font-size: 20px;
-            font-weight: bold;
-            font-family: Segoe UI;
-            margin-top: 0px;
-            margin-left: 25px;    
-        """)
-        page3_layout.addWidget(instruction_label3)
-
-        # Option layouts
-        self.option_layouts3 = []
-        self.options3 = []
-        option_texts3 = [
-            "Set the text size to",
-            "Set the line spacing to",
-            "Proceed on default"
-        ]
-        for text in option_texts3:
-            # Create a vertical layout for each option
-            option_layout3 = QVBoxLayout()
-            option_layout3.setSpacing(5)
-
-            # Replace OptionLabel with AnimatedClickableLabel3
-            option_label3 = AnimatedClickableLabel3(text, self, wizard=self)
-            option_label3.clicked.connect(lambda text=text: self.option_clicked3(text))
-            option_layout3.addWidget(option_label3)
-
-            page3_layout.addLayout(option_layout3)
-            self.option_layouts3.append(option_layout3)
-            self.options3.append(option_label3)
-
-        # Add a spacer before the navigation buttons to push them to the bottom.
-        spacer3 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
-        page3_layout.addItem(spacer3)
-
-        # Navigation buttons for page2.
-        btn_layout3 = QHBoxLayout()
-        btn_layout3.addStretch()
-        self.back_button2 = AnimatedPushButton("Back")
-        self.back_button2.setStyleSheet("""
-            margin-bottom: 15px;
-            margin-right: 5px;
-            font-size: 14px;
-            padding: 6px 12px;
-            border: 2px solid #0078d7;
-            border-radius: 8px;
-            color: black;
-        """)
-        self.back_button2.clicked.connect(self.on_back_clicked2)
-        btn_layout3.addWidget(self.back_button2)
-
-        self.next_button3 = AnimatedPushButton("Next")
-        self.next_button3.setStyleSheet("""
-            margin-bottom: 15px;
-            margin-right: 15px;
-            font-size: 14px;
-            padding: 6px 18px;
-            border: 2px solid #0078d7;
-            border-radius: 8px;
-            color: black;
-        """)
-        self.next_button3.setEnabled(False)  # Disable by default
-        self.next_button3.clicked.connect(self.on_next_clicked3)
-        btn_layout3.addWidget(self.next_button3)
-
-        page3_layout.addLayout(btn_layout3)
-        self.stacked_widget.addWidget(self.page3)
-
-        # Create the fourth page (new frame).
-        self.page4 = QWidget()
-        page4_layout = QVBoxLayout(self.page4)
-        page4_layout.setSpacing(15)
-        page4_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Title label
-        title_label4 = QLabel("Log Documentation Setup Wizard")
-        title_label4.setStyleSheet("""
-            font-size: 25px;
-            font-weight: bold;
-            background: qlineargradient(
-            x1: 0, y1: 0, x2: 1, y2: 0,
-            stop: 0 #d4acfa, stop: 1 #f27cc3
-            );
-            font-family: Segoe UI;
-        """)
-        title_label4.setContentsMargins(0, 10, 0, 10)
-        title_label4.setFixedHeight(80)
-        title_label4.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        page4_layout.addWidget(title_label4)
-
-        # Instruction label
-        instruction_label4 = QLabel("On exporting document, I want to:")
-        instruction_label4.setStyleSheet("""
-            font-size: 20px;
-            font-weight: bold;
-            font-family: Segoe UI;
-            margin-top: 0px;
-            margin-left: 25px;    
-        """)
-        page4_layout.addWidget(instruction_label4)
-
-        # Option layouts
-        self.option_layouts4 = []
-        self.options4 = []
-        option_texts4 = [
-            "Set font to:",
-            "Proceed on default"
-        ]
-        for text in option_texts4:
-            # Create a vertical layout for each option
-            option_layout4 = QVBoxLayout()
-            option_layout4.setSpacing(5)
-
-            # Replace OptionLabel with AnimatedClickableLabel2
-            option_label4 = AnimatedClickableLabel4(text, self, wizard=self)
-            option_label4.clicked.connect(lambda text=text: self.option_clicked4(text))
-            option_layout4.addWidget(option_label4)
-
-            page4_layout.addLayout(option_layout4)
-            self.option_layouts4.append(option_layout4)
-            self.options4.append(option_label4)
-
-        # Add a spacer before the navigation buttons to push them to the bottom.
-        spacer4 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
-        page4_layout.addItem(spacer4)
-
-        # Navigation buttons for page2.
-        btn_layout4 = QHBoxLayout()
-        btn_layout4.addStretch()
-        self.back_button3 = AnimatedPushButton("Back")
-        self.back_button3.setStyleSheet("""
-            margin-bottom: 15px;
-            margin-right: 5px;
-            font-size: 14px;
-            padding: 6px 12px;
-            border: 2px solid #0078d7;
-            border-radius: 8px;
-            color: black;
-        """)
-        self.back_button3.clicked.connect(self.on_back_clicked3)
-        btn_layout4.addWidget(self.back_button3)
-
-        self.next_button4 = AnimatedPushButton("Next")
-        self.next_button4.setStyleSheet("""
-            margin-bottom: 15px;
-            margin-right: 15px;
-            font-size: 14px;
-            padding: 6px 18px;
-            border: 2px solid #0078d7;
-            border-radius: 8px;
-            color: black;
-        """)
-        self.next_button4.setEnabled(False)  # Disable by default
-        self.next_button4.clicked.connect(self.on_next_clicked4)
-        btn_layout4.addWidget(self.next_button4)
-
-        page4_layout.addLayout(btn_layout4)
-        self.stacked_widget.addWidget(self.page4)
 
         # Create the fifth/last page (new frame).
         self.page5 = QWidget()
@@ -825,15 +710,7 @@ class SetupWizard(QDialog):
 
         # Title label
         title_label5 = QLabel("Log Documentation Setup Wizard")
-        title_label5.setStyleSheet("""
-            font-size: 25px;
-            font-weight: bold;
-            background: qlineargradient(
-            x1: 0, y1: 0, x2: 1, y2: 0,
-            stop: 0 #d4acfa, stop: 1 #f27cc3
-            );
-            font-family: Segoe UI;
-        """)
+        self._register_title_label(title_label5)
         title_label5.setContentsMargins(0, 10, 0, 10)
         title_label5.setFixedHeight(80)
         title_label5.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -907,6 +784,48 @@ class SetupWizard(QDialog):
 
         page5_layout.addLayout(btn_layout5)
         self.stacked_widget.addWidget(self.page5)
+        self._start_title_gradient_animation()
+
+    def _register_title_label(self, title_label):
+        self._title_labels.append(title_label)
+        self._apply_title_gradient()
+
+    def _animated_title_color(self, base_color):
+        if self._title_gradient_offset == 0:
+            return QColor(base_color)
+
+        hue = base_color.hsvHue()
+        if hue < 0:
+            hue = 0
+        return QColor.fromHsv(
+            (hue + self._title_gradient_offset) % 360,
+            base_color.hsvSaturation(),
+            base_color.value(),
+        )
+
+    def _apply_title_gradient(self):
+        start_color = self._animated_title_color(self._title_gradient_start).name()
+        end_color = self._animated_title_color(self._title_gradient_end).name()
+        title_style = f"""
+            font-size: 25px;
+            font-weight: bold;
+            background: qlineargradient(
+            x1: 0, y1: 0, x2: 1, y2: 0,
+            stop: 0 {start_color}, stop: 1 {end_color}
+            );
+            font-family: Segoe UI;
+        """
+        for title_label in self._title_labels:
+            title_label.setStyleSheet(title_style)
+
+    def _start_title_gradient_animation(self):
+        self._title_gradient_timer = QTimer(self)
+        self._title_gradient_timer.timeout.connect(self._animate_title_gradient)
+        self._title_gradient_timer.start(60)
+
+    def _animate_title_gradient(self):
+        self._title_gradient_offset = (self._title_gradient_offset + 1) % 360
+        self._apply_title_gradient()
 
     def get_setup_data(self):
         # Collect all relevant data from the wizard's fields
@@ -1105,23 +1024,7 @@ class SetupWizard(QDialog):
             clicked_option.setSelected(True)
             self.selected_option = clicked_option.text()
             self.add_subtext2(clicked_option)
-            self.validate_both_inputs()
-            self.next_button2.setEnabled(True)
-            # Enable the "Next" button.
-            self.next_button2.setEnabled(True)
-            self.next_button2.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 18px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #42f5d7, stop: 1 #14b7fc
-                );
-            """)
+            self.validate_required_choices()
             return
 
         # If any other option is clicked, toggle its selection.
@@ -1178,21 +1081,7 @@ class SetupWizard(QDialog):
                 margin-left: 25px;
                 color: #555555;
             """)
-            # Enable the "Next" button.
-            self.next_button2.setEnabled(True)
-            self.next_button2.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 18px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #42f5d7, stop: 1 #14b7fc
-                );
-            """)
+            self.validate_required_choices()
         else:
             # For other options, use a text box.
             subtext_label = QPlainTextEdit(subtext)
@@ -1280,22 +1169,7 @@ class SetupWizard(QDialog):
             clicked_option.setSelected(True)
             self.selected_option = clicked_option.text()
             self.add_subtext3(clicked_option)
-            self.validate_both_inputs2()
-            # Enable the "Next" button.
-            self.next_button3.setEnabled(True)
-            self.next_button3.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 18px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #42f5d7, stop: 1 #14b7fc
-                );
-            """)
+            self.validate_required_choices()
             return
 
         # If any other option is clicked, toggle its selection.
@@ -1352,25 +1226,11 @@ class SetupWizard(QDialog):
                 margin-left: 25px;
                 color: #555555;
             """)
-            # Enable the "Next" button.
-            self.next_button3.setEnabled(True)
-            self.next_button3.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 18px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #42f5d7, stop: 1 #14b7fc
-                );
-            """)
+            self.validate_required_choices()
         else:
             # Use QLineEdit for numeric input
             subtext_label = QLineEdit("")
-            subtext_label.setValidator(QIntValidator(1, 9999, self))  # Only allow numbers
+            subtext_label.setValidator(QIntValidator(1, 99, self))  # Only allow numbers
             subtext_label.setStyleSheet("""
                 font-size: 14px;
                 font-style: italic;
@@ -1449,20 +1309,7 @@ class SetupWizard(QDialog):
             clicked_option.setSelected(True)
             self.add_subtext4(clicked_option)
             self.selected_option = clicked_option.text()
-            self.next_button4.setEnabled(True)
-            self.next_button4.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 18px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #42f5d7, stop: 1 #14b7fc
-                );
-            """)
+            self.validate_required_choices()
             return
 
         # If the editable option is clicked
@@ -1475,16 +1322,7 @@ class SetupWizard(QDialog):
                     layout.removeWidget(subtext_label)
                     subtext_label.deleteLater()
                     break
-            self.next_button4.setEnabled(False)
-            self.next_button4.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 18px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-            """)
+            self.validate_required_choices()
         else:
             # Select and add subtext (text box)
             clicked_option.setSelected(True)
@@ -1509,21 +1347,7 @@ class SetupWizard(QDialog):
                 margin-left: 25px;
                 color: #555555;
             """)
-            # Enable the "Next" button.
-            self.next_button4.setEnabled(True)
-            self.next_button4.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 18px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #42f5d7, stop: 1 #14b7fc
-                );
-            """)
+            self.validate_required_choices()
         else:
             # Combobox as a subtext
             subtext_label = QComboBox()
@@ -1571,32 +1395,7 @@ class SetupWizard(QDialog):
             subtext_label.setFixedHeight(30)
 
             def validate_combo():
-                # Enable Next if a valid selection is made (not -1)
-                self.next_button4.setEnabled(subtext_label.currentIndex() != -1)
-                if subtext_label.currentIndex() != -1:
-                    self.next_button4.setStyleSheet("""
-                        margin-bottom: 15px;
-                        margin-right: 15px;
-                        font-size: 14px;
-                        padding: 6px 18px;
-                        border: 2px solid #0078d7;
-                        border-radius: 8px;
-                        color: black;
-                        background: qlineargradient(
-                            x1: 0, y1: 0, x2: 1, y2: 0,
-                            stop: 0 #42f5d7, stop: 1 #14b7fc
-                        );
-                    """)
-                else:
-                    self.next_button.setStyleSheet("""
-                        margin-bottom: 15px;
-                        margin-right: 15px;
-                        font-size: 14px;
-                        padding: 6px 15px;
-                        border: 2px solid #0078d7;
-                        border-radius: 8px;
-                        color: black;
-                    """)
+                self.validate_required_choices()
             subtext_label.currentIndexChanged.connect(validate_combo)
             validate_combo()  # Initial validation
 
@@ -1752,17 +1551,17 @@ class SetupWizard(QDialog):
 
     def on_back_clicked3(self):
         # Optionally reset or preserve state when going back.
-        self.stacked_widget.setCurrentWidget(self.page3)
+        self.stacked_widget.setCurrentWidget(self.page2)
 
     def on_back_clicked4(self):
         # Optionally reset or preserve state when going back.
-        self.stacked_widget.setCurrentWidget(self.page4)
+        self.stacked_widget.setCurrentWidget(self.page2)
 
     def on_next_clicked2(self):
-        self.stacked_widget.setCurrentWidget(self.page3)
+        self.stacked_widget.setCurrentWidget(self.page5)
 
     def on_next_clicked3(self):
-        self.stacked_widget.setCurrentWidget(self.page4)
+        self.stacked_widget.setCurrentWidget(self.page5)
 
     def on_next_clicked4(self):
         self.stacked_widget.setCurrentWidget(self.page5)
@@ -1770,36 +1569,15 @@ class SetupWizard(QDialog):
     def on_next_clicked5(self):
         self.accept()
 
-    def validate_both_inputs(self):
-        # Check if the text boxes exist and are filled.
-        name_filled = self.name_text_box and self.name_text_box.toPlainText().strip()
-        title_filled = self.title_text_box and self.title_text_box.toPlainText().strip()
-
-        # Enable the "Next" button if:
-        # - Only one option is selected and its text box is filled, OR
-        # - Both options are selected and both text boxes are filled.
-        if (self.name_text_box and name_filled) or (self.title_text_box and title_filled):
-            if (self.name_text_box and self.title_text_box and name_filled and title_filled) or \
-               (not self.name_text_box or not self.title_text_box):
-                self.next_button2.setEnabled(True)
-                self.next_button2.setStyleSheet("""
-                    margin-bottom: 15px;
-                    margin-right: 15px;
-                    font-size: 14px;
-                    padding: 6px 18px;
-                    border: 2px solid #0078d7;
-                    border-radius: 8px;
-                    color: black;
-                    background: qlineargradient(
-                        x1: 0, y1: 0, x2: 1, y2: 0,
-                        stop: 0 #42f5d7, stop: 1 #14b7fc
-                    );
-                """)
-                return
-
-        # Disable the "Next" button if the conditions are not met.
-        self.next_button2.setEnabled(False)
-        self.next_button2.setStyleSheet("""
+    def _set_merged_next_enabled(self, enabled):
+        self.next_button2.setEnabled(enabled)
+        background = """
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #42f5d7, stop: 1 #14b7fc
+                );
+        """ if enabled else ""
+        self.next_button2.setStyleSheet(f"""
             margin-bottom: 15px;
             margin-right: 15px;
             font-size: 14px;
@@ -1807,49 +1585,57 @@ class SetupWizard(QDialog):
             border: 2px solid #0078d7;
             border-radius: 8px;
             color: black;
+            {background}
         """)
 
-    def validate_both_inputs2(self):
+    def _option_selected(self, options, text):
+        return any(option.text() == text and option.property("selected") for option in options)
+
+    def _lds_choices_valid(self):
+        if self._option_selected(self.options2, "Proceed on default"):
+            return True
+
+        name_selected = self.name_text_box is not None
+        title_selected = self.title_text_box is not None
+        if not name_selected and not title_selected:
+            return False
+
+        name_valid = not name_selected or bool(self.name_text_box.toPlainText().strip())
+        title_valid = not title_selected or bool(self.title_text_box.toPlainText().strip())
+        return name_valid and title_valid
+
+    def _export_size_choices_valid(self):
+        if self._option_selected(self.options3, "Proceed on default"):
+            return True
+
         text_size_selected = self.text_size_box is not None
         line_spacing_selected = self.line_spacing_box is not None
-        text_size_filled = text_size_selected and self.text_size_box and self.text_size_box.text().strip()
-        line_spacing_filled = line_spacing_selected and self.line_spacing_box and self.line_spacing_box.text().strip()
+        if not text_size_selected and not line_spacing_selected:
+            return False
 
-        enable = False
-        if text_size_selected and line_spacing_selected:
-            enable = bool(text_size_filled and line_spacing_filled)
-        elif text_size_selected:
-            enable = bool(text_size_filled)
-        elif line_spacing_selected:
-            enable = bool(line_spacing_filled)
-        # If neither is selected, "Proceed on default" must be selected, which is handled elsewhere
+        text_size_valid = not text_size_selected or bool(self.text_size_box.text().strip())
+        line_spacing_valid = not line_spacing_selected or bool(self.line_spacing_box.text().strip())
+        return text_size_valid and line_spacing_valid
 
-        if enable:
-            self.next_button3.setEnabled(True)
-            self.next_button3.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 18px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #42f5d7, stop: 1 #14b7fc
-                );
-            """)
-        else:
-            self.next_button3.setEnabled(False)
-            self.next_button3.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 18px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-            """) 
+    def _export_font_choices_valid(self):
+        if self._option_selected(self.options4, "Proceed on default"):
+            return True
+        return self._option_selected(self.options4, "Set font to:")
+
+    def validate_required_choices(self):
+        enabled = (
+            self._lds_choices_valid()
+            and self._export_size_choices_valid()
+            and self._export_font_choices_valid()
+        )
+        self._set_merged_next_enabled(enabled)
+        return enabled
+
+    def validate_both_inputs(self):
+        self.validate_required_choices()
+
+    def validate_both_inputs2(self):
+        self.validate_required_choices()
 
     def validate_font_input2(self):
         if self.dictionary_box and self.dictionary_box.toPlainText().strip():

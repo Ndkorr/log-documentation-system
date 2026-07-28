@@ -691,16 +691,28 @@ class DefinitionViewer(QDialog):
         self.content_widget.setReadOnly(True)
         self.content_widget.setPlainText(full_text)
         self.content_widget.installEventFilter(self)
+        self.content_widget.viewport().installEventFilter(self)
         self.apply_text_size()
         layout.addWidget(self.content_widget)
 
         self.setLayout(layout)
+        self.zoom_in_shortcut = QShortcut(QKeySequence("Ctrl++"), self)
+        self.zoom_in_shortcut.activated.connect(lambda: self.adjust_text_size(1))
+        self.zoom_in_equal_shortcut = QShortcut(QKeySequence("Ctrl+="), self)
+        self.zoom_in_equal_shortcut.activated.connect(lambda: self.adjust_text_size(1))
+        self.zoom_out_shortcut = QShortcut(QKeySequence("Ctrl+-"), self)
+        self.zoom_out_shortcut.activated.connect(lambda: self.adjust_text_size(-1))
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
         self.center()
 
     def apply_text_size(self):
         font = self.content_widget.font()
         font.setPointSize(self.definition_text_size)
         self.content_widget.setFont(font)
+        self.content_widget.document().setDefaultFont(font)
+        self.content_widget.viewport().update()
 
     def adjust_text_size(self, delta):
         next_size = max(self.MIN_TEXT_SIZE, min(self.MAX_TEXT_SIZE, self.definition_text_size + delta))
@@ -711,14 +723,16 @@ class DefinitionViewer(QDialog):
         owner = get_editor_theme_owner(self)
         if owner is not None:
             owner.definition_viewer_text_size = self.definition_text_size
+            if hasattr(owner, "save_user_config"):
+                owner.save_user_config()
 
     def eventFilter(self, watched, event):
-        if watched is self.content_widget and event.type() == QEvent.Type.Wheel:
+        if self.isActiveWindow() and event.type() == QEvent.Type.Wheel:
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 self.adjust_text_size(1 if event.angleDelta().y() > 0 else -1)
                 event.accept()
                 return True
-        if watched is self.content_widget and event.type() == QEvent.Type.KeyPress:
+        if self.isActiveWindow() and event.type() == QEvent.Type.KeyPress:
             if self.handle_text_size_key_event(event):
                 return True
         return super().eventFilter(watched, event)
@@ -740,6 +754,25 @@ class DefinitionViewer(QDialog):
         if self.handle_text_size_key_event(event):
             return
         super().keyPressEvent(event)
+
+    def wheelEvent(self, event):
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self.adjust_text_size(1 if event.angleDelta().y() > 0 else -1)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+    def closeEvent(self, event):
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        super().closeEvent(event)
+
+    def done(self, result):
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        super().done(result)
         
     def center(self):
         """Center the dialog on the screen."""
@@ -760,12 +793,6 @@ class KeywordDialog(QDialog):
         self.clipboard = QApplication.clipboard()
         self._clipboard_monitor_connected = False
         self._has_unsaved_changes = False
-        self._initial_image_batch_size = 5
-        self._image_batch_size = 5
-        self._image_scroll_load_threshold = 24
-        self._displayed_image_count = 0
-        self._loading_remaining_images = False
-        self._thumbnail_max_size = QSize(56, 44)
         self._last_pasted_clipboard_sequence = None
         
         self.init_ui()
@@ -808,17 +835,11 @@ class KeywordDialog(QDialog):
         self.images_container = QWidget()
         self.images_layout = QVBoxLayout(self.images_container)
         self.images_layout.setSpacing(8)
-        scroll_area.verticalScrollBar().valueChanged.connect(self.on_image_scroll)
         
         # Populate existing images
         self.image_widgets = []
-        self.load_more_image_widgets(self._initial_image_batch_size)
-
-        self.load_more_images_btn = QPushButton("Load More Images")
-        self.load_more_images_btn.clicked.connect(self.load_remaining_image_widgets)
-        self.load_more_images_btn.setVisible(False)
-        self.images_layout.addWidget(self.load_more_images_btn)
-        self.update_load_more_images_button()
+        for image_path in self.image_paths:
+            self.add_image_widget(image_path, apply_theme=False)
         
         self.images_layout.addStretch()
         scroll_area.setWidget(self.images_container)
@@ -934,144 +955,22 @@ class KeywordDialog(QDialog):
             return False
 
         relative_path = os.path.relpath(dest_path, config_folder).replace("\\", "/")
-        insert_at = min(self._displayed_image_count, len(self.image_paths))
-        self.image_paths.insert(insert_at, relative_path)
-        self._displayed_image_count = insert_at + 1
+        self.image_paths.append(relative_path)
         self.add_image_widget(relative_path)
-        self.update_load_more_images_button()
         return True
-    
-    def update_load_more_images_button(self):
-        if not hasattr(self, "load_more_images_btn"):
-            return
-
-        remaining = len(self.image_paths) - self._displayed_image_count
-        if remaining > 0:
-            self.load_more_images_btn.setText(f"Load More Images ({remaining} remaining)")
-            self.load_more_images_btn.setVisible(True)
-        else:
-            self.load_more_images_btn.setVisible(False)
-
-    def load_more_image_widgets(self, batch_size=None):
-        if batch_size is None or isinstance(batch_size, bool):
-            batch_size = self._image_batch_size
-
-        rendered = 0
-        while self._displayed_image_count < len(self.image_paths) and rendered < batch_size:
-            image_path = self.image_paths[self._displayed_image_count]
-            self._displayed_image_count += 1
-            self.add_image_widget(image_path, apply_theme=False)
-            rendered += 1
-
-        if rendered:
-            self.apply_dialog_theme()
-        self.update_load_more_images_button()
-
-    def load_remaining_image_widgets(self):
-        if self._loading_remaining_images:
-            return
-
-        remaining = len(self.image_paths) - self._displayed_image_count
-        if remaining <= 0:
-            self.update_load_more_images_button()
-            return
-
-        self._loading_remaining_images = True
-        progress = QProgressDialog(
-            f"Loading {remaining} remaining image{'s' if remaining != 1 else ''}...",
-            None,
-            0,
-            remaining,
-            self,
-        )
-        progress.setWindowTitle("Loading Images")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setCancelButton(None)
-        progress.setMinimumDuration(0)
-        progress.setValue(0)
-
-        loaded = 0
-        try:
-            while self._displayed_image_count < len(self.image_paths):
-                image_path = self.image_paths[self._displayed_image_count]
-                self._displayed_image_count += 1
-                self.add_image_widget(image_path, apply_theme=False)
-                loaded += 1
-                progress.setValue(loaded)
-                progress.setLabelText(
-                    f"Loading image {loaded} of {remaining}..."
-                )
-                QApplication.processEvents()
-        finally:
-            progress.setValue(remaining)
-            progress.close()
-            self._loading_remaining_images = False
-
-        if loaded:
-            self.apply_dialog_theme()
-        self.update_load_more_images_button()
-
-    def on_image_scroll(self, value):
-        if not hasattr(self, "load_more_images_btn") or not self.load_more_images_btn.isVisible():
-            return
-
-        scrollbar = self.images_scroll_area.verticalScrollBar()
-        if scrollbar.maximum() <= 0:
-            return
-
-        if value >= scrollbar.maximum() - self._image_scroll_load_threshold:
-            self.load_remaining_image_widgets()
-
-    def _load_fast_thumbnail(self, full_path):
-        if not os.path.exists(full_path):
-            return None
-
-        reader = QImageReader(full_path)
-        reader.setAutoTransform(True)
-        image_size = reader.size()
-        if image_size.isValid():
-            image_size.scale(self._thumbnail_max_size, Qt.AspectRatioMode.KeepAspectRatio)
-            reader.setScaledSize(image_size)
-
-        image = reader.read()
-        if not image.isNull():
-            return QPixmap.fromImage(image)
-
-        pixmap = QPixmap(full_path)
-        if pixmap.isNull():
-            return None
-        return pixmap.scaled(
-            self._thumbnail_max_size,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.FastTransformation,
-        )
 
     def add_image_widget(self, image_path, apply_theme=True):
         
-        # Construct full path if relative path is provided
-        config_folder = self.parent().config_folder if self.parent() else get_config_dir()
         normalized_image_path = str(image_path).replace("\\", "/")
-        if not os.path.isabs(normalized_image_path):
-            full_path = os.path.normpath(os.path.join(config_folder, normalized_image_path))
-        else:
-            full_path = os.path.normpath(normalized_image_path)
         
         # Create a widget for displaying and managing a single image
         img_widget = QWidget()
         img_layout = QHBoxLayout(img_widget)
-        img_layout.setContentsMargins(0, 0, 0, 0)
-        
-        thumb_label = QLabel()
-        thumb_label.setFixedSize(56, 44)
-        thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        img_layout.addWidget(thumb_label)
-
-        thumbnail = self._load_fast_thumbnail(full_path)
-        if thumbnail is not None:
-            thumb_label.setPixmap(thumbnail)
+        img_layout.setContentsMargins(8, 4, 8, 4)
         
         # Image path label
         path_label = QLabel(os.path.basename(normalized_image_path))
+        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         img_layout.addWidget(path_label)
         img_layout.addStretch()
         
@@ -1094,10 +993,6 @@ class KeywordDialog(QDialog):
         
         img_widget.setLayout(img_layout)
         insert_index = len(self.image_widgets)
-        if hasattr(self, "load_more_images_btn"):
-            load_more_index = self.images_layout.indexOf(self.load_more_images_btn)
-            if load_more_index >= 0:
-                insert_index = load_more_index
 
         self.images_layout.insertWidget(insert_index, img_widget)
         self.image_widgets.append((img_widget, normalized_image_path))
@@ -1127,11 +1022,8 @@ class KeywordDialog(QDialog):
 
             relative_path = os.path.relpath(dest_path, config_folder).replace("\\", "/")
 
-            insert_at = min(self._displayed_image_count, len(self.image_paths))
-            self.image_paths.insert(insert_at, relative_path)
-            self._displayed_image_count = insert_at + 1
+            self.image_paths.append(relative_path)
             self.add_image_widget(relative_path)
-            self.update_load_more_images_button()
             self._mark_changed()
 
     def paste_image_from_clipboard(self):
@@ -1174,9 +1066,7 @@ class KeywordDialog(QDialog):
 
         if normalized_image_path in self.image_paths:
             self.image_paths.remove(normalized_image_path)
-            self._displayed_image_count = max(0, self._displayed_image_count - 1)
 
-        self.update_load_more_images_button()
         self._mark_changed()
 
     
@@ -2675,6 +2565,9 @@ class LogListWidget(QListWidget):
 
 
 class LogsViewerWindow(QMainWindow):
+    MIN_TEXT_SIZE = 4
+    MAX_TEXT_SIZE = 32
+
     # Window to display all logs in a vertical scrollable view with fixed width
     def __init__(self, log_list, parent=None):
         super().__init__(None)
@@ -2737,6 +2630,53 @@ class LogsViewerWindow(QMainWindow):
 
     def viewer_pref(self, name, default):
         return getattr(self.parent_widget, name, default)
+
+    def current_text_size(self):
+        return int(self.viewer_pref("viewer_text_size", 11))
+
+    def adjust_text_size(self, delta):
+        if self.parent_widget is None:
+            return
+
+        current_size = self.current_text_size()
+        next_size = max(self.MIN_TEXT_SIZE, min(self.MAX_TEXT_SIZE, current_size + delta))
+        if next_size == current_size:
+            return
+
+        self.parent_widget.viewer_text_size = next_size
+        text_size_input = getattr(self.parent_widget, "_viewer_text_size_input", None)
+        if text_size_input is not None:
+            try:
+                text_size_input.blockSignals(True)
+                text_size_input.setValue(next_size)
+            finally:
+                text_size_input.blockSignals(False)
+        if hasattr(self.parent_widget, "save_user_config"):
+            self.parent_widget.save_user_config()
+        self.apply_text_size_to_labels()
+
+    def apply_text_size_to_labels(self):
+        if not hasattr(self, "logs_layout"):
+            return
+        for index in range(self.logs_layout.count()):
+            item = self.logs_layout.itemAt(index)
+            widget = item.widget() if item else None
+            if isinstance(widget, ClickableLogLabel):
+                widget.setProperty("viewer_text_size", self.current_text_size())
+                widget.set_selected(widget.is_selected)
+
+    def handle_text_size_key_event(self, event):
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            key = event.key()
+            if key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+                self.adjust_text_size(1)
+                event.accept()
+                return True
+            if key == Qt.Key.Key_Minus:
+                self.adjust_text_size(-1)
+                event.accept()
+                return True
+        return False
 
     def apply_viewer_theme(self):
         dark_mode = self.viewer_pref("viewer_dark_mode", False)
@@ -3034,6 +2974,9 @@ class LogsViewerWindow(QMainWindow):
     
     
     def keyPressEvent(self, event):
+        if self.handle_text_size_key_event(event):
+            return
+
         # Navigate using arrow up and down keys (only when a log is selected)
         if event.key() == Qt.Key.Key_Up and self.selected_log_label is not None:
             current_index = self.logs_layout.indexOf(self.selected_log_label)
@@ -3068,6 +3011,11 @@ class LogsViewerWindow(QMainWindow):
                 if event.isAccepted():
                     return True
             elif event.type() == QEvent.Type.Wheel:
+                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    self.adjust_text_size(1 if event.angleDelta().y() > 0 else -1)
+                    event.accept()
+                    return True
+
                 # Handle mouse wheel - Shift determines which scrollbar
                 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                     scrollbar = self.scroll_area.horizontalScrollBar()
@@ -3221,7 +3169,7 @@ class LogApp(QWidget):
         self.important_filter_active = False
         
         self._important_sort_backup = None
-        self.definition_viewer_text_size = 15
+        self.definition_viewer_text_size = int(getattr(self, "definition_viewer_text_size", 15))
 
         # Start the hardware monitoring thread
         self.hw_monitor = HardwareMonitor()
@@ -4407,6 +4355,7 @@ class LogApp(QWidget):
         text_size_input = QSpinBox()
         text_size_input.setRange(4, 32)
         text_size_input.setValue(int(getattr(self, "viewer_text_size", 11)))
+        self._viewer_text_size_input = text_size_input
         text_size_layout.addWidget(text_size_input)
         layout.addLayout(text_size_layout)
 
@@ -4539,6 +4488,8 @@ class LogApp(QWidget):
         save_button.clicked.connect(save_preferences)
         cancel_button.clicked.connect(dialog.reject)
         dialog.exec()
+        if getattr(self, "_viewer_text_size_input", None) is text_size_input:
+            self._viewer_text_size_input = None
 
     def open_editor_playground(self):
         dialog = QDialog(self)
@@ -6033,6 +5984,7 @@ class LogApp(QWidget):
                 "viewer_selection_accent_color": getattr(self, "viewer_selection_accent_color", self.DEFAULT_VIEWER_PREFERENCES["viewer_selection_accent_color"]),
                 "viewer_background_color": getattr(self, "viewer_background_color", self.DEFAULT_VIEWER_PREFERENCES["viewer_background_color"]),
                 "viewer_hover_color": getattr(self, "viewer_hover_color", self.DEFAULT_VIEWER_PREFERENCES["viewer_hover_color"]),
+                "definition_viewer_text_size": int(getattr(self, "definition_viewer_text_size", 15)),
                 "editor_dark_mode": getattr(self, "editor_dark_mode", self.DEFAULT_EDITOR_PREFERENCES["editor_dark_mode"]),
                 "editor_background_color": getattr(self, "editor_background_color", self.DEFAULT_EDITOR_PREFERENCES["editor_background_color"]),
                 "editor_body_background_color": getattr(self, "editor_body_background_color", self.DEFAULT_EDITOR_PREFERENCES["editor_body_background_color"]),
@@ -6059,6 +6011,7 @@ class LogApp(QWidget):
                 settings.setValue(key, getattr(self, key, default_value))
             for key, default_value in self.DEFAULT_VIEWER_PREFERENCES.items():
                 settings.setValue(key, getattr(self, key, default_value))
+            settings.setValue("definition_viewer_text_size", int(getattr(self, "definition_viewer_text_size", 15)))
             for key, default_value in self.DEFAULT_EDITOR_PREFERENCES.items():
                 settings.setValue(key, getattr(self, key, default_value))
             settings.setValue("editor_categories", getattr(self, "editor_categories", list(self.DEFAULT_EDITOR_CATEGORIES)))
@@ -6086,6 +6039,7 @@ class LogApp(QWidget):
                         setattr(self, key, data.get(key, default_value))
                     for key, default_value in self.DEFAULT_VIEWER_PREFERENCES.items():
                         setattr(self, key, data.get(key, default_value))
+                    self.definition_viewer_text_size = int(data.get("definition_viewer_text_size", 15))
                     for key, default_value in self.DEFAULT_EDITOR_PREFERENCES.items():
                         setattr(self, key, data.get(key, default_value))
                     self.editor_categories_default = data.get("editor_categories_default", list(self.DEFAULT_EDITOR_CATEGORIES))
@@ -6109,6 +6063,7 @@ class LogApp(QWidget):
             elif isinstance(default_value, int):
                 value = int(value)
             setattr(self, key, value)
+        self.definition_viewer_text_size = int(settings.value("definition_viewer_text_size", 15))
         for key, default_value in self.DEFAULT_EDITOR_PREFERENCES.items():
             value = settings.value(key, default_value)
             if isinstance(default_value, bool):
