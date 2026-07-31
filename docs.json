@@ -2,10 +2,10 @@
   "idea-myratings-uidesign": "on",
   "idea-overall-encryption": "exclamation",
   "idea-general-mode-changes": "check",
-  "idea-wizard-changes": "on",
-  "idea-ui-mode-changes": "on",
+  "idea-wizard-changes": "check",
+  "idea-ui-mode-changes": "check",
   "idea-mobile": "exclamation",
-  "idea-ui-mode": "exclamation",
+  "idea-ui-mode": "on",
   "idea-my-ratings": "on",
   "idea-notes-checklists": "exclamation"
 }

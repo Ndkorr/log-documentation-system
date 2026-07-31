@@ -16,14 +16,14 @@ from PyQt6.QtCore import (
     Qt, QSize, QPropertyAnimation, QRect,
     QPoint, QEasingCurve, QTimer, pyqtSignal, QEvent,
     QParallelAnimationGroup, QEventLoop, QRectF, QPointF, QObject,
-    pyqtProperty, QThread, pyqtSlot, QRegularExpression
+    pyqtProperty, QThread, pyqtSlot, QRegularExpression, QMarginsF
     )
 
 
 from PyQt6.QtGui import (
     QIcon, QPainter, QPen, QColor, QMouseEvent,
     QCursor, QFont, QColor, QPixmap, QClipboard, QAction, QBrush, 
-    QImage, QRegularExpressionValidator
+    QImage, QRegularExpressionValidator, QPdfWriter, QPageSize, QPageLayout
     )
 import sys
 import math
@@ -10267,10 +10267,13 @@ class _AutoSaveWorker(QObject):
 class UIMode(QWidget):
     _request_auto_save = pyqtSignal(dict)
 
-    def __init__(self, parent=None):
+    def __init__(self, setup_data=None, file_path=None, parent=None):
         super().__init__(parent)
         self.setCursor(_default_cursor())
         self.setWindowIcon(QIcon(_APP_ICON_PATH))
+        self._setup_data = self._setup_data_for_file(file_path)
+        self._setup_data.update(dict(setup_data or {}))
+        self._apply_setup_data(self._setup_data)
 
         screen = QApplication.primaryScreen()
         if screen:
@@ -10284,7 +10287,7 @@ class UIMode(QWidget):
             )
         
         self.checkpoints_dir = None  # Will be set when a file is opened
-        self.current_canvas_file = None  # Track the current file path
+        self.current_canvas_file = file_path  # Track the current file path
         self._checkpoint_preview_dialogs = {}
         
         self.selected_tool = "select"
@@ -10308,6 +10311,40 @@ class UIMode(QWidget):
         
         self._recent_files = self._load_recent_files()
         self._side_menu.refresh_recent_list(self._recent_files, on_open=self.open_canvas, tooltip_fn=self.custom_tooltip.show_tooltip)
+
+        if file_path:
+            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                QTimer.singleShot(50, lambda path=file_path: self.open_canvas(path))
+            else:
+                QTimer.singleShot(0, lambda path=file_path: self._core_save_canvas(path))
+
+    def _apply_setup_data(self, setup_data):
+        setup_data = setup_data or {}
+        self.user_name = setup_data.get("user_name", "")
+        self.user_status = setup_data.get("user_status", "")
+        self.pdf_title = setup_data.get("pdf_title", "Log Documentation")
+        self.pdf_font_size = int(setup_data.get("pdf_font_size", 12) or 12)
+        self.pdf_line_spacing = float(setup_data.get("pdf_line_spacing", 1.5) or 1.5)
+        self.pdf_font = setup_data.get("pdf_font", "Arial") or "Arial"
+        self.custom_dictionary = setup_data.get("custom_dictionary", "")
+
+    def _setup_data_for_file(self, file_path):
+        if not file_path:
+            return {}
+
+        config_path = os.path.join(os.path.dirname(file_path), "config", "user_config.json")
+        if not os.path.exists(config_path):
+            return {}
+
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                data.setdefault("file_path", file_path)
+                return data
+        except Exception:
+            pass
+        return {}
 
     def init_ui(self):
         main_layout = QHBoxLayout(self)
@@ -10631,6 +10668,7 @@ class UIMode(QWidget):
             lambda: (setattr(self, "current_canvas_file", None), self.save_canvas())
         )
         self._side_menu.file_actions["Open"].clicked.connect(self.open_canvas)
+        self._side_menu.file_actions["Export"].clicked.connect(self.show_export_dialog)
         # Hotkeys Button Action
         self._side_menu.file_actions["Hotkeys"].clicked.connect(self.show_hotkeys_dialog)
         # Settings Button Action
@@ -11549,7 +11587,35 @@ class UIMode(QWidget):
         with open(os.path.join(config_folder, "shape_history.json"), "w", encoding="utf-8") as f:
             json.dump({"version": 3, "spaces": all_histories}, f, indent=2)
 
+        self._write_project_config(config_folder)
         self.current_canvas_file = file_path
+
+    def _write_project_config(self, config_folder):
+        setup_data = {
+            "log_type": "UIMode",
+            "user_name": getattr(self, "user_name", ""),
+            "user_status": getattr(self, "user_status", ""),
+            "pdf_title": getattr(self, "pdf_title", "Log Documentation"),
+            "pdf_font_size": getattr(self, "pdf_font_size", 12),
+            "pdf_line_spacing": getattr(self, "pdf_line_spacing", 1.5),
+            "pdf_font": getattr(self, "pdf_font", "Arial"),
+            "custom_dictionary": getattr(self, "custom_dictionary", ""),
+        }
+        if getattr(self, "current_canvas_file", None):
+            setup_data["file_path"] = self.current_canvas_file
+
+        with open(os.path.join(config_folder, "user_config.json"), "w", encoding="utf-8") as f:
+            json.dump(setup_data, f, indent=4)
+
+    def save_project_config(self):
+        if not self.current_canvas_file:
+            self.custom_tooltip.show_tooltip("Save the project first.", duration=2500)
+            return
+
+        config_folder = os.path.join(os.path.dirname(self.current_canvas_file), "config")
+        os.makedirs(config_folder, exist_ok=True)
+        self._write_project_config(config_folder)
+        self.custom_tooltip.show_tooltip("Config saved", duration=2000)
 
     def save_canvas(self):
         # Manual save with file dialog and LoadingOverlay
@@ -11666,6 +11732,8 @@ class UIMode(QWidget):
             self._side_menu.set_accent_color(self.current_shape_color)
 
             self.current_canvas_file = file_path
+            self._setup_data.update(self._setup_data_for_file(file_path))
+            self._apply_setup_data(self._setup_data)
             self._add_to_recent(file_path)
             self.drawing_area.undo_stack.clear()
             self.drawing_area.redo_stack.clear()
@@ -11771,6 +11839,287 @@ class UIMode(QWidget):
         
         # Open immediately (do not delay opening itself)
         QTimer.singleShot(50, lambda: self._do_open_canvas(file_path))
+
+    def show_export_dialog(self):
+        accent = self.current_shape_color.name()
+        darker = self.current_shape_color.darker(120).name()
+        export_pages = self._flatten_export_pages()
+        page_count = len(export_pages)
+
+        dialog = QDialog(self)
+        dialog.setCursor(_default_cursor())
+        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dialog.setModal(True)
+        dialog.setFixedSize(460, 460)
+        dialog.setStyleSheet("background: white; border-radius: 12px; border: 2px solid #222;")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        drag_bar = DraggableBar(dialog)
+        layout.addWidget(drag_bar)
+
+        title = QLabel("Export UI Mode")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 14pt; font-weight: bold; border: none;")
+        layout.addWidget(title)
+
+        fields = {}
+        settings = [
+            ("Name", "name", self.user_name or ""),
+            ("Status", "status", self.user_status or ""),
+            ("Document Title", "title", self.pdf_title or "Log Documentation"),
+            ("Font", "font", self.pdf_font or "Arial"),
+            ("Font Size", "font_size", str(self.pdf_font_size)),
+            ("Line Spacing", "line_spacing", str(self.pdf_line_spacing)),
+            ("Pages", "pages", "all"),
+        ]
+
+        for label, key, value in settings:
+            row = QHBoxLayout()
+            row.setContentsMargins(6, 0, 6, 0)
+
+            key_label = QLabel(label)
+            key_label.setFixedWidth(120)
+            key_label.setStyleSheet("font-weight: bold; color: #333; border: none;")
+
+            value_input = QLineEdit(value)
+            value_input.setStyleSheet("""
+                QLineEdit {
+                    padding: 6px;
+                    border: 1px solid #ddd;
+                    border-radius: 6px;
+                    font-size: 10pt;
+                }
+            """)
+            fields[key] = value_input
+
+            row.addWidget(key_label)
+            row.addWidget(value_input, stretch=1)
+            layout.addLayout(row)
+
+        hint = QLabel(f"Pages: all, 1, 1-3, or 1,3. Available pages: 1-{page_count}")
+        hint.setStyleSheet("color: #777; font-size: 9pt; border: none; margin-left: 6px;")
+        layout.addWidget(hint)
+
+        layout.addStretch()
+
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(34)
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: white; color: #222; border: 1px solid #ccc;
+                border-radius: 6px; font-size: 11pt; padding: 0 18px;
+            }
+            QPushButton:hover { background: #f3f3f3; }
+        """)
+        cancel_btn.setCursor(_pointing_cursor())
+        cancel_btn.clicked.connect(dialog.reject)
+
+        export_btn = QPushButton("Export PDF")
+        export_btn.setFixedHeight(34)
+        export_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {accent}; color: white; border: none;
+                font-weight: bold; border-radius: 6px; font-size: 11pt; padding: 0 20px;
+            }}
+            QPushButton:hover {{ background: {darker}; }}
+        """)
+        export_btn.setCursor(_pointing_cursor())
+
+        def do_export():
+            try:
+                font_size = int(fields["font_size"].text().strip() or 12)
+                line_spacing = float(fields["line_spacing"].text().strip() or 1.5)
+                pages = self._parse_export_page_selection(fields["pages"].text(), page_count)
+            except ValueError as e:
+                QMessageBox.warning(dialog, "Export Settings", str(e))
+                return
+
+            settings = {
+                "user_name": fields["name"].text().strip(),
+                "user_status": fields["status"].text().strip(),
+                "pdf_title": fields["title"].text().strip() or "Log Documentation",
+                "pdf_font": fields["font"].text().strip() or "Arial",
+                "pdf_font_size": font_size,
+                "pdf_line_spacing": line_spacing,
+            }
+            dialog.accept()
+            self.export_to_pdf(export_settings=settings, selected_pages=pages)
+
+        export_btn.clicked.connect(do_export)
+        button_row.addWidget(cancel_btn)
+        button_row.addWidget(export_btn)
+        layout.addLayout(button_row)
+
+        dialog.exec()
+
+    def _default_export_path(self):
+        safe_title = "".join(ch if ch.isalnum() or ch in (" ", "-", "_") else "_" for ch in self.pdf_title).strip()
+        safe_title = safe_title.replace(" ", "_") or "ui_mode_export"
+        folder = os.path.dirname(self.current_canvas_file) if self.current_canvas_file else os.path.expanduser("~")
+        return os.path.join(folder, f"{safe_title}.pdf")
+
+    def _flatten_export_pages(self):
+        pages = []
+        for space_index, space in enumerate(self._spaces):
+            for page_index, _page in enumerate(space.get("pages", [])):
+                pages.append((space_index, page_index))
+        return pages
+
+    def _parse_export_page_selection(self, text, page_count):
+        text = (text or "all").strip().lower()
+        if text in ("all", "*"):
+            return list(range(page_count))
+        if page_count < 1:
+            raise ValueError("There are no pages to export.")
+
+        selected = set()
+        for part in text.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "-" in part:
+                start_text, end_text = part.split("-", 1)
+                start = int(start_text.strip())
+                end = int(end_text.strip())
+                if start > end:
+                    start, end = end, start
+                selected.update(range(start, end + 1))
+            else:
+                selected.add(int(part))
+
+        if not selected:
+            raise ValueError("Choose at least one page to export.")
+        if min(selected) < 1 or max(selected) > page_count:
+            raise ValueError(f"Page selection must be between 1 and {page_count}.")
+        return [page - 1 for page in sorted(selected)]
+
+    def _render_current_page_for_export(self):
+        da = self.drawing_area
+        old_size = da.size()
+        old_scale = da.scale_factor
+        old_zoom = da.zoom_percent
+        old_pan = QPoint(da.pan_offset)
+
+        try:
+            da.resize(da.a4_size)
+            da.scale_factor = 1.0
+            da.zoom_percent = 0
+            da.pan_offset = QPoint(0, 0)
+            da.selected_shape_index = None
+            da.preview_shape = None
+            QApplication.processEvents()
+
+            pixmap = QPixmap(da.a4_size)
+            pixmap.fill(QColor("white"))
+            painter = QPainter(pixmap)
+            da.render(painter)
+            painter.end()
+            return pixmap
+        finally:
+            da.resize(old_size)
+            da.scale_factor = old_scale
+            da.zoom_percent = old_zoom
+            da.pan_offset = old_pan
+
+    def export_to_pdf(self, export_settings=None, selected_pages=None):
+        export_settings = export_settings or {
+            "user_name": self.user_name,
+            "user_status": self.user_status,
+            "pdf_title": self.pdf_title,
+            "pdf_font": self.pdf_font,
+            "pdf_font_size": self.pdf_font_size,
+            "pdf_line_spacing": self.pdf_line_spacing,
+        }
+        export_pages = self._flatten_export_pages()
+        if selected_pages is None:
+            selected_pages = list(range(len(export_pages)))
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export UI Mode PDF",
+            self._default_export_path(),
+            "PDF Files (*.pdf)",
+        )
+        if not file_path:
+            return
+        if not file_path.lower().endswith(".pdf"):
+            file_path += ".pdf"
+
+        current_space_idx = self._current_space_idx
+        current_page_idx = self._current_page_idx
+        self._snapshot_current_page()
+
+        try:
+            writer = QPdfWriter(file_path)
+            writer.setTitle(export_settings["pdf_title"] or "Log Documentation")
+            writer.setResolution(96)
+            writer.setPageLayout(QPageLayout(
+                QPageSize(QPageSize.PageSizeId.A4),
+                QPageLayout.Orientation.Landscape,
+                QMarginsF(12, 12, 12, 12),
+                QPageLayout.Unit.Millimeter,
+            ))
+
+            painter = QPainter(writer)
+            font = QFont(export_settings["pdf_font"] or "Arial", int(export_settings["pdf_font_size"] or 12))
+            painter.setFont(font)
+            painter.setPen(QColor("#222"))
+
+            first_page = True
+            for flat_page_index in selected_pages:
+                space_index, page_index = export_pages[flat_page_index]
+                self._current_space_idx = space_index
+                if not first_page:
+                    writer.newPage()
+                first_page = False
+
+                self._current_page_idx = page_index
+                self._restore_page(page_index)
+                page_pixmap = self._render_current_page_for_export()
+
+                page_rect = painter.viewport()
+                header_height = max(46, int((export_settings["pdf_font_size"] or 12) * (export_settings["pdf_line_spacing"] or 1.5) * 2.2))
+                title_rect = QRect(0, 0, page_rect.width(), header_height)
+                painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, export_settings["pdf_title"] or "Log Documentation")
+
+                byline_parts = []
+                if export_settings["user_name"]:
+                    byline_parts.append(f"Name: {export_settings['user_name']}")
+                if export_settings["user_status"]:
+                    byline_parts.append(f"Status: {export_settings['user_status']}")
+                if byline_parts:
+                    painter.drawText(
+                        QRect(0, header_height - 22, page_rect.width() - 4, 20),
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                        " | ".join(byline_parts),
+                    )
+
+                image_rect = QRect(0, header_height, page_rect.width(), page_rect.height() - header_height)
+                scaled_size = page_pixmap.size()
+                scaled_size.scale(image_rect.size(), Qt.AspectRatioMode.KeepAspectRatio)
+                target_rect = QRect(
+                    image_rect.x() + (image_rect.width() - scaled_size.width()) // 2,
+                    image_rect.y() + (image_rect.height() - scaled_size.height()) // 2,
+                    scaled_size.width(),
+                    scaled_size.height(),
+                )
+                painter.drawPixmap(target_rect, page_pixmap)
+
+            painter.end()
+            self.custom_tooltip.show_tooltip("PDF exported", duration=2500)
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export PDF:\n{e}")
+        finally:
+            self._current_space_idx = current_space_idx
+            self._current_page_idx = current_page_idx
+            self._restore_page(current_page_idx)
+            self._sync_page_ui()
             
     def create_file_checkpoint(self):
         if not self.current_canvas_file:
@@ -13367,6 +13716,8 @@ class SettingsDialog(QDialog):
         # Expanded size to accommodate tabs on the left with overflow space
         self.setFixedSize(508, 450)  # Added 8px to width for button overflow
         self.setStyleSheet("background: transparent;")
+        self._initial_name = getattr(self.parent(), "user_name", "") if self.parent() is not None else ""
+        self._initial_status = getattr(self.parent(), "user_status", "") if self.parent() is not None else ""
         
         # Background widget (positioned to the right of tabs)
         self.bg_widget = QWidget(self)
@@ -13445,6 +13796,32 @@ class SettingsDialog(QDialog):
         # Set first tab as active (after stacked_widget is created)
         self._switch_tab("Profile")
         
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setGeometry(
+            self.FRAME_X + self.FRAME_WIDTH - 184,
+            self.FRAME_HEIGHT - 40,
+            80, 28
+        )
+        self.save_btn.setParent(self)
+        self.save_btn.setStyleSheet("""
+            QPushButton {
+                background: #222;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-weight: bold;
+                padding: 8px;
+                font-size: 10pt;
+            }
+            QPushButton:hover {
+                background: #444;
+            }
+        """)
+        self.save_btn.setCursor(_pointing_cursor())
+        self.save_btn.clicked.connect(self._save_profile_changes)
+        self.save_btn.hide()
+        self.save_btn.raise_()
+
         # Close button at bottom right (inside the frame)
         close_btn = QPushButton("Close")
         close_btn.setGeometry(
@@ -13470,6 +13847,24 @@ class SettingsDialog(QDialog):
         close_btn.setCursor(_pointing_cursor())
         close_btn.clicked.connect(self.accept)
         close_btn.raise_()
+
+    def _profile_changed(self):
+        name = self.name_input.text().strip() if hasattr(self, "name_input") else ""
+        status = self.status_input.text().strip() if hasattr(self, "status_input") else ""
+        changed = name != self._initial_name or status != self._initial_status
+        self.save_btn.setVisible(changed)
+
+    def _save_profile_changes(self):
+        parent = self.parent()
+        if parent is None:
+            return
+
+        parent.user_name = self.name_input.text().strip()
+        parent.user_status = self.status_input.text().strip()
+        parent.save_project_config()
+        self._initial_name = parent.user_name
+        self._initial_status = parent.user_status
+        self._profile_changed()
     
     def _switch_tab(self, tab_name):
         """Switch between tabs with visual feedback"""
@@ -13532,7 +13927,9 @@ class SettingsDialog(QDialog):
         name_label.setStyleSheet("font-weight: bold; color: #222;")
         layout.addWidget(name_label)
         name_input = QLineEdit()
+        self.name_input = name_input
         name_input.setPlaceholderText("Enter your name")
+        name_input.setText(self._initial_name)
         name_input.setStyleSheet("""
             QLineEdit {
                 padding: 8px;
@@ -13541,6 +13938,7 @@ class SettingsDialog(QDialog):
                 font-size: 10pt;
             }
         """)
+        name_input.textChanged.connect(self._profile_changed)
         layout.addWidget(name_input)
         
         # Status
@@ -13548,7 +13946,9 @@ class SettingsDialog(QDialog):
         status_label.setStyleSheet("font-weight: bold; color: #222; margin-top: 8px;")
         layout.addWidget(status_label)
         status_input = QLineEdit()
+        self.status_input = status_input
         status_input.setPlaceholderText("Current status")
+        status_input.setText(self._initial_status)
         status_input.setStyleSheet("""
             QLineEdit {
                 padding: 8px;
@@ -13557,6 +13957,7 @@ class SettingsDialog(QDialog):
                 font-size: 10pt;
             }
         """)
+        status_input.textChanged.connect(self._profile_changed)
         layout.addWidget(status_input)
         
         # Connected projects

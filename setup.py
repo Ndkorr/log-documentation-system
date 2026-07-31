@@ -398,6 +398,8 @@ class WelcomeWindow(QMainWindow):
             # Determine file extension based on log type
             if setup_data["log_type"] == "Debugging":
                 extension = "ldsd"
+            elif setup_data["log_type"] == "UIMode":
+                extension = "ldsu"
             else:  # General or default
                 extension = "ldsg"
 
@@ -441,7 +443,10 @@ class WelcomeWindow(QMainWindow):
                     pass
                 return
 
-            self.launch_main_app(setup_data)
+            if setup_data.get("log_type") == "UIMode":
+                self.launch_ui_app(setup_data)
+            else:
+                self.launch_main_app(setup_data)
 
     def open_project(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -511,26 +516,43 @@ class WelcomeWindow(QMainWindow):
             log_mode = "General"
         elif ext == ".ldsd":
             log_mode = "Debugging"
+        elif ext == ".ldsu":
+            log_mode = "UIMode"
         else:
             log_mode = "General"
         # Locate user_config.json in the same project folder
         project_folder = os.path.dirname(file_path)
         config_path = os.path.join(project_folder, "config", "user_config.json")
         user_name = ""
+        user_status = ""
         pdf_title = "Log Documentation"
+        pdf_font_size = 12
+        pdf_line_spacing = 1.5
+        pdf_font = "Arial"
+        custom_dictionary = ""
         if os.path.exists(config_path):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
                     user_name = config.get("user_name", "")
+                    user_status = config.get("user_status", "")
                     pdf_title = config.get("pdf_title", "Log Documentation")
+                    pdf_font_size = config.get("pdf_font_size", 12)
+                    pdf_line_spacing = config.get("pdf_line_spacing", 1.5)
+                    pdf_font = config.get("pdf_font", "Arial")
+                    custom_dictionary = config.get("custom_dictionary", "")
             except Exception:
                 pass
         return {
             "file_path": file_path,
             "log_type": log_mode,
             "user_name": user_name,
+            "user_status": user_status,
             "pdf_title": pdf_title,
+            "pdf_font_size": pdf_font_size,
+            "pdf_line_spacing": pdf_line_spacing,
+            "pdf_font": pdf_font,
+            "custom_dictionary": custom_dictionary,
         }
 
     def open_documentations(self):
@@ -580,12 +602,22 @@ class WelcomeWindow(QMainWindow):
         try:
             from UIMode import UIMode
 
-            self.ui_window = UIMode()
+            setup_data = self.get_setup_data_for_file(file_path)
+            self.ui_window = UIMode(setup_data=setup_data, file_path=file_path)
             self.ui_window.show()
-            QTimer.singleShot(50, lambda: self.ui_window.open_canvas(file_path))
             self.close()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open UI Mode file:\n{e}")
+
+    def launch_ui_app(self, setup_data):
+        try:
+            from UIMode import UIMode
+
+            self.ui_window = UIMode(setup_data=setup_data, file_path=setup_data.get("file_path"))
+            self.ui_window.show()
+            self.close()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open UI Mode:\n{e}")
 
     def launch_main_app(self, setup_data):
         from main import LogApp  # Import your LogApp class
@@ -600,7 +632,9 @@ class WelcomeWindow(QMainWindow):
             return
         # Create LogApp with mode and file_path parameters.
         self.main_window = LogApp(
-            log_mode=setup_data.get("log_type", "General"), file_path=file_path
+            setup_data=setup_data,
+            log_mode=setup_data.get("log_type", "General"),
+            file_path=file_path,
         )
         
         # If the user cancelled loading during LogApp initialization, abort showing main window.
@@ -683,9 +717,9 @@ def open_startup_file(file_path):
     if ext == ".ldsu":
         from UIMode import UIMode
 
-        window = UIMode()
+        setup_data = WelcomeWindow().get_setup_data_for_file(file_path)
+        window = UIMode(setup_data=setup_data, file_path=file_path)
         window.show()
-        QTimer.singleShot(50, lambda: window.open_canvas(file_path))
         return window
 
     if ext == ".ldsdict":

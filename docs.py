@@ -208,6 +208,7 @@ class ChangelogPage(QWidget):
         # Add changelog entries here
         # Latest version should be first in the list for easier management
         self.changelog_entries = [
+            {"version": "1.0.45", "date": "July, 31, 2026", "features": ["Connect LDSU on wizard. Configs are now initialized"]},
             {"version": "1.0.44", "date": "July, 28, 2026", "features": ["Update setup wizard"]},
             {"version": "1.0.43", "date": "July, 27, 2026", "features": ["Windows ico fix"]},
             {"version": "1.0.42", "date": "July, 26, 2026", "features": ["Configured registry, MIME and info.plist to tell operating systems that hey its my file type - put this icon on"]},
@@ -700,6 +701,8 @@ class IdeaPage(QWidget):
         
         # Idea data structure with stable ids so saved status remains correct when items are added.
         self.ideas = [
+            {"id": "idea-ui-mode-connection", "date": "July 31, 2026", "description": "Connect other lds type on ui mode"},            
+            {"id": "idea-dictionary", "date": "July 31, 2026", "description": "Connect dictionary on UIMode"},
             {"id": "idea-myratings-uidesign", "date": "July 27, 2026", "description": "UI Design for myRating/ldsr"},
             {"id": "idea-overall-encryption", "date": "July 27, 2026", "description": "Will add encryption on file types. Can also add a support to compress a project folder and add an encryption on top. Can also open zipped/compressed project folder."},
             {"id": "idea-general-mode-changes", "date": "July 17, 2026", "description": "How to use window"},
@@ -1091,7 +1094,7 @@ class ModulePage(QWidget):
             {"name": "main.py", "description": "LDSD and LDSG\nPreload Dictionary", "percentage": 80},
             {"name": "UIMode.py", "description": "LDSU - User Interface Design Mode", "percentage": 80},
             {"name": "setup.py", "description": "Welcome Page\nAdd Dictionary besides git icon", "percentage": 90},
-            {"name": "gui.py", "description": "Setup Wizard", "percentage": 40},
+            {"name": "gui.py", "description": "Setup Wizard", "percentage": 70},
         ]
         
         # Scroll position and hover state

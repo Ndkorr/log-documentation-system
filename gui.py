@@ -441,6 +441,7 @@ class SetupWizard(QDialog):
 
         self.text_size_box = None
         self.line_spacing_box = None
+        self.font_combo_box = None
         self.dictionary_box = None
 
         self.init_ui()
@@ -806,17 +807,83 @@ class SetupWizard(QDialog):
     def _apply_title_gradient(self):
         start_color = self._animated_title_color(self._title_gradient_start).name()
         end_color = self._animated_title_color(self._title_gradient_end).name()
+        gradient = self._current_title_gradient_css(start_color, end_color)
         title_style = f"""
             font-size: 25px;
             font-weight: bold;
-            background: qlineargradient(
-            x1: 0, y1: 0, x2: 1, y2: 0,
-            stop: 0 {start_color}, stop: 1 {end_color}
-            );
+            background: {gradient};
             font-family: Segoe UI;
         """
         for title_label in self._title_labels:
             title_label.setStyleSheet(title_style)
+        self._apply_animated_accent_styles(gradient)
+
+    def _current_title_gradient_css(self, start_color=None, end_color=None):
+        if start_color is None:
+            start_color = self._animated_title_color(self._title_gradient_start).name()
+        if end_color is None:
+            end_color = self._animated_title_color(self._title_gradient_end).name()
+        return (
+            "qlineargradient("
+            "x1: 0, y1: 0, x2: 1, y2: 0, "
+            f"stop: 0 {start_color}, stop: 1 {end_color}"
+            ")"
+        )
+
+    def _choice_label_style(self, selected=False):
+        background = f"background: {self._current_title_gradient_css()};" if selected else ""
+        font_weight = "font-weight: bold;" if selected else ""
+        border = "1px solid #0078d7" if selected else "1px solid transparent"
+        return f"""
+            font-size: 17px;
+            padding: 10px;
+            margin-left: 15px;
+            margin-right: 15px;
+            border: {border};
+            border-radius: 15px;
+            {background}
+            {font_weight}
+        """
+
+    def _animated_button_style(self, margin_right="15px", padding="6px 18px", enabled=False):
+        background = f"background: {self._current_title_gradient_css()};" if enabled else ""
+        return f"""
+            margin-bottom: 15px;
+            margin-right: {margin_right};
+            font-size: 14px;
+            padding: {padding};
+            border: 2px solid #0078d7;
+            border-radius: 8px;
+            color: black;
+            {background}
+        """
+
+    def _all_choice_options(self):
+        return (
+            getattr(self, "options", [])
+            + getattr(self, "options2", [])
+            + getattr(self, "options3", [])
+            + getattr(self, "options4", [])
+            + getattr(self, "options5", [])
+        )
+
+    def _apply_animated_accent_styles(self, gradient=None):
+        for option in self._all_choice_options():
+            if option.property("selected"):
+                option.setStyleSheet(self._choice_label_style(selected=True))
+
+        if hasattr(self, "next_button"):
+            self.next_button.setStyleSheet(
+                self._animated_button_style(margin_right="5px", padding="6px 12px", enabled=self.next_button.isEnabled())
+            )
+        if hasattr(self, "next_button2"):
+            self.next_button2.setStyleSheet(
+                self._animated_button_style(enabled=self.next_button2.isEnabled())
+            )
+        if hasattr(self, "next_button5"):
+            self.next_button5.setStyleSheet(
+                self._animated_button_style(padding="6px 15px", enabled=self.next_button5.isEnabled())
+            )
 
     def _start_title_gradient_animation(self):
         self._title_gradient_timer = QTimer(self)
@@ -847,8 +914,8 @@ class SetupWizard(QDialog):
                 else 1.5
             ),
             "pdf_font": (
-                self.options4[0].text()
-                if self.options4 and self.options4[0].property("selected")
+                self.font_combo_box.currentText()
+                if self.font_combo_box
                 else "Arial"
             ),
             "custom_dictionary": (
@@ -872,6 +939,8 @@ class SetupWizard(QDialog):
         # Set log_type based on selection
         if self.selected_option == "Bugs and errors":
             self.log_type = "Debugging"
+        elif self.selected_option == "UI/UX Changes":
+            self.log_type = "UIMode"
         else:
             self.log_type = "General"
 
@@ -931,30 +1000,13 @@ class SetupWizard(QDialog):
             def validate_combo():
                 # Enable Next if a valid selection is made (not -1)
                 self.next_button.setEnabled(subtext_label.currentIndex() != -1)
-                if subtext_label.currentIndex() != -1:
-                    self.next_button.setStyleSheet("""
-                        margin-bottom: 15px;
-                        margin-right: 5px;
-                        font-size: 14px;
-                        padding: 6px 12px;
-                        border: 2px solid #0078d7;
-                        border-radius: 8px;
-                        color: black;
-                        background: qlineargradient(
-                            x1: 0, y1: 0, x2: 1, y2: 0,
-                            stop: 0 #42f5d7, stop: 1 #14b7fc
-                        );
-                    """)
-                else:
-                    self.next_button.setStyleSheet("""
-                        margin-bottom: 15px;
-                        margin-right: 5px;
-                        font-size: 14px;
-                        padding: 6px 12px;
-                        border: 2px solid #0078d7;
-                        border-radius: 8px;
-                        color: black;
-                    """)
+                self.next_button.setStyleSheet(
+                    self._animated_button_style(
+                        margin_right="5px",
+                        padding="6px 12px",
+                        enabled=self.next_button.isEnabled(),
+                    )
+                )
             subtext_label.currentIndexChanged.connect(validate_combo)
             validate_combo()  # Initial validation
 
@@ -969,19 +1021,9 @@ class SetupWizard(QDialog):
 
             # Enable the "Next" button.
             self.next_button.setEnabled(True)
-            self.next_button.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 5px;
-                font-size: 14px;
-                padding: 6px 12px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #42f5d7, stop: 1 #14b7fc
-                );
-            """)
+            self.next_button.setStyleSheet(
+                self._animated_button_style(margin_right="5px", padding="6px 12px", enabled=True)
+            )
 
         # Apply an opacity effect for the fade-in animation.
         opacity_effect = QGraphicsOpacityEffect(subtext_label)
@@ -1182,7 +1224,7 @@ class SetupWizard(QDialog):
                     layout.removeWidget(subtext_label)
                     subtext_label.deleteLater()
                     # Clear the reference if this was the text size or line spacing box
-                    if option.text() == "Set the text size to":
+                    if option.text() == "Set the font size to":
                         self.text_size_box = None
                     elif option.text() == "Set the line spacing to":
                         self.line_spacing_box = None
@@ -1207,7 +1249,7 @@ class SetupWizard(QDialog):
 
     def add_subtext3(self, clicked_option):
         subtext_map = {
-            "Set the text size to": "",
+            "Set the font size to": "",
             "Set the line spacing to": "",
             "Proceed on default": "Continue with the default settings."
         }
@@ -1244,7 +1286,7 @@ class SetupWizard(QDialog):
             subtext_label.setFocus()
 
             # Store references to the text boxes for validation.
-            if clicked_option.text() == "Set the text size to":
+            if clicked_option.text() == "Set the font size to":
                 self.next_button3.setEnabled(False)
                 self.next_button3.setStyleSheet("""
                     margin-bottom: 15px;
@@ -1305,6 +1347,7 @@ class SetupWizard(QDialog):
                     subtext_label = layout.itemAt(1).widget()
                     layout.removeWidget(subtext_label)
                     subtext_label.deleteLater()
+            self.font_combo_box = None
 
             clicked_option.setSelected(True)
             self.add_subtext4(clicked_option)
@@ -1321,6 +1364,7 @@ class SetupWizard(QDialog):
                     subtext_label = layout.itemAt(1).widget()
                     layout.removeWidget(subtext_label)
                     subtext_label.deleteLater()
+                    self.font_combo_box = None
                     break
             self.validate_required_choices()
         else:
@@ -1340,6 +1384,7 @@ class SetupWizard(QDialog):
 
     def add_subtext4(self, clicked_option):
         if clicked_option.text() == "Proceed on default":
+            self.font_combo_box = None
             subtext_label = QLabel("Continue with the default settings.")
             subtext_label.setStyleSheet("""
                 font-size: 14px;
@@ -1393,6 +1438,7 @@ class SetupWizard(QDialog):
             """)
             subtext_label.setFixedWidth(125)
             subtext_label.setFixedHeight(30)
+            self.font_combo_box = subtext_label
 
             def validate_combo():
                 self.validate_required_choices()
@@ -1432,19 +1478,9 @@ class SetupWizard(QDialog):
             self.add_subtext5(clicked_option)
             self.validate_font_input2()
             self.next_button5.setEnabled(True)
-            self.next_button5.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 15px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #42f5d7, stop: 1 #14b7fc
-                );
-            """)
+            self.next_button5.setStyleSheet(
+                self._animated_button_style(padding="6px 15px", enabled=True)
+            )
             return
 
         # If the editable option is clicked
@@ -1459,15 +1495,9 @@ class SetupWizard(QDialog):
                     self.dictionary_box = None
                     break
             self.next_button5.setEnabled(False)
-            self.next_button5.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 15px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-            """)
+            self.next_button5.setStyleSheet(
+                self._animated_button_style(padding="6px 15px", enabled=False)
+            )
         else:
             # Select and add subtext (text box)
             clicked_option.setSelected(True)
@@ -1571,22 +1601,7 @@ class SetupWizard(QDialog):
 
     def _set_merged_next_enabled(self, enabled):
         self.next_button2.setEnabled(enabled)
-        background = """
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #42f5d7, stop: 1 #14b7fc
-                );
-        """ if enabled else ""
-        self.next_button2.setStyleSheet(f"""
-            margin-bottom: 15px;
-            margin-right: 15px;
-            font-size: 14px;
-            padding: 6px 18px;
-            border: 2px solid #0078d7;
-            border-radius: 8px;
-            color: black;
-            {background}
-        """)
+        self.next_button2.setStyleSheet(self._animated_button_style(enabled=enabled))
 
     def _option_selected(self, options, text):
         return any(option.text() == text and option.property("selected") for option in options)
@@ -1640,30 +1655,11 @@ class SetupWizard(QDialog):
     def validate_font_input2(self):
         if self.dictionary_box and self.dictionary_box.toPlainText().strip():
             self.next_button5.setEnabled(True)
-            self.next_button5.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 15px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #42f5d7, stop: 1 #14b7fc
-                );
-            """)
         else:
             self.next_button5.setEnabled(False)
-            self.next_button5.setStyleSheet("""
-                margin-bottom: 15px;
-                margin-right: 15px;
-                font-size: 14px;
-                padding: 6px 15px;
-                border: 2px solid #0078d7;
-                border-radius: 8px;
-                color: black;
-            """)
+        self.next_button5.setStyleSheet(
+            self._animated_button_style(padding="6px 15px", enabled=self.next_button5.isEnabled())
+        )
 
 
 if __name__ == "__main__":
