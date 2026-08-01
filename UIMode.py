@@ -10,13 +10,13 @@ from PyQt6.QtWidgets import (
     QFrame, QSizePolicy, QApplication, QScrollArea, QStackedLayout, QStackedWidget,
     QGraphicsOpacityEffect, QGraphicsDropShadowEffect, QColorDialog,
     QToolButton, QMenu, QDialog, QSlider, QListWidget, QListWidgetItem,
-    QFileDialog, QMessageBox, QFontComboBox, QLineEdit, QTextEdit
+    QFileDialog, QMessageBox, QFontComboBox, QLineEdit, QTextEdit, QComboBox
 )
 from PyQt6.QtCore import (
     Qt, QSize, QPropertyAnimation, QRect,
     QPoint, QEasingCurve, QTimer, pyqtSignal, QEvent,
     QParallelAnimationGroup, QEventLoop, QRectF, QPointF, QObject,
-    pyqtProperty, QThread, pyqtSlot, QRegularExpression, QMarginsF
+    pyqtProperty, QThread, pyqtSlot, QRegularExpression, QMarginsF, QSizeF
     )
 
 
@@ -106,6 +106,64 @@ def _default_cursor():
         else:
             _default_cursor_cache = QCursor(Qt.CursorShape.ArrowCursor)
     return _default_cursor_cache
+
+
+DEFAULT_PAGE_SIZE_KEY = "A4"
+INFINITE_PAGE_SIZE_KEY = "Infinite"
+DEFAULT_PAGE_ORIENTATION = "Landscape"
+DEFAULT_PAGE_APPLY_ON = "New Page"
+PAGE_SETUP_DPI = 96
+
+
+def _page_size_catalog():
+    catalog = {INFINITE_PAGE_SIZE_KEY: None}
+    for name, member in QPageSize.PageSizeId.__members__.items():
+        if name in {"LastPageSize", "NPageSize"}:
+            continue
+        try:
+            page_size = QPageSize(member)
+            size = page_size.sizePixels(PAGE_SETUP_DPI)
+            if size.width() <= 0 or size.height() <= 0:
+                continue
+            catalog[name] = QSize(size.width(), size.height())
+        except Exception:
+            continue
+    return catalog
+
+
+PAGE_SIZE_PRESETS = _page_size_catalog()
+PAGE_SETUP_CHOICES = [key for key in PAGE_SIZE_PRESETS if key != INFINITE_PAGE_SIZE_KEY]
+
+
+def _normalize_page_setup(page_size=None, orientation=None, apply_on=None):
+    normalized_size = page_size if page_size in PAGE_SIZE_PRESETS else DEFAULT_PAGE_SIZE_KEY
+    normalized_orientation = orientation if orientation in {"Portrait", "Landscape"} else DEFAULT_PAGE_ORIENTATION
+    normalized_apply_on = apply_on if apply_on in {"New Page", "All Pages"} else DEFAULT_PAGE_APPLY_ON
+    return {
+        "page_size": normalized_size,
+        "orientation": normalized_orientation,
+        "apply_on": normalized_apply_on,
+    }
+
+
+def _page_setup_from_config(data):
+    if not isinstance(data, dict):
+        return _normalize_page_setup()
+    return _normalize_page_setup(
+        data.get("page_size", data.get("size", DEFAULT_PAGE_SIZE_KEY)),
+        data.get("page_orientation", data.get("orientation", DEFAULT_PAGE_ORIENTATION)),
+        data.get("page_apply_on", data.get("apply_on", DEFAULT_PAGE_APPLY_ON)),
+    )
+
+
+def _canvas_size_for_setup(page_size_key, orientation):
+    if page_size_key == INFINITE_PAGE_SIZE_KEY:
+        return None
+    base_size = PAGE_SIZE_PRESETS.get(page_size_key) or PAGE_SIZE_PRESETS[DEFAULT_PAGE_SIZE_KEY]
+    width, height = base_size.width(), base_size.height()
+    if orientation == "Portrait":
+        return QSize(min(width, height), max(width, height))
+    return QSize(max(width, height), min(width, height))
 
 
 class SideMenuPanel(QWidget):
@@ -337,6 +395,14 @@ class SideMenuPanel(QWidget):
         self._stack.setCurrentIndex(idx)
         for n, btn in self._tabs.items():
             btn.setChecked(n == name)
+
+    def set_pages_enabled(self, enabled: bool):
+        btn = self._tabs.get("Pages")
+        if btn is None:
+            return
+        btn.setEnabled(enabled)
+        if not enabled and btn.isChecked():
+            self._switch_tab(0, "File")
     
     def set_accent_color(self, color: QColor):
         hex_color = color.name()
@@ -1767,6 +1833,9 @@ def _serialize_page_state_for_thread(state) -> dict:
     return {
         "name": state["name"],
         "created": state.get("created", ""),
+        "canvas_size": [state["canvas_size"].width(), state["canvas_size"].height()],
+        "page_size": state.get("page_size", DEFAULT_PAGE_SIZE_KEY),
+        "page_orientation": state.get("page_orientation", DEFAULT_PAGE_ORIENTATION),
         "shapes": [_serialize_shape_for_thread(s) for s in state["shapes"]],
         "eraser_mask_img": _pixmap_to_qimage(state["eraser_mask"]),
         "eraser_strokes": [[_serialize_qpoint(p) for p in stroke]
@@ -1891,6 +1960,9 @@ def _serialize_page_state(state) -> dict:
     return {
         "name": state["name"],
         "created": state.get("created", ""),
+        "canvas_size": [state["canvas_size"].width(), state["canvas_size"].height()],
+        "page_size": state.get("page_size", DEFAULT_PAGE_SIZE_KEY),
+        "page_orientation": state.get("page_orientation", DEFAULT_PAGE_ORIENTATION),
         "shapes":         [_serialize_shape(s) for s in state["shapes"]],
         "eraser_mask":    _serialize_pixmap(state["eraser_mask"]),
         "eraser_strokes": [[_serialize_qpoint(p) for p in stroke]
@@ -1903,8 +1975,13 @@ def _serialize_page_state(state) -> dict:
 
 def _deserialize_page_state(pd: dict, a4_size) -> dict:
     em = _deserialize_pixmap(pd["eraser_mask"])
+    canvas_size_raw = pd.get("canvas_size", [a4_size.width(), a4_size.height()])
+    canvas_size = QSize(canvas_size_raw[0], canvas_size_raw[1])
     return {
         "name":           pd["name"],
+        "canvas_size":    canvas_size,
+        "page_size":      pd.get("page_size", DEFAULT_PAGE_SIZE_KEY),
+        "page_orientation": pd.get("page_orientation", DEFAULT_PAGE_ORIENTATION),
         "shapes":         [_deserialize_shape(s) for s in pd["shapes"]],
         "eraser_mask":    em,
         "eraser_strokes": [[QPoint(*p) for p in stroke]
@@ -2138,6 +2215,134 @@ class _LabelTextOverlay(QWidget):
         painter.end()
 
 
+class _InfiniteCanvasResizeOverlay(QWidget):
+    HANDLE_SIZE = 8
+    HANDLE_MARGIN = 8
+
+    def __init__(self, drawing_area):
+        super().__init__(drawing_area)
+        self._da = drawing_area
+        self._drag_mode = None
+        self._drag_start_global = None
+        self._drag_start_rect = None
+        self._resize_cursors = []
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("background: none;")
+
+        def _load_cursor(name, fallback):
+            px = QPixmap(os.path.join(_ASSETS_DIR, name))
+            if not px.isNull():
+                px = px.scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                return QCursor(px, 22, 22)
+            return QCursor(fallback)
+
+        self._resize_cursors = [
+            _load_cursor("cursor-sizediagonalleft.png", Qt.CursorShape.SizeFDiagCursor),
+            _load_cursor("cursor-sizevertical.png", Qt.CursorShape.SizeVerCursor),
+            _load_cursor("cursor-sizediagonalright.png", Qt.CursorShape.SizeBDiagCursor),
+            _load_cursor("cursor-sizehorizontal.png", Qt.CursorShape.SizeHorCursor),
+            _load_cursor("cursor-sizediagonalleft.png", Qt.CursorShape.SizeFDiagCursor),
+            _load_cursor("cursor-sizevertical.png", Qt.CursorShape.SizeVerCursor),
+            _load_cursor("cursor-sizediagonalright.png", Qt.CursorShape.SizeBDiagCursor),
+            _load_cursor("cursor-sizehorizontal.png", Qt.CursorShape.SizeHorCursor),
+        ]
+        self._reposition()
+        self.show()
+
+    def _reposition(self):
+        margin = self.HANDLE_MARGIN
+        tl = self._da.canvas_to_widget(QPoint(0, 0))
+        br = self._da.canvas_to_widget(QPoint(self._da.a4_size.width(), self._da.a4_size.height()))
+        widget_rect = QRect(tl, br).normalized().adjusted(-margin, -margin, margin, margin)
+        self.setGeometry(widget_rect)
+        self.raise_()
+
+    def handle_points_local(self):
+        r = self.rect().adjusted(self.HANDLE_MARGIN, self.HANDLE_MARGIN, -self.HANDLE_MARGIN, -self.HANDLE_MARGIN)
+        x1, y1, x2, y2 = r.left(), r.top(), r.right(), r.bottom()
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        return [
+            QPoint(x1, y1), QPoint(cx, y1), QPoint(x2, y1),
+            QPoint(x2, cy),
+            QPoint(x2, y2), QPoint(cx, y2), QPoint(x1, y2),
+            QPoint(x1, cy),
+        ]
+
+    def _hit_test(self, pos):
+        hs = self.HANDLE_SIZE + 4
+        for i, pt in enumerate(self.handle_points_local()):
+            if abs(pos.x() - pt.x()) <= hs and abs(pos.y() - pt.y()) <= hs:
+                return i
+        return None
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return super().mousePressEvent(event)
+        handle_idx = self._hit_test(event.pos())
+        if handle_idx is None:
+            return super().mousePressEvent(event)
+        self._drag_mode = handle_idx
+        self._drag_start_global = event.globalPosition().toPoint()
+        self._drag_start_rect = QRect(0, 0, self._da.a4_size.width(), self._da.a4_size.height())
+        self.grabMouse()
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_mode is None:
+            handle_idx = self._hit_test(event.pos())
+            if handle_idx is None:
+                self.unsetCursor()
+            else:
+                self.setCursor(self._resize_cursors[handle_idx])
+            return super().mouseMoveEvent(event)
+
+        curr = event.globalPosition().toPoint()
+        dw = curr - self._drag_start_global
+        dx = int(round(dw.x() / max(self._da.scale_factor, 0.01)))
+        dy = int(round(dw.y() / max(self._da.scale_factor, 0.01)))
+
+        rect = QRect(self._drag_start_rect)
+        if self._drag_mode in (2, 3, 4):
+            rect.setRight(max(120, rect.right() + dx))
+        if self._drag_mode in (4, 5, 6):
+            rect.setBottom(max(120, rect.bottom() + dy))
+        if self._drag_mode in (0, 7, 6):
+            rect.setLeft(0)
+        if self._drag_mode in (0, 1, 2):
+            rect.setTop(0)
+        new_size = QSize(max(120, rect.width()), max(120, rect.height()))
+        self._da.set_canvas_size(new_size)
+        owner = self._da.parent()
+        if owner is not None and hasattr(owner, "_page_states"):
+            owner._page_states[owner._current_page_idx]["canvas_size"] = QSize(new_size)
+        self._reposition()
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if self._drag_mode is not None:
+            self.releaseMouse()
+            self._drag_mode = None
+            self.unsetCursor()
+            self._reposition()
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#0078d7"), 1, Qt.PenStyle.DotLine)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        r = self.rect().adjusted(self.HANDLE_MARGIN, self.HANDLE_MARGIN, -self.HANDLE_MARGIN - 1, -self.HANDLE_MARGIN - 1)
+        painter.drawRect(r)
+        hs = self.HANDLE_SIZE // 2
+        for pt in self.handle_points_local():
+            painter.setBrush(QColor("white"))
+            painter.setPen(QPen(QColor("#0078d7"), 2))
+            painter.drawRect(pt.x() - hs, pt.y() - hs, self.HANDLE_SIZE, self.HANDLE_SIZE)
+        painter.end()
+
+
 class DrawingArea(QFrame):
     HANDLE_SIZE = 6
     shape_selected_for_edit = pyqtSignal()
@@ -2297,6 +2502,19 @@ class DrawingArea(QFrame):
         self._group_resize_origin_children = None
         
         self.custom_tooltip = CustomToolTip(self)
+
+    def set_canvas_size(self, size):
+        if size is None:
+            return
+        self.a4_size = QSize(size)
+        if self.eraser_mask.size() != self.a4_size:
+            new_eraser_mask = QPixmap(self.a4_size)
+            new_eraser_mask.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(new_eraser_mask)
+            painter.drawPixmap(0, 0, self.eraser_mask)
+            painter.end()
+            self.eraser_mask = new_eraser_mask
+        self.update()
 
     # Snap-to-grid helpers
 
@@ -10282,6 +10500,7 @@ class UIMode(QWidget):
 
     def __init__(self, setup_data=None, file_path=None, parent=None):
         super().__init__(parent)
+        self._infinite_canvas_overlay = None
         self.setCursor(_default_cursor())
         self.setWindowIcon(QIcon(_APP_ICON_PATH))
         self._setup_data = self._setup_data_for_file(file_path)
@@ -10340,6 +10559,8 @@ class UIMode(QWidget):
         self.pdf_line_spacing = float(setup_data.get("pdf_line_spacing", 1.5) or 1.5)
         self.pdf_font = setup_data.get("pdf_font", "Arial") or "Arial"
         self.custom_dictionary = setup_data.get("custom_dictionary", "")
+        self.infinite_page_setup = bool(setup_data.get("infinite_page_setup", False))
+        self.page_setup = _page_setup_from_config(setup_data)
 
     def _setup_data_for_file(self, file_path):
         if not file_path:
@@ -10566,6 +10787,9 @@ class UIMode(QWidget):
         
         # Drawing Area
         self.drawing_area = DrawingArea(self)
+        initial_page_setup = getattr(self, "page_setup", _normalize_page_setup())
+        initial_canvas_size = _canvas_size_for_setup(initial_page_setup["page_size"], initial_page_setup["orientation"]) or QSize(self.drawing_area.a4_size)
+        self.drawing_area.set_canvas_size(initial_canvas_size)
         # Page state init (one page per canvas "space")
         _em = QPixmap(self.drawing_area.a4_size)
         _em.fill(Qt.GlobalColor.transparent)
@@ -10574,6 +10798,9 @@ class UIMode(QWidget):
             "current_page": 0,
             "pages": [{
                 "name": "Page 1",
+                "canvas_size": QSize(self.drawing_area.a4_size),
+                "page_size": initial_page_setup["page_size"],
+                "page_orientation": initial_page_setup["orientation"],
                 "shapes": [],
                 "eraser_mask": _em,
                 "eraser_strokes": [],
@@ -10705,8 +10932,15 @@ class UIMode(QWidget):
 
         # Push initial single page to both UIs
         self._sync_page_ui()
+        if self.infinite_page_setup:
+            self._side_menu.set_pages_enabled(False)
         self.page_bar.show()
+        if self.infinite_page_setup:
+            self.page_bar.hide()
         self.page_bar.raise_()
+        self._infinite_canvas_overlay = None
+        if self.infinite_page_setup:
+            self._enable_infinite_canvas_mode()
         
         self.ribbon_layout = ribbon_layout
         self.divider = divider  
@@ -11231,6 +11465,18 @@ class UIMode(QWidget):
     def _page_states(self):
         """Convenience: the pages list of the currently active space."""
         return self._spaces[self._current_space_idx]["pages"]    
+
+    def _enable_infinite_canvas_mode(self):
+        self._side_menu.set_pages_enabled(False)
+        self.page_bar.hide()
+        if self._infinite_canvas_overlay is None:
+            self._infinite_canvas_overlay = _InfiniteCanvasResizeOverlay(self.drawing_area)
+        self._infinite_canvas_overlay.show()
+        self._infinite_canvas_overlay.raise_()
+
+    def _disable_infinite_canvas_mode(self):
+        if self._infinite_canvas_overlay is not None:
+            self._infinite_canvas_overlay.hide()
     
     def show_tool_tooltip(self, text):
         self.custom_tooltip.show_tooltip(text)
@@ -11604,6 +11850,7 @@ class UIMode(QWidget):
         self.current_canvas_file = file_path
 
     def _write_project_config(self, config_folder):
+        page_setup = getattr(self, "page_setup", _normalize_page_setup())
         setup_data = {
             "log_type": "UIMode",
             "user_name": getattr(self, "user_name", ""),
@@ -11612,6 +11859,12 @@ class UIMode(QWidget):
             "pdf_font_size": getattr(self, "pdf_font_size", 12),
             "pdf_line_spacing": getattr(self, "pdf_line_spacing", 1.5),
             "pdf_font": getattr(self, "pdf_font", "Arial"),
+            "infinite_page_setup": bool(getattr(self, "infinite_page_setup", False)),
+            "page_size": page_setup.get("page_size", DEFAULT_PAGE_SIZE_KEY),
+            "page_orientation": page_setup.get("orientation", DEFAULT_PAGE_ORIENTATION),
+            "orientation": page_setup.get("orientation", DEFAULT_PAGE_ORIENTATION),
+            "page_apply_on": page_setup.get("apply_on", DEFAULT_PAGE_APPLY_ON),
+            "apply_on": page_setup.get("apply_on", DEFAULT_PAGE_APPLY_ON),
             "custom_dictionary": getattr(self, "custom_dictionary", ""),
         }
         if getattr(self, "current_canvas_file", None):
@@ -11863,7 +12116,7 @@ class UIMode(QWidget):
         dialog.setCursor(_default_cursor())
         dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         dialog.setModal(True)
-        dialog.setFixedSize(460, 460)
+        dialog.setFixedSize(460, 480)
         dialog.setStyleSheet("background: white; border-radius: 12px; border: 2px solid #222;")
 
         layout = QVBoxLayout(dialog)
@@ -11886,7 +12139,6 @@ class UIMode(QWidget):
             ("Font", "font", self.pdf_font or "Arial"),
             ("Font Size", "font_size", str(self.pdf_font_size)),
             ("Line Spacing", "line_spacing", str(self.pdf_line_spacing)),
-            ("Pages", "pages", "all"),
         ]
 
         for label, key, value in settings:
@@ -11912,9 +12164,28 @@ class UIMode(QWidget):
             row.addWidget(value_input, stretch=1)
             layout.addLayout(row)
 
-        hint = QLabel(f"Pages: all, 1, 1-3, or 1,3. Available pages: 1-{page_count}")
-        hint.setStyleSheet("color: #777; font-size: 9pt; border: none; margin-left: 6px;")
-        layout.addWidget(hint)
+        page_row = QHBoxLayout()
+        page_row.setContentsMargins(6, 0, 6, 0)
+        page_label = QLabel("Pages")
+        page_label.setFixedWidth(120)
+        page_label.setStyleSheet("font-weight: bold; color: #333; border: none;")
+        fields["pages"] = QComboBox()
+        fields["pages"].addItem("All Pages", None)
+        for flat_index, (_space_index, page_index) in enumerate(export_pages):
+            page_name = self._spaces[_space_index]["pages"][page_index].get("name", f"Page {flat_index + 1}")
+            fields["pages"].addItem(f"{flat_index + 1}. {page_name}", [flat_index])
+        fields["pages"].setStyleSheet("""
+            QComboBox {
+                padding: 6px;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                font-size: 10pt;
+                background: white;
+            }
+        """)
+        page_row.addWidget(page_label)
+        page_row.addWidget(fields["pages"], stretch=1)
+        layout.addLayout(page_row)
 
         layout.addStretch()
 
@@ -11948,10 +12219,12 @@ class UIMode(QWidget):
             try:
                 font_size = int(fields["font_size"].text().strip() or 12)
                 line_spacing = float(fields["line_spacing"].text().strip() or 1.5)
-                pages = self._parse_export_page_selection(fields["pages"].text(), page_count)
             except ValueError as e:
                 QMessageBox.warning(dialog, "Export Settings", str(e))
                 return
+            pages = fields["pages"].currentData()
+            if pages is None:
+                pages = list(range(page_count))
 
             settings = {
                 "user_name": fields["name"].text().strip(),
@@ -12072,12 +12345,6 @@ class UIMode(QWidget):
             writer = QPdfWriter(file_path)
             writer.setTitle(export_settings["pdf_title"] or "Log Documentation")
             writer.setResolution(96)
-            writer.setPageLayout(QPageLayout(
-                QPageSize(QPageSize.PageSizeId.A4),
-                QPageLayout.Orientation.Landscape,
-                QMarginsF(12, 12, 12, 12),
-                QPageLayout.Unit.Millimeter,
-            ))
 
             painter = QPainter(writer)
             font = QFont(export_settings["pdf_font"] or "Arial", int(export_settings["pdf_font_size"] or 12))
@@ -12087,7 +12354,28 @@ class UIMode(QWidget):
             first_page = True
             for flat_page_index in selected_pages:
                 space_index, page_index = export_pages[flat_page_index]
+                page_state = self._spaces[space_index]["pages"][page_index]
+                page_size_key = page_state.get("page_size", getattr(self, "page_setup", {}).get("page_size", DEFAULT_PAGE_SIZE_KEY))
+                page_orientation = page_state.get("page_orientation", getattr(self, "page_setup", {}).get("orientation", DEFAULT_PAGE_ORIENTATION))
+                is_infinite_page = page_size_key == INFINITE_PAGE_SIZE_KEY
                 self._current_space_idx = space_index
+                margins = QMarginsF(6, 6, 6, 6) if is_infinite_page else QMarginsF(12, 12, 12, 12)
+                if is_infinite_page:
+                    page_canvas_size = page_state.get("canvas_size", self.drawing_area.a4_size)
+                    page_layout = QPageLayout(
+                        QPageSize(QSizeF(page_canvas_size.width(), page_canvas_size.height()), QPageSize.Unit.Point),
+                        QPageLayout.Orientation.Portrait,
+                        margins,
+                        QPageLayout.Unit.Point,
+                    )
+                else:
+                    page_layout = QPageLayout(
+                        QPageSize(getattr(QPageSize.PageSizeId, page_size_key, QPageSize.PageSizeId.A4)),
+                        QPageLayout.Orientation.Portrait if page_orientation == "Portrait" else QPageLayout.Orientation.Landscape,
+                        margins,
+                        QPageLayout.Unit.Millimeter,
+                    )
+                writer.setPageLayout(page_layout)
                 if not first_page:
                     writer.newPage()
                 first_page = False
@@ -12097,23 +12385,32 @@ class UIMode(QWidget):
                 page_pixmap = self._render_current_page_for_export()
 
                 page_rect = painter.viewport()
-                header_height = max(46, int((export_settings["pdf_font_size"] or 12) * (export_settings["pdf_line_spacing"] or 1.5) * 2.2))
-                title_rect = QRect(0, 0, page_rect.width(), header_height)
-                painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, export_settings["pdf_title"] or "Log Documentation")
+                header_height = 0
+                image_rect = QRect(0, 0, page_rect.width(), page_rect.height())
+                if not is_infinite_page:
+                    header_height = max(46, int((export_settings["pdf_font_size"] or 12) * (export_settings["pdf_line_spacing"] or 1.5) * 2.2))
+                    title_lines = []
+                    if flat_page_index == selected_pages[0]:
+                        title_lines.append(export_settings["pdf_title"] or "Log Documentation")
+                    page_title = page_state.get("name", f"Page {page_index + 1}")
+                    if page_title:
+                        title_lines.append(page_title)
+                    if title_lines:
+                        title_rect = QRect(0, 0, page_rect.width(), header_height)
+                        painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, "\n".join(title_lines))
 
-                byline_parts = []
-                if export_settings["user_name"]:
-                    byline_parts.append(f"Name: {export_settings['user_name']}")
-                if export_settings["user_status"]:
-                    byline_parts.append(f"Status: {export_settings['user_status']}")
-                if byline_parts:
-                    painter.drawText(
-                        QRect(0, header_height - 22, page_rect.width() - 4, 20),
-                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                        " | ".join(byline_parts),
-                    )
-
-                image_rect = QRect(0, header_height, page_rect.width(), page_rect.height() - header_height)
+                    byline_parts = []
+                    if export_settings["user_name"]:
+                        byline_parts.append(f"Name: {export_settings['user_name']}")
+                    if export_settings["user_status"]:
+                        byline_parts.append(f"Status: {export_settings['user_status']}")
+                    if byline_parts:
+                        painter.drawText(
+                            QRect(0, max(header_height - 22, 0), page_rect.width() - 4, 20),
+                            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                            " | ".join(byline_parts),
+                        )
+                    image_rect = QRect(0, header_height, page_rect.width(), page_rect.height() - header_height)
                 scaled_size = page_pixmap.size()
                 scaled_size.scale(image_rect.size(), Qt.AspectRatioMode.KeepAspectRatio)
                 target_rect = QRect(
@@ -12697,6 +12994,7 @@ class UIMode(QWidget):
     def _snapshot_current_page(self):
         da = self.drawing_area
         state = self._page_states[self._current_page_idx]
+        state["canvas_size"] = QSize(da.a4_size)
 
         def _copy_shapes(shapes):
             return [da._copy_single_shape(s) for s in shapes]
@@ -12737,6 +13035,7 @@ class UIMode(QWidget):
     def _restore_page(self, idx: int):
         da = self.drawing_area
         state = self._page_states[idx]
+        da.set_canvas_size(state.get("canvas_size", da.a4_size))
 
         def _copy_shapes(shapes):
             return [da._copy_single_shape(s) for s in shapes]
@@ -12772,6 +13071,8 @@ class UIMode(QWidget):
         da.update()
 
     def _add_space(self):
+        if getattr(self, "infinite_page_setup", False):
+            return
         space_num = len(self._spaces) + 1
         default_name = f"Space {space_num}"
         accent = self.current_shape_color.name()
@@ -12861,13 +13162,19 @@ class UIMode(QWidget):
         # Original _add_space logic continues here, using space_name instead of default_name
         self._snapshot_current_page()
         self._spaces[self._current_space_idx]["current_page"] = self._current_page_idx
-        em = QPixmap(self.drawing_area.a4_size)
+        page_size_key = getattr(self, "page_setup", {}).get("page_size", DEFAULT_PAGE_SIZE_KEY)
+        page_orientation = getattr(self, "page_setup", {}).get("orientation", DEFAULT_PAGE_ORIENTATION)
+        page_canvas_size = _canvas_size_for_setup(page_size_key, page_orientation) or QSize(self.drawing_area.a4_size)
+        em = QPixmap(page_canvas_size)
         em.fill(Qt.GlobalColor.transparent)
         self._spaces.append({
             "name": space_name,   # <-- user-provided name
             "current_page": 0,
             "pages": [{
                 "name": "Page 1",
+                "canvas_size": QSize(page_canvas_size),
+                "page_size": page_size_key,
+                "page_orientation": page_orientation,
                 "shapes": [],
                 "eraser_mask": em,
                 "eraser_strokes": [],
@@ -12899,6 +13206,8 @@ class UIMode(QWidget):
         self._sync_page_ui()
 
     def _add_page(self):
+        if getattr(self, "infinite_page_setup", False):
+            return
         # Add a new page to the current space and switch to it.
         self._snapshot_current_page()
         cur_pages = self._spaces[self._current_space_idx]["pages"]
@@ -12908,10 +13217,16 @@ class UIMode(QWidget):
             if name.startswith("Page ") and name[5:].isdigit():
                 existing_nums.append(int(name[5:]))
         page_num = max(existing_nums, default=0) + 1
-        em = QPixmap(self.drawing_area.a4_size)
+        page_size_key = getattr(self, "page_setup", {}).get("page_size", DEFAULT_PAGE_SIZE_KEY)
+        page_orientation = getattr(self, "page_setup", {}).get("orientation", DEFAULT_PAGE_ORIENTATION)
+        page_canvas_size = _canvas_size_for_setup(page_size_key, page_orientation) or QSize(self.drawing_area.a4_size)
+        em = QPixmap(page_canvas_size)
         em.fill(Qt.GlobalColor.transparent)
         cur_pages.append({
             "name": f"Page {page_num}",
+            "canvas_size": QSize(page_canvas_size),
+            "page_size": page_size_key,
+            "page_orientation": page_orientation,
             "shapes": [],
             "eraser_mask": em,
             "eraser_strokes": [],
@@ -12946,6 +13261,10 @@ class UIMode(QWidget):
             self._select_page(page_idx)
 
     def _sync_page_ui(self):
+        if getattr(self, "infinite_page_setup", False):
+            if self._infinite_canvas_overlay is not None:
+                self._infinite_canvas_overlay._reposition()
+            return
         # Refresh thumbnail for the currently active page before rendering the panel.
         snap = self._capture_drawing_area_snapshot()
         if snap:
@@ -13731,6 +14050,7 @@ class SettingsDialog(QDialog):
         self.setStyleSheet("background: transparent;")
         self._initial_name = getattr(self.parent(), "user_name", "") if self.parent() is not None else ""
         self._initial_status = getattr(self.parent(), "user_status", "") if self.parent() is not None else ""
+        self._initial_page_setup = dict(getattr(self.parent(), "page_setup", _normalize_page_setup())) if self.parent() is not None else _normalize_page_setup()
         
         # Background widget (positioned to the right of tabs)
         self.bg_widget = QWidget(self)
@@ -13806,9 +14126,6 @@ class SettingsDialog(QDialog):
         about_widget = self._create_about_tab()
         self.stacked_widget.addWidget(about_widget)
         
-        # Set first tab as active (after stacked_widget is created)
-        self._switch_tab("Profile")
-        
         self.save_btn = QPushButton("Save")
         self.save_btn.setGeometry(
             self.FRAME_X + self.FRAME_WIDTH - 184,
@@ -13831,9 +14148,12 @@ class SettingsDialog(QDialog):
             }
         """)
         self.save_btn.setCursor(_pointing_cursor())
-        self.save_btn.clicked.connect(self._save_profile_changes)
+        self.save_btn.clicked.connect(self._save_current_tab_changes)
         self.save_btn.hide()
         self.save_btn.raise_()
+
+        # Set first tab as active after the save button exists.
+        self._switch_tab("Profile")
 
         # Close button at bottom right (inside the frame)
         close_btn = QPushButton("Close")
@@ -13865,7 +14185,27 @@ class SettingsDialog(QDialog):
         name = self.name_input.text().strip() if hasattr(self, "name_input") else ""
         status = self.status_input.text().strip() if hasattr(self, "status_input") else ""
         changed = name != self._initial_name or status != self._initial_status
-        self.save_btn.setVisible(changed)
+        if self.current_tab == "Profile":
+            self.save_btn.setVisible(changed)
+
+    def _interface_changed(self):
+        if not hasattr(self, "page_size_input"):
+            return
+        current = self._current_page_setup_values()
+        changed = current != self._initial_page_setup
+        if self.current_tab == "Interface":
+            self.save_btn.setVisible(changed)
+        self.apply_on_input.setEnabled(current["page_size"] != INFINITE_PAGE_SIZE_KEY)
+
+    def _current_page_setup_values(self):
+        values = _normalize_page_setup(
+            self.page_size_input.currentData(),
+            self.orientation_input.currentText(),
+            self.apply_on_input.currentText(),
+        )
+        if values["page_size"] == INFINITE_PAGE_SIZE_KEY:
+            values["apply_on"] = DEFAULT_PAGE_APPLY_ON
+        return values
 
     def _save_profile_changes(self):
         parent = self.parent()
@@ -13878,6 +14218,53 @@ class SettingsDialog(QDialog):
         self._initial_name = parent.user_name
         self._initial_status = parent.user_status
         self._profile_changed()
+
+    def _save_interface_changes(self):
+        parent = self.parent()
+        if parent is None:
+            return
+        if getattr(parent, "infinite_page_setup", False):
+            self.save_btn.hide()
+            return
+        page_setup = self._current_page_setup_values()
+        parent.page_setup = dict(page_setup)
+        if page_setup["page_size"] != INFINITE_PAGE_SIZE_KEY and page_setup["apply_on"] == "All Pages":
+            page_canvas_size = _canvas_size_for_setup(page_setup["page_size"], page_setup["orientation"])
+            for space in parent._spaces:
+                for page in space.get("pages", []):
+                    page["page_size"] = page_setup["page_size"]
+                    page["page_orientation"] = page_setup["orientation"]
+                    if page_canvas_size is not None:
+                        page["canvas_size"] = QSize(page_canvas_size)
+                        new_mask = QPixmap(page_canvas_size)
+                        new_mask.fill(Qt.GlobalColor.transparent)
+                        painter = QPainter(new_mask)
+                        painter.drawPixmap(0, 0, page["eraser_mask"])
+                        painter.end()
+                        page["eraser_mask"] = new_mask
+        parent.save_project_config()
+        parent._restore_page(parent._current_page_idx)
+        parent._sync_page_ui()
+        self._initial_page_setup = dict(page_setup)
+        self._interface_changed()
+
+    def _show_interface_settings_home(self):
+        if hasattr(self, "interface_stack"):
+            self.interface_stack.setCurrentIndex(0)
+        if self.current_tab == "Interface":
+            self._interface_changed()
+
+    def _show_page_setup_settings(self):
+        if hasattr(self, "interface_stack"):
+            self.interface_stack.setCurrentIndex(1)
+        if self.current_tab == "Interface":
+            self._interface_changed()
+
+    def _save_current_tab_changes(self):
+        if self.current_tab == "Profile":
+            self._save_profile_changes()
+        elif self.current_tab == "Interface":
+            self._save_interface_changes()
     
     def _switch_tab(self, tab_name):
         """Switch between tabs with visual feedback"""
@@ -13927,6 +14314,12 @@ class SettingsDialog(QDialog):
         # Switch stacked widget page
         idx = self.tabs.index(tab_name)
         self.stacked_widget.setCurrentIndex(idx)
+        if tab_name == "Profile":
+            self._profile_changed()
+        elif tab_name == "Interface":
+            self._interface_changed()
+        else:
+            self.save_btn.hide()
     
     def _create_profile_tab(self):
         """Create Profile tab content"""
@@ -13991,32 +14384,59 @@ class SettingsDialog(QDialog):
         """Create Interface tab content"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
-        
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.interface_stack = QStackedWidget()
+        self.interface_stack.setStyleSheet("background: white; border: none;")
+
+        home_page = QWidget()
+        home_layout = QVBoxLayout(home_page)
+        home_layout.setContentsMargins(12, 12, 12, 12)
+        home_layout.setSpacing(12)
+
+        page_setup_click = None if getattr(self.parent(), "infinite_page_setup", False) else self._show_page_setup_settings
         settings = [
-            ("Page Setup", "Configure document layout"),
-            ("Snap to grid", "Align shapes to grid"),
-            ("Grid Guidelines", "Display grid lines"),
-            ("Auto-save timer", "Sets auto-save frequency"),
-            ("Encrypt Project", "Enable project encryption"),
-            ("Dark Mode", "Use dark theme"),
+            ("Page Setup", "Managed by wizard in infinite mode" if getattr(self.parent(), "infinite_page_setup", False) else "Configure document layout", page_setup_click),
+            ("Snap to grid", "Align shapes to grid", None),
+            ("Grid Guidelines", "Display grid lines", None),
+            ("Auto-save timer", "Sets auto-save frequency", None),
+            ("Encrypt Project", "Enable project encryption", None),
+            ("Dark Mode", "Use dark theme", None),
         ]
-        
-        for setting_name, setting_desc in settings:
-            item_layout = QHBoxLayout()
-            item_layout.setSpacing(8)
-            
+
+        for setting_name, setting_desc, on_click in settings:
+            row_btn = QPushButton()
+            row_btn.setCursor(_pointing_cursor())
+            row_btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    border: none;
+                    text-align: left;
+                    padding: 8px 2px;
+                }
+                QPushButton:hover {
+                    background: #f7f7f7;
+                    border-radius: 6px;
+                }
+            """)
+            row_layout = QHBoxLayout(row_btn)
+            row_layout.setContentsMargins(8, 2, 8, 2)
+            row_layout.setSpacing(8)
+
             label = QLabel(setting_name)
             label.setStyleSheet("font-weight: bold; color: #222;")
-            item_layout.addWidget(label)
-            
             desc = QLabel(setting_desc)
             desc.setStyleSheet("color: #999; font-size: 9pt;")
-            item_layout.addWidget(desc)
-            
-            # Checkbox or toggle (you can customize this)
-            if setting_name in ["Dark Mode", "Snap to grid", "Grid Guidelines", "Encrypt Project"]:
+            row_layout.addWidget(label)
+            row_layout.addWidget(desc)
+            row_layout.addStretch()
+
+            if setting_name == "Page Setup" and on_click is None:
+                row_btn.setEnabled(False)
+                label.setStyleSheet("font-weight: bold; color: #999;")
+                desc.setStyleSheet("color: #bbb; font-size: 9pt;")
+            elif on_click is None:
                 toggle = QPushButton()
                 toggle.setFixedSize(32, 20)
                 toggle.setCheckable(True)
@@ -14030,14 +14450,122 @@ class SettingsDialog(QDialog):
                         background: #ff6600;
                     }
                 """)
-                item_layout.addStretch()
-                item_layout.addWidget(toggle)
+                toggle.setCursor(_pointing_cursor())
+                row_layout.addWidget(toggle)
+                row_btn.setEnabled(False)
             else:
-                item_layout.addStretch()
-            
-            layout.addLayout(item_layout)
-        
-        layout.addStretch()
+                arrow = QLabel(">")
+                arrow.setStyleSheet("color: #999; font-size: 11pt; font-weight: bold;")
+                row_layout.addWidget(arrow)
+                row_btn.clicked.connect(on_click)
+
+            home_layout.addWidget(row_btn)
+
+        home_layout.addStretch()
+        self.interface_stack.addWidget(home_page)
+
+        page_setup_page = QWidget()
+        page_setup_outer = QVBoxLayout(page_setup_page)
+        page_setup_outer.setContentsMargins(0, 0, 0, 0)
+        page_setup_outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        scroll_content = QWidget()
+        page_setup_layout = QVBoxLayout(scroll_content)
+        page_setup_layout.setContentsMargins(12, 12, 12, 12)
+        page_setup_layout.setSpacing(12)
+
+        back_btn = QPushButton("<")
+        back_btn.setFixedSize(28, 28)
+        back_btn.setCursor(_pointing_cursor())
+        back_btn.setStyleSheet("""
+            QPushButton {
+                background: #f3f3f3;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                color: #222;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #ececec;
+            }
+        """)
+        back_btn.clicked.connect(self._show_interface_settings_home)
+        page_setup_layout.addWidget(back_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        intro = QLabel("Page Setup")
+        intro.setStyleSheet("font-size: 12pt; font-weight: bold; color: #222;")
+        page_setup_layout.addWidget(intro)
+
+        subtitle = QLabel("Settings > Interface > Page Setup")
+        subtitle.setStyleSheet("color: #999; font-size: 9pt;")
+        page_setup_layout.addWidget(subtitle)
+
+        page_setup = dict(self._initial_page_setup)
+        field_specs = [
+            ("Page Size", "page_size_input"),
+            ("Orientation", "orientation_input"),
+            ("Apply On", "apply_on_input"),
+        ]
+        for label_text, attr_name in field_specs:
+            label = QLabel(label_text)
+            label.setStyleSheet("font-weight: bold; color: #222; margin-top: 10px;")
+            page_setup_layout.addWidget(label)
+
+            combo = QComboBox()
+            combo.setStyleSheet("""
+                QComboBox {
+                    padding: 8px;
+                    border: 1px solid #ddd;
+                    border-radius: 6px;
+                    font-size: 10pt;
+                    background: white;
+                    min-height: 20px;
+                }
+            """)
+            setattr(self, attr_name, combo)
+            page_setup_layout.addWidget(combo)
+
+        for key in PAGE_SETUP_CHOICES:
+            self.page_size_input.addItem(key, key)
+        self.page_size_input.setCurrentIndex(max(0, self.page_size_input.findData(page_setup["page_size"])))
+
+        self.orientation_input.addItems(["Landscape", "Portrait"])
+        self.orientation_input.setCurrentText(page_setup["orientation"])
+
+        self.apply_on_input.addItems(["New Page", "All Pages"])
+        self.apply_on_input.setCurrentText(page_setup["apply_on"])
+
+        note = QLabel("Infinite disables Apply On and exports as bitmap-only pages without document/page header text.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #777; font-size: 9pt; margin-top: 8px;")
+        page_setup_layout.addWidget(note)
+        page_setup_layout.addStretch()
+
+        scroll.setWidget(scroll_content)
+        custom_vsb = VerticalScrollBar()
+        custom_vsb.connect_to(scroll.verticalScrollBar())
+
+        scroll_row = QHBoxLayout()
+        scroll_row.setContentsMargins(0, 0, 0, 0)
+        scroll_row.setSpacing(0)
+        scroll_row.addWidget(scroll)
+        scroll_row.addWidget(custom_vsb)
+        page_setup_outer.addLayout(scroll_row)
+
+        self.interface_stack.addWidget(page_setup_page)
+        layout.addWidget(self.interface_stack)
+
+        self.page_size_input.currentIndexChanged.connect(self._interface_changed)
+        self.orientation_input.currentIndexChanged.connect(self._interface_changed)
+        self.apply_on_input.currentIndexChanged.connect(self._interface_changed)
+        self._show_interface_settings_home()
+        self._interface_changed()
         return widget
     
     def _create_about_tab(self):

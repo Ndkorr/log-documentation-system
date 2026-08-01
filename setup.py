@@ -530,6 +530,9 @@ class WelcomeWindow(QMainWindow):
         pdf_line_spacing = 1.5
         pdf_font = "Arial"
         custom_dictionary = ""
+        page_size = "A4"
+        page_orientation = "Landscape"
+        page_apply_on = "New Page"
         if os.path.exists(config_path):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
@@ -541,8 +544,14 @@ class WelcomeWindow(QMainWindow):
                     pdf_line_spacing = config.get("pdf_line_spacing", 1.5)
                     pdf_font = config.get("pdf_font", "Arial")
                     custom_dictionary = config.get("custom_dictionary", "")
+                    infinite_page_setup = config.get("infinite_page_setup", False)
+                    page_size = config.get("page_size", config.get("size", "A4"))
+                    page_orientation = config.get("page_orientation", config.get("orientation", "Landscape"))
+                    page_apply_on = config.get("page_apply_on", config.get("apply_on", "New Page"))
             except Exception:
                 pass
+        else:
+            infinite_page_setup = False
         return {
             "file_path": file_path,
             "log_type": log_mode,
@@ -553,6 +562,10 @@ class WelcomeWindow(QMainWindow):
             "pdf_line_spacing": pdf_line_spacing,
             "pdf_font": pdf_font,
             "custom_dictionary": custom_dictionary,
+            "infinite_page_setup": infinite_page_setup,
+            "page_size": page_size,
+            "page_orientation": page_orientation,
+            "page_apply_on": page_apply_on,
         }
 
     def open_documentations(self):

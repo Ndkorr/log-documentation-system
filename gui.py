@@ -348,7 +348,7 @@ class AnimatedClickableLabel4(QLabel):
             """)
 
 class AnimatedClickableLabel5(QLabel):
-    clicked = pyqtSignal()
+    clicked = pyqtSignal(object)
     
     def __init__(self, text="", parent=None, wizard=None):
         super().__init__(text, parent)
@@ -379,8 +379,7 @@ class AnimatedClickableLabel5(QLabel):
         
     def mousePressEvent(self, ev):
         if ev is not None and ev.button() == Qt.MouseButton.LeftButton:
-            if self.wizard:  # Use the wizard reference to call the method
-                self.wizard.option_clicked5(self)
+            self.clicked.emit(self)
         
     def enterEvent(self, event):
         self.anim.stop()
@@ -660,6 +659,41 @@ class SetupWizard(QDialog):
             self.option_layouts4.append(option_layout4)
             self.options4.append(option_label4)
 
+        instruction_label6 = QLabel("Do you want to use infinite page setup?")
+        instruction_label6.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            font-family: Segoe UI;
+            margin-top: 0px;
+            margin-left: 25px;
+        """)
+        choices_layout.addWidget(instruction_label6)
+
+        self.option_layouts6 = []
+        self.options6 = []
+        option_texts6 = [
+            "Yes",
+            "No - Continue with default"
+        ]
+        for text in option_texts6:
+            option_layout6 = QVBoxLayout()
+            option_layout6.setSpacing(5)
+
+            option_label6 = AnimatedClickableLabel5(text, self, wizard=self)
+            option_label6.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            option_label6.clicked.connect(self.option_clicked6)
+            option_layout6.addWidget(option_label6)
+            option_label6.setVisible(False)
+            option_label6.setEnabled(False)
+
+            choices_layout.addLayout(option_layout6)
+            self.option_layouts6.append(option_layout6)
+            self.options6.append(option_label6)
+        self.infinite_choice_widget = instruction_label6
+        instruction_label6.setVisible(False)
+        instruction_label6.setEnabled(False)
+        self._refresh_infinite_page_choice()
+
         choices_layout.addStretch()
         choices_scroll_area.setWidget(choices_widget)
         page2_layout.addWidget(choices_scroll_area)
@@ -742,7 +776,7 @@ class SetupWizard(QDialog):
 
             # Replace OptionLabel with AnimatedClickableLabel2
             option_label5 = AnimatedClickableLabel5(text, self, wizard=self)
-            option_label5.clicked.connect(lambda text=text: self.option_clicked5(text))
+            option_label5.clicked.connect(self.option_clicked5)
             option_layout5.addWidget(option_label5)
 
             page5_layout.addLayout(option_layout5)
@@ -858,6 +892,40 @@ class SetupWizard(QDialog):
             {background}
         """
 
+    def _clear_group_selection(self, options, layouts, keep=None):
+        for option, layout in zip(options, layouts):
+            if option is keep:
+                option.setSelected(True)
+                if layout.count() > 1:
+                    subtext_widget = layout.itemAt(1).widget()
+                    if subtext_widget is not None:
+                        layout.removeWidget(subtext_widget)
+                        subtext_widget.deleteLater()
+                continue
+            option.setSelected(False)
+            if layout.count() > 1:
+                subtext_widget = layout.itemAt(1).widget()
+                if subtext_widget is not None:
+                    layout.removeWidget(subtext_widget)
+                    subtext_widget.deleteLater()
+
+    def _refresh_infinite_page_choice(self):
+        is_uiux = getattr(self, "log_type", None) == "UIMode"
+        if hasattr(self, "infinite_choice_widget"):
+            self.infinite_choice_widget.setVisible(is_uiux)
+            self.infinite_choice_widget.setEnabled(is_uiux)
+        if hasattr(self, "options6"):
+            for option, layout in zip(self.options6, self.option_layouts6):
+                option.setVisible(is_uiux)
+                option.setEnabled(is_uiux)
+                if not is_uiux:
+                    option.setSelected(False)
+                    if layout.count() > 1:
+                        subtext_widget = layout.itemAt(1).widget()
+                        if subtext_widget is not None:
+                            layout.removeWidget(subtext_widget)
+                            subtext_widget.deleteLater()
+
     def _all_choice_options(self):
         return (
             getattr(self, "options", [])
@@ -865,12 +933,12 @@ class SetupWizard(QDialog):
             + getattr(self, "options3", [])
             + getattr(self, "options4", [])
             + getattr(self, "options5", [])
+            + getattr(self, "options6", [])
         )
 
     def _apply_animated_accent_styles(self, gradient=None):
         for option in self._all_choice_options():
-            if option.property("selected"):
-                option.setStyleSheet(self._choice_label_style(selected=True))
+            option.setStyleSheet(self._choice_label_style(selected=bool(option.property("selected"))))
 
         if hasattr(self, "next_button"):
             self.next_button.setStyleSheet(
@@ -921,30 +989,20 @@ class SetupWizard(QDialog):
             "custom_dictionary": (
                 self.dictionary_box.toPlainText().strip() if self.dictionary_box else ""
             ),
+            "infinite_page_setup": self._option_selected(self.options6, "Yes") if hasattr(self, "options6") else False,
             "log_type": getattr(self, "log_type", "General"),
         }
 
     def option_clicked(self, clicked_option):
-        # Unselect all options and remove subtext labels.
-        for option, layout in zip(self.options, self.option_layouts):
-            option.setSelected(False)
-            if layout.count() > 1:  # Remove subtext if it exists
-                subtext_label = layout.itemAt(1).widget()
-                layout.removeWidget(subtext_label)
-                subtext_label.deleteLater()
-
-        # Select the clicked option.
-        clicked_option.setSelected(True)
+        self._clear_group_selection(self.options, self.option_layouts, clicked_option)
         self.selected_option = clicked_option.text()
-        # Set log_type based on selection
         if self.selected_option == "Bugs and errors":
             self.log_type = "Debugging"
         elif self.selected_option == "UI/UX Changes":
             self.log_type = "UIMode"
         else:
             self.log_type = "General"
-
-        # Add the subtext label below the clicked option.
+        self._refresh_infinite_page_choice()
         self.add_subtext(clicked_option)
 
     def add_subtext(self, clicked_option):
@@ -1050,56 +1108,14 @@ class SetupWizard(QDialog):
                 break
 
     def option_clicked2(self, clicked_option):
-        # If "Proceed on default" is clicked, clear all selections.
+        self._clear_group_selection(self.options2, self.option_layouts2, clicked_option)
+        self.name_text_box = None
+        self.title_text_box = None
+        self.selected_option = clicked_option.text()
         if clicked_option.text() == "Proceed on default":
-            for option, layout in zip(self.options2, self.option_layouts2):
-                option.setSelected(False)
-                if layout.count() > 1:  # Remove subtext if it exists
-                    subtext_label = layout.itemAt(1).widget()
-                    layout.removeWidget(subtext_label)
-                    subtext_label.deleteLater()
-
-            # Clear references to text boxes
             self.name_text_box = None
-            self.title_text_box = None       
-            # Select only "Proceed on default".
-            clicked_option.setSelected(True)
-            self.selected_option = clicked_option.text()
-            self.add_subtext2(clicked_option)
-            self.validate_required_choices()
-            return
-
-        # If any other option is clicked, toggle its selection.
-        if clicked_option.property("selected"):
-            # Deselect the option and remove its subtext.
-            clicked_option.setSelected(False)
-            for option, layout in zip(self.options2, self.option_layouts2):
-                if option == clicked_option and layout.count() > 1:
-                    subtext_label = layout.itemAt(1).widget()
-                    layout.removeWidget(subtext_label)
-                    subtext_label.deleteLater()
-                    # Clear the reference if this was the text size or line spacing box
-                    if option.text() == "Set my name to":
-                        self.name_text_box = None
-                    elif option.text() == "Set document title to":
-                        self.title_text_box = None
-                    break
-        else:
-            # Select the option and add its subtext.
-            clicked_option.setSelected(True)
-            self.add_subtext2(clicked_option)
-
-        # Ensure "Proceed on default" is deselected if any other option is selected.
-        for option, layout in zip(self.options2, self.option_layouts2):
-            if option.text() == "Proceed on default":
-                if option.property("selected"):
-                    # Remove subtext if "Proceed on default" is deselected.
-                    if layout.count() > 1:
-                        subtext_label = layout.itemAt(1).widget()
-                        layout.removeWidget(subtext_label)
-                        subtext_label.deleteLater()
-                option.setSelected(False)
-                break
+            self.title_text_box = None
+        self.add_subtext2(clicked_option)
         self.validate_both_inputs()
 
     def add_subtext2(self, clicked_option):
@@ -1195,57 +1211,12 @@ class SetupWizard(QDialog):
                 break
 
     def option_clicked3(self, clicked_option):
-        # If "Proceed on default" is clicked, clear all selections.
-        if clicked_option.text() == "Proceed on default":
-            for option, layout in zip(self.options3, self.option_layouts3):
-                option.setSelected(False)
-                if layout.count() > 1:  # Remove subtext if it exists
-                    subtext_label = layout.itemAt(1).widget()
-                    layout.removeWidget(subtext_label)
-                    subtext_label.deleteLater()
-
-            # Clear references to text boxes
-            self.text_size_box = None
-            self.line_spacing_box = None        
-            # Select only "Proceed on default".
-            clicked_option.setSelected(True)
-            self.selected_option = clicked_option.text()
-            self.add_subtext3(clicked_option)
-            self.validate_required_choices()
-            return
-
-        # If any other option is clicked, toggle its selection.
-        if clicked_option.property("selected"):
-            # Deselect the option and remove its subtext.
-            clicked_option.setSelected(False)
-            for option, layout in zip(self.options3, self.option_layouts3):
-                if option == clicked_option and layout.count() > 1:
-                    subtext_label = layout.itemAt(1).widget()
-                    layout.removeWidget(subtext_label)
-                    subtext_label.deleteLater()
-                    # Clear the reference if this was the text size or line spacing box
-                    if option.text() == "Set the font size to":
-                        self.text_size_box = None
-                    elif option.text() == "Set the line spacing to":
-                        self.line_spacing_box = None
-                    break
-            self.validate_both_inputs2()
-        else:
-            # Select the option and add its subtext.
-            clicked_option.setSelected(True)
-            self.add_subtext3(clicked_option)
-
-        # Ensure "Proceed on default" is deselected if any other option is selected.
-        for option, layout in zip(self.options3, self.option_layouts3):
-            if option.text() == "Proceed on default":
-                if option.property("selected"):
-                    # Remove subtext if "Proceed on default" is deselected.
-                    if layout.count() > 1:
-                        subtext_label = layout.itemAt(1).widget()
-                        layout.removeWidget(subtext_label)
-                        subtext_label.deleteLater()
-                option.setSelected(False)
-                break
+        self._clear_group_selection(self.options3, self.option_layouts3, clicked_option)
+        self.text_size_box = None
+        self.line_spacing_box = None
+        self.selected_option = clicked_option.text()
+        self.add_subtext3(clicked_option)
+        self.validate_both_inputs2()
 
     def add_subtext3(self, clicked_option):
         subtext_map = {
@@ -1339,48 +1310,11 @@ class SetupWizard(QDialog):
                 break
 
     def option_clicked4(self, clicked_option):
-        # If "Proceed on default" is clicked, clear all selections and text box.
-        if clicked_option.text() == "Proceed on default":
-            for option, layout in zip(self.options4, self.option_layouts4):
-                option.setSelected(False)
-                if layout.count() > 1:
-                    subtext_label = layout.itemAt(1).widget()
-                    layout.removeWidget(subtext_label)
-                    subtext_label.deleteLater()
-            self.font_combo_box = None
-
-            clicked_option.setSelected(True)
-            self.add_subtext4(clicked_option)
-            self.selected_option = clicked_option.text()
-            self.validate_required_choices()
-            return
-
-        # If the editable option is clicked
-        if clicked_option.property("selected"):
-            # Deselect and remove subtext
-            clicked_option.setSelected(False)
-            for option, layout in zip(self.options4, self.option_layouts4):
-                if option == clicked_option and layout.count() > 1:
-                    subtext_label = layout.itemAt(1).widget()
-                    layout.removeWidget(subtext_label)
-                    subtext_label.deleteLater()
-                    self.font_combo_box = None
-                    break
-            self.validate_required_choices()
-        else:
-            # Select and add subtext (text box)
-            clicked_option.setSelected(True)
-            self.add_subtext4(clicked_option)
-            # Deselect "Proceed on default"
-            for option, layout in zip(self.options4, self.option_layouts4):
-                if option.text() == "Proceed on default":
-                    if option.property("selected"):
-                        if layout.count() > 1:
-                            subtext_label = layout.itemAt(1).widget()
-                            layout.removeWidget(subtext_label)
-                            subtext_label.deleteLater()
-                    option.setSelected(False)
-                    break
+        self._clear_group_selection(self.options4, self.option_layouts4, clicked_option)
+        self.font_combo_box = None
+        self.selected_option = clicked_option.text()
+        self.add_subtext4(clicked_option)
+        self.validate_required_choices()
 
     def add_subtext4(self, clicked_option):
         if clicked_option.text() == "Proceed on default":
@@ -1464,54 +1398,48 @@ class SetupWizard(QDialog):
                 subtext_label.setVisible(True)
                 break
 
-    def option_clicked5(self, clicked_option):
-        # If "Proceed on default" is clicked, clear all selections and text box.
-        if clicked_option.text() == "No, Use the default":
-            for option, layout in zip(self.options5, self.option_layouts5):
-                option.setSelected(False)
-                if layout.count() > 1:
-                    subtext_label = layout.itemAt(1).widget()
-                    layout.removeWidget(subtext_label)
-                    subtext_label.deleteLater()
-            self.dictionary_box = None
-            clicked_option.setSelected(True)
-            self.add_subtext5(clicked_option)
-            self.validate_font_input2()
-            self.next_button5.setEnabled(True)
-            self.next_button5.setStyleSheet(
-                self._animated_button_style(padding="6px 15px", enabled=True)
-            )
+    def option_clicked6(self, clicked_option):
+        if getattr(self, "log_type", None) != "UIMode":
             return
+        self._clear_group_selection(self.options6, self.option_layouts6, clicked_option)
+        subtext_map = {
+            "Yes": "This will disable pages and spaces and use one resizable infinite canvas.",
+            "No - Continue with default": "Continue with the default paged setup.",
+        }
+        subtext_label = QLabel(subtext_map.get(clicked_option.text(), ""))
+        subtext_label.setWordWrap(True)
+        subtext_label.setStyleSheet("""
+            font-size: 14px;
+            font-style: italic;
+            margin-left: 25px;
+            margin-right: 105px;
+            color: #555555;
+        """)
 
-        # If the editable option is clicked
-        if clicked_option.property("selected"):
-            # Deselect and remove subtext
-            clicked_option.setSelected(False)
-            for option, layout in zip(self.options5, self.option_layouts5):
-                if option == clicked_option and layout.count() > 1:
-                    subtext_label = layout.itemAt(1).widget()
-                    layout.removeWidget(subtext_label)
-                    subtext_label.deleteLater()
-                    self.dictionary_box = None
-                    break
-            self.next_button5.setEnabled(False)
-            self.next_button5.setStyleSheet(
-                self._animated_button_style(padding="6px 15px", enabled=False)
-            )
-        else:
-            # Select and add subtext (text box)
-            clicked_option.setSelected(True)
-            self.add_subtext5(clicked_option)
-            # Deselect "Proceed on default"
-            for option, layout in zip(self.options5, self.option_layouts5):
-                if option.text() == "No, Use the default":
-                    if option.property("selected"):
-                        if layout.count() > 1:
-                            subtext_label = layout.itemAt(1).widget()
-                            layout.removeWidget(subtext_label)
-                            subtext_label.deleteLater()
-                    option.setSelected(False)
-                    break
+        opacity_effect = QGraphicsOpacityEffect(subtext_label)
+        subtext_label.setGraphicsEffect(opacity_effect)
+        opacity_effect.setOpacity(0)
+        fade_anim = QPropertyAnimation(opacity_effect, b"opacity")
+        fade_anim.setDuration(500)
+        fade_anim.setStartValue(0)
+        fade_anim.setEndValue(1)
+        fade_anim.start()
+        if not hasattr(self, "_animations"):
+            self._animations = {}
+        self._animations[subtext_label] = fade_anim
+
+        for option, layout in zip(self.options6, self.option_layouts6):
+            if option == clicked_option:
+                layout.addWidget(subtext_label)
+                subtext_label.setVisible(True)
+                break
+        self.validate_required_choices()
+
+    def option_clicked5(self, clicked_option):
+        self._clear_group_selection(self.options5, self.option_layouts5, clicked_option)
+        self.dictionary_box = None
+        self.add_subtext5(clicked_option)
+        self.validate_font_input2()
 
     def add_subtext5(self, clicked_option):
         if clicked_option.text() == "No, Use the default":
@@ -1637,11 +1565,20 @@ class SetupWizard(QDialog):
             return True
         return self._option_selected(self.options4, "Set font to:")
 
+    def _infinite_page_choice_valid(self):
+        if getattr(self, "log_type", None) != "UIMode":
+            return True
+        return (
+            self._option_selected(self.options6, "Yes")
+            or self._option_selected(self.options6, "No - Continue with default")
+        )
+
     def validate_required_choices(self):
         enabled = (
             self._lds_choices_valid()
             and self._export_size_choices_valid()
             and self._export_font_choices_valid()
+            and self._infinite_page_choice_valid()
         )
         self._set_merged_next_enabled(enabled)
         return enabled

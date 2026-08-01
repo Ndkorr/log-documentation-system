@@ -208,6 +208,7 @@ class ChangelogPage(QWidget):
         # Add changelog entries here
         # Latest version should be first in the list for easier management
         self.changelog_entries = [
+            {"version": "1.0.47", "date": "August, 02, 2026", "features": ["Page Setup, Export and Wizard setup.", "Infinite page setup is added on wizard for UIMode only this will disable page tab and page setup settings", "Edge handle to resize the drawing area is not implemented yet", "Export as Bitmap on infinite page is not implemented yet"]},
             {"version": "1.0.46", "date": "August, 01, 2026", "features": ["Dictionary icon and ldsu file type open configuration fixed"]},
             {"version": "1.0.45", "date": "July, 31, 2026", "features": ["Connect LDSU on wizard. Configs are now initialized"]},
             {"version": "1.0.44", "date": "July, 28, 2026", "features": ["Update setup wizard"]},
@@ -702,6 +703,8 @@ class IdeaPage(QWidget):
         
         # Idea data structure with stable ids so saved status remains correct when items are added.
         self.ideas = [
+            {"id": "idea-ui-mode-edgehandle", "date": "August 02, 2026", "description": "Edge handle resize"},
+            {"id": "idea-ui-mode-exportasbitmap", "date": "August 02, 2026", "description": "Export as bitmap when page is infinite"},            
             {"id": "idea-ui-mode-connection", "date": "July 31, 2026", "description": "Connect other lds type on ui mode"},            
             {"id": "idea-dictionary", "date": "July 31, 2026", "description": "Connect dictionary on UIMode"},
             {"id": "idea-myratings-uidesign", "date": "July 27, 2026", "description": "UI Design for myRating/ldsr"},

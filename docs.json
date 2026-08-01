@@ -1,4 +1,8 @@
 {
+  "idea-ui-mode-edgehandle": "exclamation",
+  "idea-ui-mode-exportasbitmap": "exclamation",
+  "idea-ui-mode-connection": "check",
+  "idea-dictionary": "check",
   "idea-myratings-uidesign": "on",
   "idea-overall-encryption": "exclamation",
   "idea-general-mode-changes": "check",
