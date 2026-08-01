@@ -167,7 +167,7 @@ jobs:
           resources = app / "Contents" / "Resources"
           resources.mkdir(parents=True, exist_ok=True)
 
-          icon_names = ["lds", "ldsg", "ldsd", "ldsu"]
+          icon_names = ["lds", "ldsg", "ldsd", "ldsu", "dictv2"]
           for icon_name in icon_names:
               shutil.copyfile(Path("assets") / f"{icon_name}.icns", resources / f"{icon_name}.icns")
 
@@ -176,6 +176,7 @@ jobs:
               ("ldsg", "LDS General Log", "com.mathewsa.lds.ldsg", "ldsg.icns"),
               ("ldsd", "LDS Debugging Log", "com.mathewsa.lds.ldsd", "ldsd.icns"),
               ("ldsu", "LDS UI Mode File", "com.mathewsa.lds.ldsu", "ldsu.icns"),
+              ("ldsdict", "LDS Dictionary File", "com.mathewsa.lds.ldsdict", "dictv2.icns"),
           ]
 
           with info_path.open("rb") as fh:
@@ -217,6 +218,63 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           pyinstaller --noconfirm --windowed --name LogDocumentationSystem --add-data "assets${{ matrix.data_separator }}assets" --add-data "docs.json${{ matrix.data_separator }}." setup.py
+
+      - name: Register Linux file types
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shared-mime-info desktop-file-utils
+
+          mkdir -p "$HOME/.local/share/applications" "$HOME/.local/share/mime/packages" "$HOME/.local/share/icons/hicolor/256x256/apps"
+          cp assets/dictv2.png "$HOME/.local/share/icons/hicolor/256x256/apps/dictv2.png"
+          cp assets/lds.png "$HOME/.local/share/icons/hicolor/256x256/apps/lds.png"
+
+          cat > "$HOME/.local/share/applications/log-documentation-system.desktop" <<'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=Log Documentation System
+          Exec="/usr/bin/env" python3 -m setup %F
+          Icon=lds
+          Terminal=false
+          Categories=Utility;
+          MimeType=application/x-lds;application/x-ldsg;application/x-ldsd;application/x-ldsu;application/x-ldsdict;
+          DESKTOP
+
+          desktop-file-install --dir="$HOME/.local/share/applications" "$HOME/.local/share/applications/log-documentation-system.desktop"
+
+          cat > "$HOME/.local/share/mime/packages/lds.xml" <<'XML'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <mime-info xmlns="http://www.freedesktop.org/shared-mime-info">
+            <mime-type type="application/x-lds">
+              <comment>LDS Log File</comment>
+              <glob pattern="*.lds"/>
+              <icon name="lds"/>
+            </mime-type>
+            <mime-type type="application/x-ldsg">
+              <comment>LDS General Log</comment>
+              <glob pattern="*.ldsg"/>
+              <icon name="lds"/>
+            </mime-type>
+            <mime-type type="application/x-ldsd">
+              <comment>LDS Debugging Log</comment>
+              <glob pattern="*.ldsd"/>
+              <icon name="lds"/>
+            </mime-type>
+            <mime-type type="application/x-ldsu">
+              <comment>LDS UI Mode File</comment>
+              <glob pattern="*.ldsu"/>
+              <icon name="lds"/>
+            </mime-type>
+            <mime-type type="application/x-ldsdict">
+              <comment>LDS Dictionary File</comment>
+              <glob pattern="*.ldsdict"/>
+              <icon name="dictv2"/>
+            </mime-type>
+          </mime-info>
+          XML
+
+          update-mime-database "$HOME/.local/share/mime"
 
       - name: Install Inno Setup
         if: runner.os == 'Windows'
