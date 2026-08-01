@@ -208,7 +208,6 @@ class ChangelogPage(QWidget):
         # Add changelog entries here
         # Latest version should be first in the list for easier management
         self.changelog_entries = [
-            {"version": "1.0.46", "date": "August, 01, 2026", "features": ["Dictionary icon and ldsu file type open configuration fixed"]},
             {"version": "1.0.45", "date": "July, 31, 2026", "features": ["Connect LDSU on wizard. Configs are now initialized"]},
             {"version": "1.0.44", "date": "July, 28, 2026", "features": ["Update setup wizard"]},
             {"version": "1.0.43", "date": "July, 27, 2026", "features": ["Windows ico fix"]},

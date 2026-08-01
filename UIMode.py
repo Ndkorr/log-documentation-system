@@ -36,19 +36,6 @@ from pathlib import Path
 _ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 _APP_ICON_PATH = os.path.join(_ASSETS_DIR, "lds.png")
 
-
-def _resolve_startup_file(argv=None):
-    """Return the first existing file passed to the app as a startup target."""
-    candidates = (argv or sys.argv[1:])
-    for candidate in candidates:
-        if not candidate:
-            continue
-        path = os.path.abspath(os.path.expanduser(str(candidate)))
-        if os.path.exists(path):
-            return path
-    return None
-
-
 TOOL_MENU = [
     {
         "type": "category", "name": "shapes", "icon": os.path.join(_ASSETS_DIR, "tool-shapes.png"), "children": [
@@ -14091,7 +14078,6 @@ class SettingsDialog(QDialog):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon(_APP_ICON_PATH))
-    startup_file = _resolve_startup_file()
-    win = UIMode(file_path=startup_file) if startup_file else UIMode()
+    win = UIMode()
     win.show()
     sys.exit(app.exec())
