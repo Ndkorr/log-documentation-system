@@ -328,7 +328,7 @@ class WelcomeWindow(QMainWindow):
             icons_layout.addWidget(fallback, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         # Dictionary icon (opens an empty dictionary by default)
-        dict_pix = load_icon_pixmap("dict-icon.png")
+        dict_pix = load_icon_pixmap("dictv2.png")
         if dict_pix is not None:
             self.dict_label = AnimatedClickableLabel()
             self.dict_label.setStyleSheet("padding: 4px; border-radius: 8px;")
