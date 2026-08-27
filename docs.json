@@ -1,6 +1,10 @@
 {
-  "idea-ui-mode-edgehandle": "exclamation",
-  "idea-ui-mode-exportasbitmap": "exclamation",
+  "idea-ui-mode-icons": "exclamation",
+  "idea-ui-mode-snapping": "exclamation",
+  "idea-ui-mode-panning": "exclamation",
+  "idea-ui-mode-export": "exclamation",
+  "idea-ui-mode-edgehandle": "check",
+  "idea-ui-mode-exportasbitmap": "check",
   "idea-ui-mode-connection": "check",
   "idea-dictionary": "check",
   "idea-myratings-uidesign": "on",

@@ -2237,52 +2237,35 @@ class _InfiniteCanvasResizeOverlay(QWidget):
                 return QCursor(px, 22, 22)
             return QCursor(fallback)
 
-        self._resize_cursors = [
-            _load_cursor("cursor-sizediagonalleft.png", Qt.CursorShape.SizeFDiagCursor),
-            _load_cursor("cursor-sizevertical.png", Qt.CursorShape.SizeVerCursor),
-            _load_cursor("cursor-sizediagonalright.png", Qt.CursorShape.SizeBDiagCursor),
-            _load_cursor("cursor-sizehorizontal.png", Qt.CursorShape.SizeHorCursor),
-            _load_cursor("cursor-sizediagonalleft.png", Qt.CursorShape.SizeFDiagCursor),
-            _load_cursor("cursor-sizevertical.png", Qt.CursorShape.SizeVerCursor),
-            _load_cursor("cursor-sizediagonalright.png", Qt.CursorShape.SizeBDiagCursor),
-            _load_cursor("cursor-sizehorizontal.png", Qt.CursorShape.SizeHorCursor),
-        ]
+        self._resize_cursor = _load_cursor("cursor-sizediagonalleft.png", Qt.CursorShape.SizeFDiagCursor)
         self._reposition()
         self.show()
 
     def _reposition(self):
-        margin = self.HANDLE_MARGIN
-        tl = self._da.canvas_to_widget(QPoint(0, 0))
         br = self._da.canvas_to_widget(QPoint(self._da.a4_size.width(), self._da.a4_size.height()))
-        widget_rect = QRect(tl, br).normalized().adjusted(-margin, -margin, margin, margin)
-        self.setGeometry(widget_rect)
+        size = self.HANDLE_SIZE + self.HANDLE_MARGIN * 2 + 6
+        self.setGeometry(br.x() - size // 2, br.y() - size // 2, size, size)
         self.raise_()
 
-    def handle_points_local(self):
-        r = self.rect().adjusted(self.HANDLE_MARGIN, self.HANDLE_MARGIN, -self.HANDLE_MARGIN, -self.HANDLE_MARGIN)
-        x1, y1, x2, y2 = r.left(), r.top(), r.right(), r.bottom()
-        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-        return [
-            QPoint(x1, y1), QPoint(cx, y1), QPoint(x2, y1),
-            QPoint(x2, cy),
-            QPoint(x2, y2), QPoint(cx, y2), QPoint(x1, y2),
-            QPoint(x1, cy),
-        ]
+    def _handle_rect(self):
+        inset = self.HANDLE_MARGIN
+        size = self.HANDLE_SIZE + 4
+        return QRect(
+            self.width() - inset - size,
+            self.height() - inset - size,
+            size,
+            size,
+        )
 
     def _hit_test(self, pos):
-        hs = self.HANDLE_SIZE + 4
-        for i, pt in enumerate(self.handle_points_local()):
-            if abs(pos.x() - pt.x()) <= hs and abs(pos.y() - pt.y()) <= hs:
-                return i
-        return None
+        return self._handle_rect().adjusted(-6, -6, 6, 6).contains(pos)
 
     def mousePressEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton:
             return super().mousePressEvent(event)
-        handle_idx = self._hit_test(event.pos())
-        if handle_idx is None:
+        if not self._hit_test(event.pos()):
             return super().mousePressEvent(event)
-        self._drag_mode = handle_idx
+        self._drag_mode = "resize"
         self._drag_start_global = event.globalPosition().toPoint()
         self._drag_start_rect = QRect(0, 0, self._da.a4_size.width(), self._da.a4_size.height())
         self.grabMouse()
@@ -2290,11 +2273,10 @@ class _InfiniteCanvasResizeOverlay(QWidget):
 
     def mouseMoveEvent(self, event):
         if self._drag_mode is None:
-            handle_idx = self._hit_test(event.pos())
-            if handle_idx is None:
+            if not self._hit_test(event.pos()):
                 self.unsetCursor()
             else:
-                self.setCursor(self._resize_cursors[handle_idx])
+                self.setCursor(self._resize_cursor)
             return super().mouseMoveEvent(event)
 
         curr = event.globalPosition().toPoint()
@@ -2303,19 +2285,23 @@ class _InfiniteCanvasResizeOverlay(QWidget):
         dy = int(round(dw.y() / max(self._da.scale_factor, 0.01)))
 
         rect = QRect(self._drag_start_rect)
-        if self._drag_mode in (2, 3, 4):
-            rect.setRight(max(120, rect.right() + dx))
-        if self._drag_mode in (4, 5, 6):
-            rect.setBottom(max(120, rect.bottom() + dy))
-        if self._drag_mode in (0, 7, 6):
-            rect.setLeft(0)
-        if self._drag_mode in (0, 1, 2):
-            rect.setTop(0)
+        rect.setRight(max(120, rect.right() + dx))
+        rect.setBottom(max(120, rect.bottom() + dy))
         new_size = QSize(max(120, rect.width()), max(120, rect.height()))
+        old_size = QSize(self._da.a4_size)
         self._da.set_canvas_size(new_size)
+        delta_w = new_size.width() - old_size.width()
+        delta_h = new_size.height() - old_size.height()
+        if delta_w or delta_h:
+            self._da.pan_offset += QPoint(
+                int(round((delta_w * self._da.scale_factor) / 2.0)),
+                int(round((delta_h * self._da.scale_factor) / 2.0)),
+            )
+            self._da.clamp_pan_offset()
         owner = self._da.parent()
         if owner is not None and hasattr(owner, "_page_states"):
             owner._page_states[owner._current_page_idx]["canvas_size"] = QSize(new_size)
+            owner._page_states[owner._current_page_idx]["pan_offset"] = QPoint(self._da.pan_offset)
         self._reposition()
         event.accept()
 
@@ -2330,16 +2316,10 @@ class _InfiniteCanvasResizeOverlay(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#0078d7"), 1, Qt.PenStyle.DotLine)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        r = self.rect().adjusted(self.HANDLE_MARGIN, self.HANDLE_MARGIN, -self.HANDLE_MARGIN - 1, -self.HANDLE_MARGIN - 1)
-        painter.drawRect(r)
-        hs = self.HANDLE_SIZE // 2
-        for pt in self.handle_points_local():
-            painter.setBrush(QColor("white"))
-            painter.setPen(QPen(QColor("#0078d7"), 2))
-            painter.drawRect(pt.x() - hs, pt.y() - hs, self.HANDLE_SIZE, self.HANDLE_SIZE)
+        handle_rect = self._handle_rect()
+        painter.setBrush(QColor("white"))
+        painter.setPen(QPen(QColor("#0078d7"), 2))
+        painter.drawRect(handle_rect)
         painter.end()
 
 
@@ -2882,7 +2862,10 @@ class DrawingArea(QFrame):
 
     def zoom_by(self, delta_percent):
         self.zoom_percent += delta_percent
-        self.zoom_percent = max(-90, min(400, self.zoom_percent))  # Clamp between 10% and 500%
+        # Infinite canvas benefits from a wider zoom range so very large pages
+        # remain navigable without resizing the viewport itself.
+        max_zoom_percent = 1200 if self._is_infinite_canvas_mode() else 400
+        self.zoom_percent = max(-90, min(max_zoom_percent, self.zoom_percent))
         self.scale_factor = 1.0 + self.zoom_percent / 100.0
         self.clamp_pan_offset()
         self.update()
@@ -4692,6 +4675,11 @@ class DrawingArea(QFrame):
 
     def paintEvent(self, event):
         super().paintEvent(event)
+        owner = self.parent()
+        if owner is not None:
+            overlay = getattr(owner, "_infinite_canvas_overlay", None)
+            if overlay is not None and overlay.isVisible():
+                overlay._reposition()
         # print("Current shapes:", self.shapes)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -6800,20 +6788,37 @@ class DrawingArea(QFrame):
         """Check if a canvas point is inside the A4 canvas."""
         return QRect(0, 0, self.a4_size.width(), self.a4_size.height()).contains(pt)
 
+    def _is_infinite_canvas_mode(self):
+        owner = self.parent()
+        return bool(getattr(owner, "infinite_page_setup", False))
+
+    def _infinite_pan_slack(self):
+        # Allow travel beyond the centered position so users can keep navigating
+        # even when the visible canvas is smaller than the viewport.
+        return max(240, min(max(self.width(), self.height()), 2400))
+
     def clamp_pan_offset(self):
         """Ensure the canvas cannot be panned completely out of view."""
         widget_w, widget_h = self.width(), self.height()
         canvas_w = self.a4_size.width() * self.scale_factor
         canvas_h = self.a4_size.height() * self.scale_factor
+        infinite_mode = self._is_infinite_canvas_mode()
 
-        # If canvas is smaller than widget, center it (no panning allowed)
-        if canvas_w <= widget_w:
+        # Infinite mode keeps some overscroll room so panning still works even
+        # before the canvas grows beyond the viewport.
+        if infinite_mode:
+            max_pan_x = max((canvas_w - widget_w) / 2.0, 0.0) + self._infinite_pan_slack()
+            px = max(-max_pan_x, min(self.pan_offset.x(), max_pan_x))
+        elif canvas_w <= widget_w:
             px = 0
         else:
             max_pan_x = (canvas_w - widget_w) // 2
             px = max(-max_pan_x, min(self.pan_offset.x(), max_pan_x))
 
-        if canvas_h <= widget_h:
+        if infinite_mode:
+            max_pan_y = max((canvas_h - widget_h) / 2.0, 0.0) + self._infinite_pan_slack()
+            py = max(-max_pan_y, min(self.pan_offset.y(), max_pan_y))
+        elif canvas_h <= widget_h:
             py = 0
         else:
             max_pan_y = (canvas_h - widget_h) // 2
@@ -10941,6 +10946,7 @@ class UIMode(QWidget):
         self._infinite_canvas_overlay = None
         if self.infinite_page_setup:
             self._enable_infinite_canvas_mode()
+            QTimer.singleShot(0, self._enable_infinite_canvas_mode)
         
         self.ribbon_layout = ribbon_layout
         self.divider = divider  
@@ -11418,6 +11424,8 @@ class UIMode(QWidget):
         
         if hasattr(self, 'page_bar'):
             self.page_bar.update_position(self.width())
+        if getattr(self, "_infinite_canvas_overlay", None) is not None and self._infinite_canvas_overlay.isVisible():
+            self._infinite_canvas_overlay._reposition()
             
         # Floating hamburger (top right)
         self.menu_btn.move(self.width() - self.menu_btn.width() - 8, 4)
@@ -11477,6 +11485,8 @@ class UIMode(QWidget):
     def _disable_infinite_canvas_mode(self):
         if self._infinite_canvas_overlay is not None:
             self._infinite_canvas_overlay.hide()
+        self._side_menu.set_pages_enabled(True)
+        self.page_bar.show()
     
     def show_tool_tooltip(self, text):
         self.custom_tooltip.show_tooltip(text)
@@ -12000,6 +12010,10 @@ class UIMode(QWidget):
             self.current_canvas_file = file_path
             self._setup_data.update(self._setup_data_for_file(file_path))
             self._apply_setup_data(self._setup_data)
+            if self.infinite_page_setup:
+                self._enable_infinite_canvas_mode()
+            else:
+                self._disable_infinite_canvas_mode()
             self._add_to_recent(file_path)
             self.drawing_area.undo_stack.clear()
             self.drawing_area.redo_stack.clear()
@@ -12109,8 +12123,9 @@ class UIMode(QWidget):
     def show_export_dialog(self):
         accent = self.current_shape_color.name()
         darker = self.current_shape_color.darker(120).name()
-        export_pages = self._flatten_export_pages()
+        export_pages = self._flatten_export_pages(self._current_space_idx)
         page_count = len(export_pages)
+        is_infinite_mode = bool(getattr(self, "infinite_page_setup", False))
 
         dialog = QDialog(self)
         dialog.setCursor(_default_cursor())
@@ -12164,28 +12179,33 @@ class UIMode(QWidget):
             row.addWidget(value_input, stretch=1)
             layout.addLayout(row)
 
-        page_row = QHBoxLayout()
-        page_row.setContentsMargins(6, 0, 6, 0)
-        page_label = QLabel("Pages")
-        page_label.setFixedWidth(120)
-        page_label.setStyleSheet("font-weight: bold; color: #333; border: none;")
-        fields["pages"] = QComboBox()
-        fields["pages"].addItem("All Pages", None)
-        for flat_index, (_space_index, page_index) in enumerate(export_pages):
-            page_name = self._spaces[_space_index]["pages"][page_index].get("name", f"Page {flat_index + 1}")
-            fields["pages"].addItem(f"{flat_index + 1}. {page_name}", [flat_index])
-        fields["pages"].setStyleSheet("""
-            QComboBox {
-                padding: 6px;
-                border: 1px solid #ddd;
-                border-radius: 6px;
-                font-size: 10pt;
-                background: white;
-            }
-        """)
-        page_row.addWidget(page_label)
-        page_row.addWidget(fields["pages"], stretch=1)
-        layout.addLayout(page_row)
+        if not is_infinite_mode:
+            page_row = QHBoxLayout()
+            page_row.setContentsMargins(6, 0, 6, 0)
+            page_label = QLabel("Pages")
+            page_label.setFixedWidth(120)
+            page_label.setStyleSheet("font-weight: bold; color: #333; border: none;")
+            fields["pages"] = QComboBox()
+            fields["pages"].addItem("All Pages", None)
+            for flat_index, (_space_index, page_index) in enumerate(export_pages):
+                page_name = self._spaces[_space_index]["pages"][page_index].get("name", f"Page {flat_index + 1}")
+                fields["pages"].addItem(f"{flat_index + 1}. {page_name}", [flat_index])
+            fields["pages"].setStyleSheet("""
+                QComboBox {
+                    padding: 6px;
+                    border: 1px solid #ddd;
+                    border-radius: 6px;
+                    font-size: 10pt;
+                    background: white;
+                }
+            """)
+            page_row.addWidget(page_label)
+            page_row.addWidget(fields["pages"], stretch=1)
+            layout.addLayout(page_row)
+        else:
+            hint = QLabel("Infinite canvas will be exported as a bitmap image.")
+            hint.setStyleSheet("color: #777; font-size: 9pt; border: none; margin-left: 6px;")
+            layout.addWidget(hint)
 
         layout.addStretch()
 
@@ -12204,7 +12224,7 @@ class UIMode(QWidget):
         cancel_btn.setCursor(_pointing_cursor())
         cancel_btn.clicked.connect(dialog.reject)
 
-        export_btn = QPushButton("Export PDF")
+        export_btn = QPushButton("Export Bitmap" if is_infinite_mode else "Export PDF")
         export_btn.setFixedHeight(34)
         export_btn.setStyleSheet(f"""
             QPushButton {{
@@ -12222,7 +12242,7 @@ class UIMode(QWidget):
             except ValueError as e:
                 QMessageBox.warning(dialog, "Export Settings", str(e))
                 return
-            pages = fields["pages"].currentData()
+            pages = [0] if is_infinite_mode else fields["pages"].currentData()
             if pages is None:
                 pages = list(range(page_count))
 
@@ -12235,7 +12255,10 @@ class UIMode(QWidget):
                 "pdf_line_spacing": line_spacing,
             }
             dialog.accept()
-            self.export_to_pdf(export_settings=settings, selected_pages=pages)
+            if is_infinite_mode:
+                self.export_to_bitmap(export_settings=settings, selected_pages=pages, export_pages=export_pages)
+            else:
+                self.export_to_pdf(export_settings=settings, selected_pages=pages, export_pages=export_pages)
 
         export_btn.clicked.connect(do_export)
         button_row.addWidget(cancel_btn)
@@ -12250,11 +12273,22 @@ class UIMode(QWidget):
         folder = os.path.dirname(self.current_canvas_file) if self.current_canvas_file else os.path.expanduser("~")
         return os.path.join(folder, f"{safe_title}.pdf")
 
-    def _flatten_export_pages(self):
+    def _default_bitmap_export_path(self):
+        safe_title = "".join(ch if ch.isalnum() or ch in (" ", "-", "_") else "_" for ch in self.pdf_title).strip()
+        safe_title = safe_title.replace(" ", "_") or "ui_mode_export"
+        folder = os.path.dirname(self.current_canvas_file) if self.current_canvas_file else os.path.expanduser("~")
+        return os.path.join(folder, f"{safe_title}.png")
+
+    def _flatten_export_pages(self, space_index=None):
         pages = []
-        for space_index, space in enumerate(self._spaces):
+        if space_index is not None:
+            if 0 <= space_index < len(self._spaces):
+                for page_index, _page in enumerate(self._spaces[space_index].get("pages", [])):
+                    pages.append((space_index, page_index))
+            return pages
+        for si, space in enumerate(self._spaces):
             for page_index, _page in enumerate(space.get("pages", [])):
-                pages.append((space_index, page_index))
+                pages.append((si, page_index))
         return pages
 
     def _parse_export_page_selection(self, text, page_count):
@@ -12313,7 +12347,53 @@ class UIMode(QWidget):
             da.zoom_percent = old_zoom
             da.pan_offset = old_pan
 
-    def export_to_pdf(self, export_settings=None, selected_pages=None):
+    def export_to_bitmap(self, export_settings=None, selected_pages=None, export_pages=None):
+        export_pages = export_pages or self._flatten_export_pages(self._current_space_idx)
+        if not export_pages:
+            QMessageBox.warning(self, "Export Error", "There are no pages to export.")
+            return
+        if selected_pages is None:
+            selected_pages = [0]
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export UI Mode Bitmap",
+            self._default_bitmap_export_path(),
+            "PNG Files (*.png);;JPEG Files (*.jpg *.jpeg);;Bitmap Files (*.bmp)",
+        )
+        if not file_path:
+            return
+
+        chosen_index = selected_pages[0]
+        current_space_idx = self._current_space_idx
+        current_page_idx = self._current_page_idx
+        self._snapshot_current_page()
+        try:
+            space_index, page_index = export_pages[chosen_index]
+            self._current_space_idx = space_index
+            self._current_page_idx = page_index
+            self._restore_page(page_index)
+            pixmap = self._render_current_page_for_export()
+            suffix = os.path.splitext(file_path)[1].lower()
+            image_format = "PNG"
+            if suffix in (".jpg", ".jpeg"):
+                image_format = "JPG"
+            elif suffix == ".bmp":
+                image_format = "BMP"
+            elif not suffix:
+                file_path += ".png"
+            if not pixmap.save(file_path, image_format):
+                raise ValueError("Could not save bitmap export.")
+            self.custom_tooltip.show_tooltip("Bitmap exported", duration=2500)
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export bitmap:\n{e}")
+        finally:
+            self._current_space_idx = current_space_idx
+            self._current_page_idx = current_page_idx
+            self._restore_page(current_page_idx)
+            self._sync_page_ui()
+
+    def export_to_pdf(self, export_settings=None, selected_pages=None, export_pages=None):
         export_settings = export_settings or {
             "user_name": self.user_name,
             "user_status": self.user_status,
@@ -12322,7 +12402,7 @@ class UIMode(QWidget):
             "pdf_font_size": self.pdf_font_size,
             "pdf_line_spacing": self.pdf_line_spacing,
         }
-        export_pages = self._flatten_export_pages()
+        export_pages = export_pages or self._flatten_export_pages(self._current_space_idx)
         if selected_pages is None:
             selected_pages = list(range(len(export_pages)))
 
@@ -12357,7 +12437,7 @@ class UIMode(QWidget):
                 page_state = self._spaces[space_index]["pages"][page_index]
                 page_size_key = page_state.get("page_size", getattr(self, "page_setup", {}).get("page_size", DEFAULT_PAGE_SIZE_KEY))
                 page_orientation = page_state.get("page_orientation", getattr(self, "page_setup", {}).get("orientation", DEFAULT_PAGE_ORIENTATION))
-                is_infinite_page = page_size_key == INFINITE_PAGE_SIZE_KEY
+                is_infinite_page = bool(getattr(self, "infinite_page_setup", False)) or page_size_key == INFINITE_PAGE_SIZE_KEY
                 self._current_space_idx = space_index
                 margins = QMarginsF(6, 6, 6, 6) if is_infinite_page else QMarginsF(12, 12, 12, 12)
                 if is_infinite_page:
@@ -12369,9 +12449,14 @@ class UIMode(QWidget):
                         QPageLayout.Unit.Point,
                     )
                 else:
+                    page_canvas_size = page_state.get("canvas_size", self.drawing_area.a4_size)
+                    page_size_mm = QSizeF(
+                        page_canvas_size.width() * 25.4 / PAGE_SETUP_DPI,
+                        page_canvas_size.height() * 25.4 / PAGE_SETUP_DPI,
+                    )
                     page_layout = QPageLayout(
-                        QPageSize(getattr(QPageSize.PageSizeId, page_size_key, QPageSize.PageSizeId.A4)),
-                        QPageLayout.Orientation.Portrait if page_orientation == "Portrait" else QPageLayout.Orientation.Landscape,
+                        QPageSize(page_size_mm, QPageSize.Unit.Millimeter),
+                        QPageLayout.Orientation.Portrait,
                         margins,
                         QPageLayout.Unit.Millimeter,
                     )
@@ -14195,17 +14280,14 @@ class SettingsDialog(QDialog):
         changed = current != self._initial_page_setup
         if self.current_tab == "Interface":
             self.save_btn.setVisible(changed)
-        self.apply_on_input.setEnabled(current["page_size"] != INFINITE_PAGE_SIZE_KEY)
+        self.apply_on_input.setEnabled(True)
 
     def _current_page_setup_values(self):
-        values = _normalize_page_setup(
+        return _normalize_page_setup(
             self.page_size_input.currentData(),
             self.orientation_input.currentText(),
             self.apply_on_input.currentText(),
         )
-        if values["page_size"] == INFINITE_PAGE_SIZE_KEY:
-            values["apply_on"] = DEFAULT_PAGE_APPLY_ON
-        return values
 
     def _save_profile_changes(self):
         parent = self.parent()
@@ -14228,7 +14310,7 @@ class SettingsDialog(QDialog):
             return
         page_setup = self._current_page_setup_values()
         parent.page_setup = dict(page_setup)
-        if page_setup["page_size"] != INFINITE_PAGE_SIZE_KEY and page_setup["apply_on"] == "All Pages":
+        if page_setup["apply_on"] == "All Pages":
             page_canvas_size = _canvas_size_for_setup(page_setup["page_size"], page_setup["orientation"])
             for space in parent._spaces:
                 for page in space.get("pages", []):
@@ -14541,7 +14623,7 @@ class SettingsDialog(QDialog):
         self.apply_on_input.addItems(["New Page", "All Pages"])
         self.apply_on_input.setCurrentText(page_setup["apply_on"])
 
-        note = QLabel("Infinite disables Apply On and exports as bitmap-only pages without document/page header text.")
+        note = QLabel("Page setup here only controls normal paged documents. Infinite canvas is managed from the setup wizard.")
         note.setWordWrap(True)
         note.setStyleSheet("color: #777; font-size: 9pt; margin-top: 8px;")
         page_setup_layout.addWidget(note)

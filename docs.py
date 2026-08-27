@@ -208,6 +208,7 @@ class ChangelogPage(QWidget):
         # Add changelog entries here
         # Latest version should be first in the list for easier management
         self.changelog_entries = [
+            {"version": "1.0.48", "date": "August, 28, 2026", "features": ["Infinite Page", "Disables page clamping on infinite page but will add it on normal pages later", "Exports pages on the active space only", "Wizard setup to uimode now working flawlessly"]},
             {"version": "1.0.47", "date": "August, 02, 2026", "features": ["Page Setup, Export and Wizard setup.", "Infinite page setup is added on wizard for UIMode only this will disable page tab and page setup settings", "Edge handle to resize the drawing area is not implemented yet", "Export as Bitmap on infinite page is not implemented yet"]},
             {"version": "1.0.46", "date": "August, 01, 2026", "features": ["Dictionary icon and ldsu file type open configuration fixed"]},
             {"version": "1.0.45", "date": "July, 31, 2026", "features": ["Connect LDSU on wizard. Configs are now initialized"]},
@@ -703,6 +704,10 @@ class IdeaPage(QWidget):
         
         # Idea data structure with stable ids so saved status remains correct when items are added.
         self.ideas = [
+            {"id": "idea-ui-mode-icons", "date": "August 28, 2026", "description": "Will create and replace the icons using my design (svg)"},
+            {"id": "idea-ui-mode-snapping", "date": "August 28, 2026", "description": "ruler and better snapping"},
+            {"id": "idea-ui-mode-panning", "date": "August 28, 2026", "description": "Will add panning on normal page so that user can move around the page without clamping the canvas in the center"},
+            {"id": "idea-ui-mode-export", "date": "August 28, 2026", "description": "Multiple different page sizes export doesn't seem to display correctly on pdf"},
             {"id": "idea-ui-mode-edgehandle", "date": "August 02, 2026", "description": "Edge handle resize"},
             {"id": "idea-ui-mode-exportasbitmap", "date": "August 02, 2026", "description": "Export as bitmap when page is infinite"},            
             {"id": "idea-ui-mode-connection", "date": "July 31, 2026", "description": "Connect other lds type on ui mode"},            
@@ -1096,7 +1101,7 @@ class ModulePage(QWidget):
         self.modules = [
             {"name": "docs.py", "description": "Document Page\nModified Module Page", "percentage": 100},
             {"name": "main.py", "description": "LDSD and LDSG\nPreload Dictionary", "percentage": 80},
-            {"name": "UIMode.py", "description": "LDSU - User Interface Design Mode", "percentage": 80},
+            {"name": "UIMode.py", "description": "LDSU - User Interface Design Mode\nInfinite Page", "percentage": 84},
             {"name": "setup.py", "description": "Welcome Page\nAdd Dictionary besides git icon", "percentage": 90},
             {"name": "gui.py", "description": "Setup Wizard", "percentage": 70},
         ]

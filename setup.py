@@ -530,6 +530,7 @@ class WelcomeWindow(QMainWindow):
         pdf_line_spacing = 1.5
         pdf_font = "Arial"
         custom_dictionary = ""
+        infinite_page_setup = False
         page_size = "A4"
         page_orientation = "Landscape"
         page_apply_on = "New Page"
@@ -550,8 +551,6 @@ class WelcomeWindow(QMainWindow):
                     page_apply_on = config.get("page_apply_on", config.get("apply_on", "New Page"))
             except Exception:
                 pass
-        else:
-            infinite_page_setup = False
         return {
             "file_path": file_path,
             "log_type": log_mode,

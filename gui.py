@@ -925,6 +925,8 @@ class SetupWizard(QDialog):
                         if subtext_widget is not None:
                             layout.removeWidget(subtext_widget)
                             subtext_widget.deleteLater()
+        if hasattr(self, "next_button2"):
+            self.validate_required_choices()
 
     def _all_choice_options(self):
         return (
