@@ -2003,6 +2003,7 @@ class _LabelTextOverlay(QWidget):
     HANDLE_SIZE    = 8
     HANDLE_MARGIN  = 8    # Extra margin so handles are not clipped
     BORDER_HIT     = 12   # px from edge that triggers move cursor
+    TEXT_INSET     = 4    # Matches the committed label's QTextDocument inset
 
     # _RESIZE_CURSORS is built in __init__ so QCursor/QPixmap are
     # only created after QApplication exists.
@@ -2041,11 +2042,10 @@ class _LabelTextOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet("background: none;")
 
-        layout = QVBoxLayout(self)
-        hs = self.HANDLE_SIZE
-        layout.setContentsMargins(hs, hs, hs, hs)
-        layout.setSpacing(0)
-        layout.addWidget(text_edit)
+        self._layout = QVBoxLayout(self)
+        self._sync_text_edit_margins()
+        self._layout.setSpacing(0)
+        self._layout.addWidget(text_edit)
         self._te.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._te.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
@@ -2080,6 +2080,7 @@ class _LabelTextOverlay(QWidget):
         widget_rect = QRect(tl, br).normalized()
         widget_rect = widget_rect.adjusted(-margin, -margin, margin, margin)
         self.setGeometry(widget_rect)
+        self._sync_text_edit_margins()
         if self._toolbar and self._toolbar.isVisible():
             toolbar_h = self._toolbar.height()
             tx = widget_rect.left()
@@ -2087,6 +2088,14 @@ class _LabelTextOverlay(QWidget):
             self._toolbar.move(tx, ty)
             min_w = getattr(self._da, '_label_toolbar_min_width', 310)
             self._toolbar.setFixedWidth(max(widget_rect.width(), min_w))
+
+    def _sync_text_edit_margins(self):
+        # The committed label has a 4px canvas inset plus QTextDocument's
+        # 4px logical margin. QTextEdit's document margin is screen-space, so
+        # account for that difference to align both at every zoom level.
+        text_inset = int(round(self.TEXT_INSET * 2 * self._da.scale_factor))
+        margin = self.HANDLE_MARGIN + text_inset - self.TEXT_INSET
+        self._layout.setContentsMargins(margin, margin, margin, margin)
 
     # MouseEvents
     def mousePressEvent(self, event):
@@ -2327,6 +2336,7 @@ class DrawingArea(QFrame):
     HANDLE_SIZE = 6
     shape_selected_for_edit = pyqtSignal()
     shape_deselected = pyqtSignal()
+    content_changed = pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background: #e5e5e5; border: none;")
@@ -2700,11 +2710,13 @@ class DrawingArea(QFrame):
         ny = math.sin(rad) * dx + math.cos(rad) * dy + center.y()
         return QPoint(int(round(nx)), int(round(ny)))    
 
-    def _shape_at_point(self, canvas_pt):
+    def _shape_at_point(self, canvas_pt, include_locked=False):
         """Return the index of the topmost shape under canvas_pt, or None.
         Iterates in reverse so the topmost (last drawn) shape wins."""
         for idx in reversed(range(len(self.shapes))):
             shape = self.shapes[idx]
+            if not include_locked and self.is_shape_locked(idx):
+                continue
             tool = shape[0]
             start, end = shape[1], shape[2]
             # Extract rotation
@@ -2957,7 +2969,7 @@ class DrawingArea(QFrame):
                 return
             click_pos = event.position().toPoint()
             if not self._text_edit_overlay.geometry().contains(click_pos):
-                self._commit_text_overlay()
+                self._safe_commit_text_overlay()
             return
 
         # Handle adddescription tool clicks
@@ -2976,28 +2988,6 @@ class DrawingArea(QFrame):
             return
 
         pt = self.widget_to_canvas(event.position().toPoint())
-
-        # PREVENT ANY INTERACTION WITH LOCKED SHAPES
-        if event.button() == Qt.MouseButton.LeftButton:
-            # Check if clicking on a locked shape
-            for idx in reversed(range(len(self.shapes))):
-                shape = self.shapes[idx]
-                if self.is_shape_locked(idx):
-                    # Get shape bounds to see if click is on it
-                    if len(shape) >= 3:
-                        tool = shape[0]
-                        start, end = shape[1], shape[2]
-                        if tool == "draw" and isinstance(start, list) and len(start) > 0:
-                            min_x = min(p.x() for p in start)
-                            min_y = min(p.y() for p in start)
-                            max_x = max(p.x() for p in start)
-                            max_y = max(p.y() for p in start)
-                            rect = QRect(QPoint(min_x, min_y), QPoint(max_x, max_y)).normalized()
-                        else:
-                            rect = QRect(start, end).normalized()
-                        if rect.contains(pt):
-                            # Clicking on locked shape - do nothing
-                            return
 
         # Deselect a locked shape if user clicks elsewhere
         if (event.button() == Qt.MouseButton.LeftButton
@@ -3466,12 +3456,14 @@ class DrawingArea(QFrame):
                 self.selected_shape_indices.clear()
 
             # --- Ctrl+click: toggle multi-selection ---
-            if ctrl_held and self.selected_shape_index is None:
+            if ctrl_held:
+                if self.selected_shape_index is not None:
+                    if (0 <= self.selected_shape_index < len(self.shapes) and
+                            not self.is_shape_locked(self.selected_shape_index)):
+                        self.selected_shape_indices = {self.selected_shape_index}
+                    self.selected_shape_index = None
                 hit_idx = self._shape_at_point(pt)
                 if hit_idx is not None and not self.is_shape_locked(hit_idx):
-                    # Don't allow adding group shapes to multi-selection
-                    if self.shapes[hit_idx][0] == "group":
-                        return
                     if hit_idx in self.selected_shape_indices:
                         self.selected_shape_indices.discard(hit_idx)
                     else:
@@ -6150,30 +6142,6 @@ class DrawingArea(QFrame):
         self._cursor_sync_timer.timeout.connect(_do_sync_toolbar)
         te.cursorPositionChanged.connect(lambda: self._cursor_sync_timer.start())
         
-        def _on_text_changed():
-            try:
-                _te = self._text_edit_widget
-                if _te is None:
-                    return
-                # characterCount() == 1 means only the trailing paragraph
-                # separator remains — the document is effectively empty.
-                if _te.document().characterCount() > 1:
-                    return
-                from PyQt6.QtGui import QTextCharFormat
-                _pt = max(1, int(self._label_font_size * (self.scale_factor or 1.0)))
-                _fmt = QTextCharFormat()
-                _fmt.setFontPointSize(float(_pt))
-                _fmt.setFontFamily(getattr(self, "_label_font_family", "Arial"))
-                _fmt.setFontWeight(QFont.Weight.Bold if getattr(self, "_label_font_bold", False) else QFont.Weight.Normal)
-                _fmt.setFontItalic(getattr(self, "_label_font_italic", False))
-                _fmt.setFontUnderline(getattr(self, "_label_font_underline", False))
-                _fmt.setForeground(QBrush(getattr(self, "_label_font_color", QColor("#000000"))))
-                _te.mergeCurrentCharFormat(_fmt)
-            except Exception:
-                pass
-            
-        te.textChanged.connect(_on_text_changed)
-
         # Install event filter for Escape / Ctrl+Enter
         te.installEventFilter(self)
 
@@ -6264,6 +6232,19 @@ class DrawingArea(QFrame):
             pass
         te.update()
         te.repaint()
+
+    def _safe_commit_text_overlay(self):
+        try:
+            self._commit_text_overlay()
+        except Exception as exc:
+            # Never let malformed rich text or a stale selection crash the UI.
+            print(f"Textbox commit failed: {exc}")
+            self._cancel_text_overlay()
+            self.preview_shape = None
+            self.preview_start = None
+            self.preview_end = None
+            self._label_edit_index = None
+            self.update()
 
     def _commit_text_overlay(self):
         # Commit the text-box contents as a label shape on the canvas.
@@ -6418,6 +6399,29 @@ class DrawingArea(QFrame):
             self._cursor_sync_timer.stop()
         self._label_font_combo = None
 
+    def _reapply_label_format_after_enter(self, editor):
+        """Restore the insertion format after QTextEdit finishes a new block."""
+        # The callback runs after Qt handles Return. Ignore it if the editor
+        # was closed or replaced while the event was pending.
+        if editor is None or editor is not self._text_edit_widget:
+            return
+        try:
+            from PyQt6.QtGui import QTextCharFormat
+            pt_size = max(1, int(self._label_font_size * (self.scale_factor or 1.0)))
+            fmt = QTextCharFormat()
+            fmt.setFontPointSize(float(pt_size))
+            fmt.setFontFamily(getattr(self, "_label_font_family", "Arial"))
+            fmt.setFontWeight(QFont.Weight.Bold if getattr(self, "_label_font_bold", False) else QFont.Weight.Normal)
+            fmt.setFontItalic(getattr(self, "_label_font_italic", False))
+            fmt.setFontUnderline(getattr(self, "_label_font_underline", False))
+            fmt.setForeground(QBrush(getattr(self, "_label_font_color", QColor("#000000"))))
+            editor.mergeCurrentCharFormat(fmt)
+        except RuntimeError:
+            # Qt has already destroyed the editor during teardown.
+            return
+        except Exception:
+            return
+
     def eventFilter(self, obj, event):
         """Intercept key events on the label text-edit overlay."""
         if self._text_edit_widget is not None and obj is self._text_edit_widget:
@@ -6438,7 +6442,7 @@ class DrawingArea(QFrame):
                 # Commit: Ctrl+Enter
                 if (key in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
                         and mods & Qt.KeyboardModifier.ControlModifier):
-                    self._commit_text_overlay()
+                    self._safe_commit_text_overlay()
                     return True
 
                 te = self._text_edit_widget
@@ -6447,21 +6451,10 @@ class DrawingArea(QFrame):
                 # re-apply the current char format so the font size stays
                 # consistent instead of reverting to the document default.
                 if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (mods & Qt.KeyboardModifier.ControlModifier):
-                    def _reapply_format_after_enter():
-                        try:
-                            from PyQt6.QtGui import QTextCharFormat
-                            pt_size = max(1, int(self._label_font_size * (self.scale_factor or 1.0)))
-                            fmt = QTextCharFormat()
-                            fmt.setFontPointSize(float(pt_size))
-                            fmt.setFontFamily(getattr(self, "_label_font_family", "Arial"))
-                            fmt.setFontWeight(QFont.Weight.Bold if getattr(self, "_label_font_bold", False) else QFont.Weight.Normal)
-                            fmt.setFontItalic(getattr(self, "_label_font_italic", False))
-                            fmt.setFontUnderline(getattr(self, "_label_font_underline", False))
-                            fmt.setForeground(QBrush(getattr(self, "_label_font_color", QColor("#000000"))))
-                            te.mergeCurrentCharFormat(fmt)
-                        except Exception:
-                            pass
-                    QTimer.singleShot(0, _reapply_format_after_enter)
+                    QTimer.singleShot(
+                        0,
+                        lambda editor=te: self._reapply_label_format_after_enter(editor),
+                    )
                     # Don't return True — let Enter propagate to QTextEdit normally
 
                 # Toggle Bold: Ctrl+B
@@ -6735,8 +6728,15 @@ class DrawingArea(QFrame):
                         pass
                     return True
 
-                # Alt+Arrow: move the label shape while the text editor is open
-                if mods & Qt.KeyboardModifier.AltModifier and key in (
+                # Move the live editor only. The shape is updated once when
+                # the editor commits, avoiding an expensive undo snapshot for
+                # every key repeat while text is still being edited.
+                move_editor_shortcut = (
+                    bool(mods & Qt.KeyboardModifier.AltModifier)
+                    or bool(mods & Qt.KeyboardModifier.ControlModifier
+                            and mods & Qt.KeyboardModifier.ShiftModifier)
+                )
+                if move_editor_shortcut and key in (
                     Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down
                 ):
                     _arrow_delta = {
@@ -6747,38 +6747,15 @@ class DrawingArea(QFrame):
                     }
                     step = 10 if mods & Qt.KeyboardModifier.ShiftModifier else 1
                     delta = _arrow_delta[key] * step
-                    edit_idx = getattr(self, '_label_edit_index', None)
-                    if edit_idx is not None and 0 <= edit_idx < len(self.shapes):
-                        self.push_undo()
-                        shape = self.shapes[edit_idx]
-                        new_start = shape[1] + delta
-                        new_end   = shape[2] + delta
-                        # Apply snap guidelines (same logic as regular arrow-key move)
-                        if not self.snap_to_grid:
-                            new_rect = QRect(new_start, new_end).normalized()
-                            # Temporarily use edit_idx as selected_shape_index so
-                            # _find_snap_guides excludes the label being moved.
-                            _prev_sel = self.selected_shape_index
-                            self.selected_shape_index = edit_idx
-                            snapped, guides = self._find_snap_guides(new_rect)
-                            self.selected_shape_index = _prev_sel
-                            direction = _arrow_delta[key]
-                            gd = snapped.topLeft() - new_rect.topLeft()
-                            gx = gd.x() if direction.x() == 0 or direction.x() * gd.x() >= 0 else 0
-                            gy = gd.y() if direction.y() == 0 or direction.y() * gd.y() >= 0 else 0
-                            guide_delta = QPoint(gx, gy)
-                            new_start += guide_delta
-                            new_end   += guide_delta
-                            self._active_guides = guides
-                        else:
-                            self._active_guides = []
-                        self.shapes[edit_idx] = (shape[0], new_start, new_end) + shape[3:]
-                        # Update the overlay's canvas rect and reposition it
-                        overlay = getattr(self, '_text_edit_overlay', None)
-                        if overlay is not None:
-                            overlay._canvas_rect = QRect(new_start, new_end).normalized()
-                            overlay._reposition()
-                        self._label_canvas_rect = QRect(new_start, new_end).normalized()
+                    overlay = getattr(self, '_text_edit_overlay', None)
+                    if overlay is not None:
+                        new_rect = QRect(overlay._canvas_rect.topLeft() + delta,
+                                         overlay._canvas_rect.bottomRight() + delta).normalized()
+                        overlay._canvas_rect = new_rect
+                        self._label_canvas_rect = QRect(new_rect)
+                        self._active_guides = []
+                        overlay._reposition()
+                        overlay._te.update()
                         self.update()
                     return True
 
@@ -6840,7 +6817,16 @@ class DrawingArea(QFrame):
                 pass
 
     def keyPressEvent(self, event):
+        # A textbox owns deletion keys while its inline editor is open.
+        if (getattr(self, '_text_edit_overlay', None) is not None
+                and self._text_edit_overlay.isVisible()
+                and event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace)):
+            event.accept()
+            return
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_C:
+            if self.selected_shape_indices:
+                self.copy_selected_shape_to_clipboard()
+                return
             if (
                 self.selected_shape_index is not None
                 and 0 <= self.selected_shape_index < len(self.shapes)
@@ -6896,12 +6882,14 @@ class DrawingArea(QFrame):
 
 
         # Delete key: Delete selected shape(s)
-        if event.key() == Qt.Key.Key_Delete:
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             if self.selected_shape_indices:
+                deletable = [i for i in self.selected_shape_indices if 0 <= i < len(self.shapes) and not self.is_shape_locked(i)]
+                if not deletable:
+                    return
                 self.push_undo()
-                for i in sorted(self.selected_shape_indices, reverse=True):
-                    if 0 <= i < len(self.shapes) and not self.is_shape_locked(i):
-                        self.shapes.pop(i)
+                for i in sorted(deletable, reverse=True):
+                    self.shapes.pop(i)
                 self.selected_shape_indices.clear()
                 self.selected_shape_index = None
                 self.shape_layers_overlay.update_shapes(self.shapes)
@@ -7188,11 +7176,15 @@ class DrawingArea(QFrame):
         self.update()
 
     def contextMenuEvent(self, event):
+        if self.selected_shape_index is None:
+            hit = self._shape_at_point(self.widget_to_canvas(event.pos()), include_locked=True)
+            if hit is not None and self.is_shape_locked(hit):
+                self.select_shape_by_index(hit)
         # If a label text overlay is open, commit it but preserve the selection
         # so that Lock/Unlock and other actions remain available.
         if self._text_edit_overlay is not None and self._text_edit_overlay.isVisible():
             saved_idx = self.selected_shape_index
-            self._commit_text_overlay()
+            self._safe_commit_text_overlay()
             self.selected_shape_index = saved_idx
 
         menu = QMenu(self)
@@ -7252,13 +7244,15 @@ class DrawingArea(QFrame):
 
         # Copy
         copy_action = QAction("Copy", self)
-        can_copy = (
+        can_copy = (bool(self.selected_shape_indices) or (
             self.selected_shape_index is not None
             and 0 <= self.selected_shape_index < len(self.shapes)
-        )
+        ))
         copy_action.setEnabled(can_copy)
         if can_copy:
-            if self.shapes[self.selected_shape_index][0] == "image":
+            if self.selected_shape_indices:
+                copy_action.triggered.connect(self.copy_selected_shape_to_clipboard)
+            elif self.shapes[self.selected_shape_index][0] == "image":
                 copy_action.triggered.connect(self.copy_selected_image_to_clipboard)
             else:
                 copy_action.triggered.connect(self.copy_selected_shape_to_clipboard)
@@ -7527,7 +7521,7 @@ class DrawingArea(QFrame):
         # and deselect the shape.
         idx = self.selected_shape_index
         if self._text_edit_widget is not None:
-            self._commit_text_overlay()
+            self._safe_commit_text_overlay()
             # _commit_text_overlay resets selected_shape_index; restore it
             self.selected_shape_index = idx
         self._free_rotating = True
@@ -7597,7 +7591,7 @@ class DrawingArea(QFrame):
             return
         # Close text overlay before rotating (same reason as free rotate)
         if self._text_edit_widget is not None:
-            self._commit_text_overlay()
+            self._safe_commit_text_overlay()
             self.selected_shape_index = idx
         self.push_shape_restore(idx, "Rotate 90°")
         self.push_undo()
@@ -7809,14 +7803,29 @@ class DrawingArea(QFrame):
     def paste_shape_from_clipboard(self, adjust_mode=False):
         clipboard = QApplication.clipboard()
         text = clipboard.text()
-        self.push_undo()
         try:
             shape_dict = json.loads(text)
             tool = shape_dict.get("tool")
+            if tool == "multi" and isinstance(shape_dict.get("shapes"), list):
+                pasted = [_deserialize_shape(item) for item in shape_dict["shapes"]]
+                if pasted:
+                    pasted = [self._offset_shape(item, QPoint(20, 20)) for item in pasted]
+                    self.push_undo()
+                    self.shapes.extend(pasted)
+                    self.selected_shape_index = None
+                    self.selected_shape_indices = set(range(len(self.shapes) - len(pasted), len(self.shapes)))
+                    self.preview_shape = None
+                    self.preview_start = None
+                    self.preview_end = None
+                    self.shape_layers_overlay.update_shapes(self.shapes)
+                    self.update()
+                return
+
 
             # Groups: deserialize full shape, offset, and commit directly
             if tool == "group" and "children" in shape_dict:
                 group_shape = _deserialize_shape(shape_dict)
+                self.push_undo()
                 offset = QPoint(20, 20)
                 moved = self._offset_shape(group_shape, offset)
                 self.shapes.append(moved)
@@ -7929,6 +7938,8 @@ class DrawingArea(QFrame):
             shape = json.loads(text)
             if not isinstance(shape, dict) or "tool" not in shape:
                 return False
+            if shape["tool"] == "multi":
+                return bool(shape.get("shapes")) and all(isinstance(item, dict) and "tool" in item for item in shape["shapes"])
             # Group shapes use _serialize_shape format (children, extras)
             if shape["tool"] == "group" and "children" in shape:
                 return True
@@ -7942,6 +7953,14 @@ class DrawingArea(QFrame):
             return False
 
     def copy_selected_shape_to_clipboard(self):
+        if self.selected_shape_indices:
+            indices = sorted(i for i in self.selected_shape_indices if 0 <= i < len(self.shapes) and not self.is_shape_locked(i))
+            if not indices:
+                return
+            QApplication.clipboard().setText(json.dumps({"tool": "multi", "shapes": [_serialize_shape(self.shapes[i]) for i in indices]}))
+            if callable(self.tooltip_callback):
+                self.tooltip_callback("Copied")
+            return
         if self.selected_shape_index is not None and 0 <= self.selected_shape_index < len(self.shapes):
             shape = self.shapes[self.selected_shape_index]
             tool, start, end, data = shape[:4]
@@ -8031,10 +8050,8 @@ class DrawingArea(QFrame):
     def _group_selected_shapes(self):
         """Group all shapes in selected_shape_indices into a single group shape."""
         indices = sorted(self.selected_shape_indices)
+        indices = [i for i in indices if 0 <= i < len(self.shapes) and not self.is_shape_locked(i)]
         if len(indices) < 2:
-            return
-        # Don't group if any selected shape is already a group
-        if any(self.shapes[i][0] == "group" for i in indices if 0 <= i < len(self.shapes)):
             return
         self.push_undo()
         children = [self.shapes[i] for i in indices]
@@ -8201,6 +8218,8 @@ class DrawingArea(QFrame):
         self.update()
 
     def push_undo(self):
+        # Most edits create an undo checkpoint immediately before changing the canvas.
+        self.content_changed.emit()
         # Custom copy to avoid deepcopying QPixmap
         new_shapes = []
         for shape in self.shapes:
@@ -8254,6 +8273,7 @@ class DrawingArea(QFrame):
 
     def undo(self):
         if self.undo_stack:
+            self.content_changed.emit()
             self.redo_stack.append((self.shapes, self.eraser_mask.copy(), [list(s) for s in self.eraser_strokes]))
             shapes, eraser_mask, eraser_strokes = self.undo_stack.pop()
             self.shapes = shapes
@@ -8270,6 +8290,7 @@ class DrawingArea(QFrame):
 
     def redo(self):
         if self.redo_stack:
+            self.content_changed.emit()
             self.undo_stack.append((self.shapes, self.eraser_mask.copy(), [list(s) for s in self.eraser_strokes]))
             shapes, eraser_mask, eraser_strokes = self.redo_stack.pop()
             self.shapes = shapes
@@ -9686,16 +9707,7 @@ class DrawingArea(QFrame):
         if shape[0] != "group":
             return
         children = shape[3]
-        new_children = []
-        for child in children:
-            ctool = child[0]
-            if ctool == "draw" and isinstance(child[1], list):
-                new_pts = [p + delta for p in child[1]]
-                new_children.append(tuple(["draw", new_pts] + list(child[2:])))
-            else:
-                new_start = child[1] + delta
-                new_end = child[2] + delta
-                new_children.append(tuple([ctool, new_start, new_end] + list(child[3:])))
+        new_children = [self._offset_shape(child, delta) for child in children]
         new_start = shape[1] + delta
         new_end = shape[2] + delta
         self.shapes[idx] = tuple(["group", new_start, new_end, new_children] + list(shape[4:]))
@@ -10474,26 +10486,27 @@ class _AutoSaveWorker(QObject):
             file_path = data["file_path"]
             config_folder = data["config_folder"]
             payload = data["payload"]
-            histories_payload = data["histories"]
+            histories_payload = data.get("histories")
 
             # Finalize pages: convert QImage objects to base64 strings
             for sp in payload["spaces"]:
                 for page in sp["pages"]:
                     _finalize_page_for_json(page)
 
-            # Finalize history entries that contain image shapes
-            for sp_hist in histories_payload:
-                for page_hist in sp_hist:
-                    for entry in page_hist:
-                        shape_d = entry.get("shape_data", {})
-                        if "qimage" in shape_d:
-                            shape_d["pixmap"] = _encode_qimage_b64(shape_d.pop("qimage"))
-
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
 
-            with open(os.path.join(config_folder, "shape_history.json"), "w", encoding="utf-8") as f:
-                json.dump({"version": 3, "spaces": histories_payload}, f, indent=2)
+            # Recovery autosaves intentionally omit editing history. It is not
+            # needed to restore the document and can be expensive for images.
+            if histories_payload is not None:
+                for sp_hist in histories_payload:
+                    for page_hist in sp_hist:
+                        for entry in page_hist:
+                            shape_d = entry.get("shape_data", {})
+                            if "qimage" in shape_d:
+                                shape_d["pixmap"] = _encode_qimage_b64(shape_d.pop("qimage"))
+                with open(os.path.join(config_folder, "shape_history.json"), "w", encoding="utf-8") as f:
+                    json.dump({"version": 3, "spaces": histories_payload}, f, indent=2)
 
             self.finished.emit()
         except Exception as e:
@@ -10539,6 +10552,7 @@ class UIMode(QWidget):
         self._show_controls = False
         
         self.drawing_area.shape_selected_for_edit.connect(self.deselect_tool)
+        self.drawing_area.content_changed.connect(self._mark_auto_save_dirty)
         self._tool_btn_anim = None  # Initialize attribute to avoid assignment error
         self._last_category_index = 0
         self.drawing_area.shape_selected_for_edit.connect(self.sync_color_with_selected_shape)
@@ -10995,7 +11009,7 @@ class UIMode(QWidget):
         
         self._auto_save_timer = QTimer(self)
         self._auto_save_timer.timeout.connect(self._auto_save_tick)
-        self._auto_save_timer.start(30000)  # Auto-save every 30 seconds
+        self._auto_save_timer.start(120000)  # Recovery auto-save every 2 minutes
 
         # Auto-save worker thread setup
         self._auto_save_worker = _AutoSaveWorker()
@@ -11007,6 +11021,9 @@ class UIMode(QWidget):
         self._auto_save_thread.start()
         self._auto_save_running = False
         self._auto_save_queued = False
+        self._auto_save_dirty = False
+        self._auto_save_generation = 0
+        self._auto_save_generation_in_flight = 0
         
         
         
@@ -11858,6 +11875,7 @@ class UIMode(QWidget):
 
         self._write_project_config(config_folder)
         self.current_canvas_file = file_path
+        self._auto_save_dirty = False
 
     def _write_project_config(self, config_folder):
         page_setup = getattr(self, "page_setup", _normalize_page_setup())
@@ -11974,7 +11992,7 @@ class UIMode(QWidget):
             # Load shape histories
             project_folder = os.path.dirname(file_path)
             history_path   = os.path.join(project_folder, "config", "shape_history.json")
-            if os.path.exists(history_path):
+            if not payload.get("recovery_save", False) and os.path.exists(history_path):
                 with open(history_path, "r", encoding="utf-8") as f:
                     hist_data = json.load(f)
 
@@ -12017,6 +12035,7 @@ class UIMode(QWidget):
             self._add_to_recent(file_path)
             self.drawing_area.undo_stack.clear()
             self.drawing_area.redo_stack.clear()
+            self._auto_save_dirty = False
             self.drawing_area.update()
             self.refresh_history_list()
             self._sync_page_ui()
@@ -12033,34 +12052,75 @@ class UIMode(QWidget):
             if hasattr(self, '_loading_overlay') and self._loading_overlay:
                 QTimer.singleShot(delay_ms, self._loading_overlay.hide_overlay)
 
+    def _mark_auto_save_dirty(self):
+        """Record an edit that needs to be included in the recovery save."""
+        if not hasattr(self, "_auto_save_generation"):
+            return
+        self._auto_save_dirty = True
+        self._auto_save_generation += 1
+        if self._auto_save_running:
+            self._auto_save_queued = True
+
+    def _snapshot_current_page_for_recovery(self):
+        """Copy only the state needed to reopen the current page after a crash."""
+        da = self.drawing_area
+        state = self._page_states[self._current_page_idx]
+        state["canvas_size"] = QSize(da.a4_size)
+        state["shapes"] = [da._copy_single_shape(shape) for shape in da.shapes]
+        state["eraser_mask"] = da.eraser_mask.copy()
+        state["eraser_strokes"] = [list(stroke) for stroke in da.eraser_strokes]
+        state["scale_factor"] = da.scale_factor
+        state["zoom_percent"] = da.zoom_percent
+        state["pan_offset"] = QPoint(da.pan_offset)
+        state["tool_sizes"] = dict(da.tool_sizes)
+
+    def _auto_save_is_safe(self):
+        """Avoid snapshotting while the canvas owns transient editing state."""
+        da = self.drawing_area
+        return not any((
+            getattr(da, "_text_edit_overlay", None) is not None,
+            getattr(da, "_text_edit_widget", None) is not None,
+            getattr(da, "_desc_overlay", None) is not None,
+            getattr(da, "_labeling", False),
+            getattr(da, "drawing", False),
+            getattr(da, "_erasing", False),
+            getattr(da, "_dragging_handle", None) is not None,
+            getattr(da, "_dragging_box", False),
+        ))
+
     def _auto_save_tick(self):
-        # Called every 30 seconds to auto-save
-        if hasattr(self, "current_canvas_file") and self.current_canvas_file:
+        # Frequent recovery checks are cheap when the document has not changed.
+        # An open label/description editor is committed separately, so defer
+        # saving until it has closed instead of snapshotting transient widgets.
+        if (self.current_canvas_file and self._auto_save_dirty
+                and self._auto_save_is_safe()):
             self._perform_auto_save()
 
     def _perform_auto_save(self):
-        # Threaded auto-save: snapshot + lightweight serialize on main thread,
-        # heavy PNG encoding + disk I/O on worker thread
+        # Threaded recovery save: snapshot + lightweight serialization on the
+        # main thread, with PNG encoding and disk I/O on the worker thread.
         if self._auto_save_running:
             self._auto_save_queued = True
             return
 
+        if not self._auto_save_dirty:
+            return
+
+        if not self._auto_save_is_safe():
+            return
+
         try:
             file_path = self.current_canvas_file
-            self._snapshot_current_page()
+            self._snapshot_current_page_for_recovery()
             self._spaces[self._current_space_idx]["current_page"] = self._current_page_idx
 
             project_folder = os.path.dirname(file_path)
             config_folder = os.path.join(project_folder, "config")
             os.makedirs(config_folder, exist_ok=True)
 
-            def _ser_hist(entry):
-                e = dict(entry)
-                e["shape_data"] = _serialize_shape_for_thread(entry["shape_data"])
-                return e
-
             payload = {
                 "version": 3,
+                "recovery_save": True,
                 "current_space": self._current_space_idx,
                 "current_shape_color": self.current_shape_color.name(),
                 "spaces": [
@@ -12073,17 +12133,13 @@ class UIMode(QWidget):
                 ],
             }
 
-            all_histories = [
-                [[_ser_hist(e) for e in p["shape_history"]] for p in sp["pages"]]
-                for sp in self._spaces
-            ]
-
             self._auto_save_running = True
+            self._auto_save_generation_in_flight = self._auto_save_generation
             self._request_auto_save.emit({
                 "file_path": file_path,
                 "config_folder": config_folder,
                 "payload": payload,
-                "histories": all_histories,
+                "histories": None,
             })
         except Exception as e:
             self.drawing_area.show_status_overlay(f"Auto-save failed: {str(e)[:30]}", duration=3000)
@@ -12091,6 +12147,8 @@ class UIMode(QWidget):
 
     def _on_auto_save_done(self):
         self._auto_save_running = False
+        if self._auto_save_generation == self._auto_save_generation_in_flight:
+            self._auto_save_dirty = False
         self.drawing_area.show_status_overlay("File auto saved", duration=2000)
         if self._auto_save_queued:
             self._auto_save_queued = False
@@ -13277,6 +13335,7 @@ class UIMode(QWidget):
         self._current_space_idx = len(self._spaces) - 1
         self._current_page_idx  = 0
         self._restore_page(0)
+        self._mark_auto_save_dirty()
         self._sync_page_ui()
 
     def _select_space(self, space_idx: int):
@@ -13327,6 +13386,7 @@ class UIMode(QWidget):
         })
         self._current_page_idx = len(cur_pages) - 1
         self._restore_page(self._current_page_idx)
+        self._mark_auto_save_dirty()
         self._sync_page_ui()
 
     def _select_page(self, page_idx: int):
@@ -13456,7 +13516,8 @@ class UIMode(QWidget):
             stored = self._spaces[space_idx]["current_page"]
             if stored >= len(pages):
                 self._spaces[space_idx]["current_page"] = len(pages) - 1
-        self._sync_page_ui()            
+        self._mark_auto_save_dirty()
+        self._sync_page_ui()
 
     def _rename_page(self, space_idx: int, page_idx: int):
         page = self._spaces[space_idx]["pages"][page_idx]
@@ -13552,6 +13613,7 @@ class UIMode(QWidget):
             if name.startswith("Page ") and name[5:].isdigit():
                 p["name"] = f"Page {counter}"
                 counter += 1
+        self._mark_auto_save_dirty()
         self._sync_page_ui()       
         
     def _rename_space(self, space_idx: int):
@@ -13659,6 +13721,7 @@ class UIMode(QWidget):
 
         if _result[0] == "rename":
             space["name"] = input_field.text().strip()
+            self._mark_auto_save_dirty()
             self._sync_page_ui()
         elif _result[0] == "delete":
             self._delete_space(space_idx)
@@ -13722,6 +13785,7 @@ class UIMode(QWidget):
             self._current_space_idx = len(self._spaces) - 1
         self._current_page_idx = self._spaces[self._current_space_idx]["current_page"]
         self._restore_page(self._current_page_idx)
+        self._mark_auto_save_dirty()
         self._sync_page_ui()
 
 class CheckpointPreviewDialog(QDialog):
