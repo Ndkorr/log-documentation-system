@@ -208,6 +208,7 @@ class ChangelogPage(QWidget):
         # Add changelog entries here
         # Latest version should be first in the list for easier management
         self.changelog_entries = [
+            {"version": "1.1.1", "date": "September, 23, 2026", "features": ["Supports dark mode for UIMode, welcome screen and setup wizard", "Starting to implement myRatings using flutter + dart for cross platform compatibility."]},
             {"version": "1.1.0", "date": "September, 06, 2026", "features": ["LDSR rating mode - I follow a mobile first approach on this mode, I use flutter to create a mobile app that will be used to rate contents. The rating will be saved on the lds project file and can be viewed on the same app"]},
             {"version": "1.0.48", "date": "August, 28, 2026", "features": ["Infinite Page", "Disables page clamping on infinite page but will add it on normal pages later", "Exports pages on the active space only", "Wizard setup to uimode now working flawlessly"]},
             {"version": "1.0.47", "date": "August, 02, 2026", "features": ["Page Setup, Export and Wizard setup.", "Infinite page setup is added on wizard for UIMode only this will disable page tab and page setup settings", "Edge handle to resize the drawing area is not implemented yet", "Export as Bitmap on infinite page is not implemented yet"]},
@@ -1100,11 +1101,11 @@ class ModulePage(QWidget):
         
         # Module data structure with name, description, and percentage completion
         self.modules = [
-            {"name": "main.dart", "description": "First Implementation of LDSR", "percentage": 3},
+            {"name": "main.dart", "description": "First Implementation of LDSR", "percentage": 10},
             {"name": "docs.py", "description": "Document Page\nModified Module Page", "percentage": 100},
             {"name": "main.py", "description": "LDSD and LDSG\nPreload Dictionary", "percentage": 80},
             {"name": "UIMode.py", "description": "LDSU - User Interface Design Mode\nInfinite Page", "percentage": 84},
-            {"name": "setup.py", "description": "Welcome Page\nAdd Dictionary besides git icon", "percentage": 90},
+            {"name": "setup.py", "description": "Welcome Page\nAdd Dictionary besides git icon", "percentage": 95},
             {"name": "gui.py", "description": "Setup Wizard", "percentage": 70},
         ]
         

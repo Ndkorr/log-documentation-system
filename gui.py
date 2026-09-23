@@ -5,8 +5,8 @@ from PyQt6.QtWidgets import (
     QSizePolicy, QGraphicsOpacityEffect, QStackedWidget, QWidget,
     QTextEdit, QPlainTextEdit, QLineEdit, QComboBox, QScrollArea, QFrame
 )
-from PyQt6.QtCore import Qt, QPropertyAnimation, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QIntValidator
+from PyQt6.QtCore import Qt, QPropertyAnimation, QTimer, pyqtSignal, QEvent
+from PyQt6.QtGui import QColor, QIntValidator, QPalette
 
 
 class AnimatedPushButton(QPushButton):
@@ -427,7 +427,6 @@ class SetupWizard(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Log Documentation Setup Wizard")
         self.setFixedSize(550, 450)
-        self.setStyleSheet("background-color: #FFFFFF;")
         self.selected_option = None
         self._title_labels = []
         self._title_gradient_offset = 0
@@ -444,6 +443,70 @@ class SetupWizard(QDialog):
         self.dictionary_box = None
 
         self.init_ui()
+        self.apply_system_theme()
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+    @staticmethod
+    def system_dark_mode():
+        app = QApplication.instance()
+        if app is None:
+            return False
+        palette = app.palette()
+        window_color = palette.color(QPalette.ColorRole.Window)
+        text_color = palette.color(QPalette.ColorRole.WindowText)
+        return window_color.lightness() < text_color.lightness()
+
+    def apply_system_theme(self):
+        dark_mode = self.system_dark_mode()
+        if dark_mode:
+            background = "#1f2329"
+            foreground = "#f4f4f4"
+            input_background = "#2b3038"
+            border = "#5c6673"
+        else:
+            background = "#ffffff"
+            foreground = "#111111"
+            input_background = "#ffffff"
+            border = "#b8b8b8"
+
+        palette = self.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor(background))
+        palette.setColor(QPalette.ColorRole.Base, QColor(input_background))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(background))
+        palette.setColor(QPalette.ColorRole.Text, QColor(foreground))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(foreground))
+        palette.setColor(QPalette.ColorRole.Button, QColor(input_background))
+        palette.setColor(QPalette.ColorRole.ButtonText, QColor(foreground))
+        palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#9aa4b2" if dark_mode else "#777777"))
+        self.setPalette(palette)
+        self.setStyleSheet(
+            f"""
+            QDialog, QStackedWidget, QWidget {{
+                background-color: {background};
+                color: {foreground};
+            }}
+            QScrollArea, QScrollArea > QWidget > QWidget {{
+                background-color: {background};
+                color: {foreground};
+            }}
+            QLineEdit, QPlainTextEdit, QTextEdit, QComboBox {{
+                background-color: {input_background};
+                color: {foreground};
+                border-color: {border};
+            }}
+            """
+        )
+        self._apply_animated_accent_styles()
+
+    def eventFilter(self, obj, event):
+        if (
+            obj == QApplication.instance()
+            and event.type() == QEvent.Type.ApplicationPaletteChange
+        ):
+            self.apply_system_theme()
+        return super().eventFilter(obj, event)
 
     def init_ui(self):
         # Main vertical layout
@@ -868,6 +931,7 @@ class SetupWizard(QDialog):
         background = f"background: {self._current_title_gradient_css()};" if selected else ""
         font_weight = "font-weight: bold;" if selected else ""
         border = "1px solid #0078d7" if selected else "1px solid transparent"
+        text_color = "#f4f4f4" if self.system_dark_mode() else "#111111"
         return f"""
             font-size: 17px;
             padding: 10px;
@@ -875,12 +939,14 @@ class SetupWizard(QDialog):
             margin-right: 15px;
             border: {border};
             border-radius: 15px;
+            color: {text_color};
             {background}
             {font_weight}
         """
 
     def _animated_button_style(self, margin_right="15px", padding="6px 18px", enabled=False):
         background = f"background: {self._current_title_gradient_css()};" if enabled else ""
+        text_color = "#f4f4f4" if self.system_dark_mode() else "#111111"
         return f"""
             margin-bottom: 15px;
             margin-right: {margin_right};
@@ -888,7 +954,7 @@ class SetupWizard(QDialog):
             padding: {padding};
             border: 2px solid #0078d7;
             border-radius: 8px;
-            color: black;
+            color: {text_color};
             {background}
         """
 

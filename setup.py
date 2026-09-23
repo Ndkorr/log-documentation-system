@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QGraphicsBlurEffect, QMessageBox, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QSettings, QPropertyAnimation, QEasingCurve, QEvent, QRect, QUrl, QTimer
-from PyQt6.QtGui import QFont, QAction, QPixmap, QDesktopServices, QIcon
+from PyQt6.QtGui import QFont, QAction, QPixmap, QDesktopServices, QIcon, QPalette
 from gui import SetupWizard
 from main import LogApp
 import shutil
@@ -61,16 +61,15 @@ class NavigationPane(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet("background-color: #FFFFFF;")
         self.setMinimumWidth(0)  # Start hidden
         self.init_ui()
         
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
-        label = QLabel("Recent Files:")
-        label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        layout.addWidget(label)
+        self.recent_label = QLabel("Recent Files:")
+        self.recent_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        layout.addWidget(self.recent_label)
         
         self.list_widget = QListWidget()
         self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -92,6 +91,37 @@ class NavigationPane(QFrame):
             
         # Connect double-click signal to our handler.
         self.list_widget.itemDoubleClicked.connect(self.handle_item_double_clicked)
+        self.apply_theme(False)
+
+    def apply_theme(self, dark_mode):
+        if dark_mode:
+            background = "#1f2329"
+            foreground = "#f4f4f4"
+            border = "#3d4652"
+            selection = "#3d5572"
+        else:
+            background = "#ffffff"
+            foreground = "#111111"
+            border = "#dddddd"
+            selection = "#cde8ff"
+
+        self.setStyleSheet(
+            f"QFrame {{ background-color: {background}; border-left: 1px solid {border}; }}"
+        )
+        self.recent_label.setStyleSheet(f"color: {foreground};")
+        self.list_widget.setStyleSheet(
+            f"""
+            QListWidget {{
+                background-color: {background};
+                color: {foreground};
+                border: none;
+            }}
+            QListWidget::item:selected {{
+                background-color: {selection};
+                color: {foreground};
+            }}
+            """
+        )
         
     def handle_item_double_clicked(self, item: QListWidgetItem):
         # Retrieve the full file path from the tooltip.
@@ -231,8 +261,11 @@ class WelcomeWindow(QMainWindow):
         self.setWindowIcon(get_app_icon())
         self.resize(800, 450)
         self.setFixedSize(800, 450)
-        self.setStyleSheet("background-color: #FFFFFF;")
         self.init_ui()
+        self.apply_theme(self.system_dark_mode())
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
     def init_ui(self):
         central_widget = QWidget(self)
@@ -279,11 +312,10 @@ class WelcomeWindow(QMainWindow):
         content_layout.addLayout(top_bar)
 
         # Title label
-        title_label = QLabel("WELCOME TO LDS")
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title_label.setFont(QFont("Inter SemiBold", 34, QFont.Weight.Bold))
-        title_label.setStyleSheet("color: black; margin-top: 0px; margin-bottom: 30px;")
-        content_layout.addWidget(title_label)
+        self.title_label = QLabel("WELCOME TO LDS")
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label.setFont(QFont("Inter SemiBold", 34, QFont.Weight.Bold))
+        content_layout.addWidget(self.title_label)
 
         def _make_menu_label(text, slot=None, max_width=520):
             lbl = AnimatedClickableLabel(text)
@@ -350,9 +382,58 @@ class WelcomeWindow(QMainWindow):
 
         self.central_widget.installEventFilter(self)
 
+        self.menu_labels = [
+            self.create_new_label,
+            self.open_project_label,
+            self.docs_label,
+        ]
+
+    @staticmethod
+    def system_dark_mode():
+        app = QApplication.instance()
+        if app is None:
+            return False
+        palette = app.palette()
+        window_color = palette.color(QPalette.ColorRole.Window)
+        text_color = palette.color(QPalette.ColorRole.WindowText)
+        return window_color.lightness() < text_color.lightness()
+
+    def apply_theme(self, dark_mode):
+        if dark_mode:
+            background = "#1f2329"
+            foreground = "#f4f4f4"
+        else:
+            background = "#ffffff"
+            foreground = "#111111"
+
+        self.setStyleSheet(f"QMainWindow, QWidget {{ background-color: {background}; }}")
+        self.central_widget.setStyleSheet(f"background-color: {background};")
+        self.title_label.setStyleSheet(
+            f"color: {foreground}; margin-top: 0px; margin-bottom: 30px;"
+        )
+        self.hamburger_label.setStyleSheet(
+            f"color: {foreground}; margin: 10px; padding: 5px; border-radius: 5px;"
+        )
+        for label in self.menu_labels:
+            label.setStyleSheet(
+                f"""
+                color: {foreground};
+                padding: 10px;
+                border-radius: 15px;
+                margin-bottom: 6px;
+                """
+            )
+        self.nav_pane.apply_theme(dark_mode)
+
     def eventFilter(self, obj, event):
         if (
-            obj == self.central_widget
+            obj == QApplication.instance()
+            and event.type() == QEvent.Type.ApplicationPaletteChange
+        ):
+            self.apply_theme(self.system_dark_mode())
+            return False
+        if (
+            obj == getattr(self, "central_widget", None)
             and self.nav_open
             and event.type() == QEvent.Type.MouseButtonPress
         ):

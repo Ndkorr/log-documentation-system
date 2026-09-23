@@ -23,7 +23,8 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QIcon, QPainter, QPen, QColor, QMouseEvent,
     QCursor, QFont, QColor, QPixmap, QClipboard, QAction, QBrush, 
-    QImage, QRegularExpressionValidator, QPdfWriter, QPageSize, QPageLayout
+    QImage, QRegularExpressionValidator, QPdfWriter, QPageSize, QPageLayout,
+    QPalette
     )
 import sys
 import math
@@ -391,6 +392,39 @@ class SideMenuPanel(QWidget):
             self._tabs[name].clicked.connect(partial(self._switch_tab, i, name))
         self._switch_tab(0, "File")
 
+    def apply_system_theme(self, dark_mode):
+        background = "#1f2329" if dark_mode else "#ffffff"
+        foreground = "#f4f4f4" if dark_mode else "#111111"
+        surface = "#2b3038" if dark_mode else "#ffffff"
+        border = "#3d4652" if dark_mode else "#dddddd"
+
+        self.setStyleSheet(
+            f"""
+            SideMenuPanel {{
+                background: {surface};
+                color: {foreground};
+                border-left: 1px solid {border};
+            }}
+            QLabel {{ color: {foreground}; }}
+            QListWidget, QScrollArea, QStackedWidget {{
+                background: {surface};
+                color: {foreground};
+                border-color: {border};
+            }}
+            """
+        )
+        self.recent_list_widget.setStyleSheet(
+            f"background: transparent; color: {foreground};"
+        )
+        self.spaces_list_widget.setStyleSheet(
+            f"background: transparent; color: {foreground};"
+        )
+        self.checkpoint_list_widget.setStyleSheet(
+            f"background: transparent; color: {foreground};"
+        )
+        self._side_menu_dark_mode = dark_mode
+        self.set_accent_color(QColor(getattr(self, "_accent_hex", "#ff6600")))
+
     def _switch_tab(self, idx, name):
         self._stack.setCurrentIndex(idx)
         for n, btn in self._tabs.items():
@@ -406,9 +440,13 @@ class SideMenuPanel(QWidget):
     
     def set_accent_color(self, color: QColor):
         hex_color = color.name()
+        dark_mode = getattr(self, "_side_menu_dark_mode", False)
+        background = "#2b3038" if dark_mode else "#ffffff"
+        foreground = "#f4f4f4" if dark_mode else "#222222"
+        muted_foreground = "#aeb7c2" if dark_mode else "#555555"
         tab_ss = f"""
             QPushButton {{ border: none; border-bottom: 4px solid #ddd;
-                          background: white; font-size: 13pt; }}
+                          background: {background}; color: {foreground}; font-size: 13pt; }}
             QPushButton:checked {{ border-bottom: 4px solid {hex_color};
                                    font-weight: bold; }}
             QPushButton:hover {{ background: {hex_color}; opacity: 0.1; color: white;}}
@@ -418,7 +456,7 @@ class SideMenuPanel(QWidget):
 
         action_ss = f"""
             QPushButton {{ text-align: left; padding: 0 18px;
-                          border: none; font-size: 11pt; background: white; }}
+                          border: none; font-size: 11pt; background: {background}; color: {foreground}; }}
             QPushButton:hover {{ background: {hex_color}; color: white; }}
         """
         for btn in self.file_actions.values():
@@ -431,7 +469,7 @@ class SideMenuPanel(QWidget):
         for btn in getattr(self, '_recent_file_buttons', []):
             btn.setStyleSheet(f"""
                 QPushButton {{ text-align: left; padding: 0 18px 0 28px;
-                              border: none; font-size: 10pt; background: white; color: #555; }}
+                              border: none; font-size: 10pt; background: {background}; color: {muted_foreground}; }}
                 QPushButton:hover {{ background: {hex_color}; color: white; }}
             """)
         
@@ -458,7 +496,7 @@ class SideMenuPanel(QWidget):
         # File History toggle button hover follows accent
         self.file_history_btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent; color: #222; border: none;
+                background: transparent; color: {foreground}; border: none;
                 font-weight: bold; font-size: 12pt; text-align: left; padding-left: 8px;
             }}
             QPushButton:hover {{ color: {hex_color}; }}
@@ -479,6 +517,9 @@ class SideMenuPanel(QWidget):
         self._recent_file_buttons = []
 
         accent = getattr(self, "_accent_hex", "#ff6600")
+        dark_mode = getattr(self, "_side_menu_dark_mode", False)
+        background = "#2b3038" if dark_mode else "#ffffff"
+        foreground = "#aeb7c2" if dark_mode else "#555555"
 
         if not recent_files:
             lbl = QLabel("No recent files")
@@ -496,7 +537,7 @@ class SideMenuPanel(QWidget):
             btn.setCursor(_pointing_cursor())
             btn.setStyleSheet(f"""
                 QPushButton {{ text-align: left; padding: 0 18px 0 28px;
-                              border: none; font-size: 10pt; background: white; color: #555; }}
+                              border: none; font-size: 10pt; background: {background}; color: {foreground}; }}
                 QPushButton:hover {{ background: {accent}; color: white; }}
             """)
             if on_open:
@@ -2340,6 +2381,7 @@ class DrawingArea(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background: #e5e5e5; border: none;")
+        self.canvas_background_color = QColor("#ffffff")
         self.setMinimumSize(800, 600)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
@@ -2492,6 +2534,12 @@ class DrawingArea(QFrame):
         self._group_resize_origin_children = None
         
         self.custom_tooltip = CustomToolTip(self)
+
+    def apply_system_theme(self, dark_mode):
+        self.canvas_background_color = QColor("#343a46" if dark_mode else "#ffffff")
+        workspace = "#252a31" if dark_mode else "#e5e5e5"
+        self.setStyleSheet(f"background: {workspace}; border: none;")
+        self.update()
 
     def set_canvas_size(self, size):
         if size is None:
@@ -4684,7 +4732,7 @@ class DrawingArea(QFrame):
         painter.translate(-self.a4_size.width() // 2, -self.a4_size.height() // 2)
 
         # Draw the A4 canvas (white paper)
-        painter.setBrush(QColor("white"))
+        painter.setBrush(self.canvas_background_color)
         painter.setPen(QPen(QColor("#bbbbbb"), 3))
         painter.drawRect(0, 0, self.a4_size.width(), self.a4_size.height())
 
@@ -10569,6 +10617,121 @@ class UIMode(QWidget):
             else:
                 QTimer.singleShot(0, lambda path=file_path: self._core_save_canvas(path))
 
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+        self.apply_system_theme()
+
+    @staticmethod
+    def system_dark_mode():
+        app = QApplication.instance()
+        if app is None:
+            return False
+        palette = app.palette()
+        window_color = palette.color(QPalette.ColorRole.Window)
+        text_color = palette.color(QPalette.ColorRole.WindowText)
+        return window_color.lightness() < text_color.lightness()
+
+    def apply_system_theme(self):
+        dark_mode = self.system_dark_mode()
+        background = "#252a31" if dark_mode else "#ffffff"
+        foreground = "#f4f4f4" if dark_mode else "#111111"
+        surface = "#303640" if dark_mode else "#ffffff"
+        border = "#5c6673" if dark_mode else "#dddddd"
+        muted = "#aeb7c2" if dark_mode else "#777777"
+        hover = "#424b59" if dark_mode else "#f0f0f0"
+
+        palette = self.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor(background))
+        palette.setColor(QPalette.ColorRole.Base, QColor(surface))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(background))
+        palette.setColor(QPalette.ColorRole.Text, QColor(foreground))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(foreground))
+        palette.setColor(QPalette.ColorRole.Button, QColor(surface))
+        palette.setColor(QPalette.ColorRole.ButtonText, QColor(foreground))
+        palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(muted))
+        self.setPalette(palette)
+
+        self.setStyleSheet(
+            f"""
+            UIMode {{
+                background-color: {background};
+                color: {foreground};
+                font-family: Arial;
+                font-size: 12pt;
+            }}
+            QScrollBar {{
+                background: {background};
+            }}
+            QToolTip {{
+                background: {surface};
+                color: {foreground};
+                border: 1px solid {border};
+            }}
+            """
+        )
+        self.top_bar.setStyleSheet(f"background: {background};")
+        self.title_label.setStyleSheet(
+            f"font-weight: bold; font-size: 16pt; padding: 8px; color: {foreground};"
+        )
+        self.controls_widget.setStyleSheet(f"background: {background};")
+        for button in [
+            self.quick_save_btn,
+            self.min_btn,
+            self.max_btn,
+            self.close_btn,
+        ]:
+            button.setStyleSheet(
+                f"background: transparent; border: none; color: {foreground}; font-size: 14pt;"
+            )
+        self.menu_btn.setStyleSheet(
+            f"background: transparent; border: none; color: {foreground}; font-size: 42pt;"
+        )
+        self.ribbon_widget.setStyleSheet(
+            f"""
+            QScrollArea {{
+                background: {background};
+                border: none;
+            }}
+            """
+        )
+        self._ribbon_content_widget.setStyleSheet(
+            f"""
+            QWidget {{
+                background: {surface};
+                color: {foreground};
+                border: none;
+            }}
+            QWidget:hover {{ background: {hover}; }}
+            QScrollBar {{ background: transparent; }}
+            QScrollBar::handle {{ background: #ff6600; }}
+            """
+        )
+        self.quick_prop.setStyleSheet(
+            f"""
+            background: transparent;
+            border: 2px solid {foreground};
+            border-radius: 22px;
+            margin-top: 25px;
+            margin-bottom: 25px;
+            """
+        )
+        self._ribbon_divider.setStyleSheet(
+            f"color: {border}; background: {border}; height: 3px; "
+            "margin: 3px 0; margin-left: 10px; margin-right: 10px;"
+        )
+        self.drawing_area.apply_system_theme(dark_mode)
+        self._refresh_tool_button_theme(dark_mode)
+        self._side_menu.apply_system_theme(dark_mode)
+
+    def _refresh_tool_button_theme(self, dark_mode):
+        foreground = "#f4f4f4" if dark_mode else "#222222"
+        selected_background = "#4a4035" if dark_mode else "#fff7ef"
+        for name, button in getattr(self, "category_tool_buttons", {}).items():
+            style = button.styleSheet().replace("#222", foreground)
+            style = style.replace("#fff7ef", selected_background)
+            button.setStyleSheet(style)
+
     def _apply_setup_data(self, setup_data):
         setup_data = setup_data or {}
         self.user_name = setup_data.get("user_name", "")
@@ -10640,6 +10803,7 @@ class UIMode(QWidget):
                 height: 0px;
             }
         """)  # Blend with drawing area
+        self._ribbon_content_widget = ribbon_widget
         
         self.ribbon_tools_container = QWidget()
         self.ribbon_tools_layout = QVBoxLayout(self.ribbon_tools_container)
@@ -10723,6 +10887,7 @@ class UIMode(QWidget):
         divider.setFrameShape(QFrame.Shape.HLine)
         divider.setFrameShadow(QFrame.Shadow.Sunken)
         divider.setStyleSheet("color: black; background: black; height: 3px; margin: 3px 0; margin-left: 10px; margin-right: 10px;")
+        self._ribbon_divider = divider
         ribbon_layout.insertWidget(1, divider)
         
         scroll = QScrollArea()
@@ -11071,7 +11236,9 @@ class UIMode(QWidget):
         
     def update_tool_btn_border(self):
         color_hex = self.current_shape_color.name()
-        bg = "#ffe6b3" if self._rotated else "white"
+        bg = "#5a4630" if self._rotated else (
+            "#303640" if self.system_dark_mode() else "white"
+        )
         self.tool_btn.setStyleSheet(
             f"""
             border: 2px solid {color_hex};
@@ -11142,6 +11309,11 @@ class UIMode(QWidget):
             "arrow": "font-size: 32pt; color: #222; border: none; background: transparent;",
             "framewithlabel": "font-size: 52pt; color: #222; border: none; background: transparent;",
             "adddescription": "font-size: 32pt; color: #222; border: none; background: transparent;",
+        }
+        tool_foreground = "#f4f4f4" if self.system_dark_mode() else "#222222"
+        style_map = {
+            name: style.replace("#222", tool_foreground)
+            for name, style in style_map.items()
         }
         pretty_names = {
             "circle": "Circle",
@@ -11304,7 +11476,8 @@ class UIMode(QWidget):
             base_style = style_map.get(tool, "font-size: 28pt; color: #222; border: none; background: transparent; font-weight: bold;")
             selected_style = (
                 base_style +
-                f"border: 3px solid {color_hex}; border-radius: 12px; background: #fff7ef;"
+                f"border: 3px solid {color_hex}; border-radius: 12px; "
+                f"background: {'#4a4035' if self.system_dark_mode() else '#fff7ef'};"
             )
             btn.setStyleSheet(selected_style)
         # Pass the tool to the drawing area
@@ -11329,6 +11502,11 @@ class UIMode(QWidget):
             "framewithlabel": "font-size: 52pt; color: #222; border: none; background: transparent;",
             "adddescription": "font-size: 32pt; color: #222; border: none; background: transparent;",
         }
+        tool_foreground = "#f4f4f4" if self.system_dark_mode() else "#222222"
+        style_map = {
+            name: style.replace("#222", tool_foreground)
+            for name, style in style_map.items()
+        }
         for name, btn in getattr(self, "category_tool_buttons", {}).items():
             btn.setChecked(False)
             btn.setStyleSheet(style_map.get(name, "font-size: 28pt; color: #222; border: none; background: transparent; font-weight: bold;"))
@@ -11337,6 +11515,12 @@ class UIMode(QWidget):
         
 
     def eventFilter(self, obj, event):
+        if (
+            obj == QApplication.instance()
+            and event.type() == QEvent.Type.ApplicationPaletteChange
+        ):
+            self.apply_system_theme()
+
         # Close side menu when clicking on drawing area
         if (obj == self.drawing_area 
                 and event.type() == QEvent.Type.MouseButtonPress
