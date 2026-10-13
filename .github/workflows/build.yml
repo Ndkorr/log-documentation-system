@@ -413,6 +413,39 @@ jobs:
 
           dpkg-deb --build "${PACKAGE_ROOT}" "dist/log-documentation-system-${APP_VERSION}-linux-amd64.deb"
 
+      - name: Build Linux AppImage
+        if: runner.os == 'Linux'
+        env:
+          APP_VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          APP_DIR="dist/LogDocumentationSystem.AppDir"
+          mkdir -p "${APP_DIR}/opt/log-documentation-system" "${APP_DIR}/usr/share/applications" "${APP_DIR}/usr/share/icons/hicolor/256x256/apps"
+          cp -R dist/LogDocumentationSystem/. "${APP_DIR}/opt/log-documentation-system/"
+          cp assets/lds.png "${APP_DIR}/log-documentation-system.png"
+          cp assets/lds.png "${APP_DIR}/usr/share/icons/hicolor/256x256/apps/log-documentation-system.png"
+
+          cat > "${APP_DIR}/AppRun" <<'EOF'
+          #!/usr/bin/env sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "${HERE}/opt/log-documentation-system/LogDocumentationSystem" "$@"
+          EOF
+          chmod +x "${APP_DIR}/AppRun"
+
+          cat > "${APP_DIR}/log-documentation-system.desktop" <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Log Documentation System
+          Exec=AppRun %F
+          Icon=log-documentation-system
+          Terminal=false
+          Categories=Office;Utility;
+          EOF
+
+          wget -q -O appimagetool.AppImage https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool.AppImage
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool.AppImage "${APP_DIR}" "dist/log-documentation-system-${APP_VERSION}-linux-x86_64.AppImage"
+
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
@@ -421,12 +454,85 @@ jobs:
             dist/Output/*.exe
             dist/log-documentation-system-*.dmg
             dist/log-documentation-system-*.deb
+            dist/log-documentation-system-*.AppImage
+          if-no-files-found: error
+
+  build-arm64-appimage:
+    needs:
+      - prepare
+      - test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Linux desktop libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build Linux ARM64 app
+        run: |
+          pyinstaller --noconfirm --windowed --name LogDocumentationSystem --add-data "assets:assets" --add-data "docs.json:." setup.py
+
+      - name: Package ARM64 AppImage
+        env:
+          APP_VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          APP_DIR="dist/LogDocumentationSystem.AppDir"
+          mkdir -p "${APP_DIR}/opt/log-documentation-system" "${APP_DIR}/usr/share/applications" "${APP_DIR}/usr/share/icons/hicolor/256x256/apps"
+          cp -R dist/LogDocumentationSystem/. "${APP_DIR}/opt/log-documentation-system/"
+          cp assets/lds.png "${APP_DIR}/log-documentation-system.png"
+          cp assets/lds.png "${APP_DIR}/usr/share/icons/hicolor/256x256/apps/log-documentation-system.png"
+
+          cat > "${APP_DIR}/AppRun" <<'EOF'
+          #!/usr/bin/env sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "${HERE}/opt/log-documentation-system/LogDocumentationSystem" "$@"
+          EOF
+          chmod +x "${APP_DIR}/AppRun"
+
+          cat > "${APP_DIR}/log-documentation-system.desktop" <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Log Documentation System
+          Exec=AppRun %F
+          Icon=log-documentation-system
+          Terminal=false
+          Categories=Office;Utility;
+          EOF
+
+          wget -q -O appimagetool.AppImage https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-aarch64.AppImage
+          chmod +x appimagetool.AppImage
+          ARCH=aarch64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool.AppImage "${APP_DIR}" "dist/log-documentation-system-${APP_VERSION}-linux-aarch64.AppImage"
+
+      - name: Upload ARM64 AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-documentation-system-${{ needs.prepare.outputs.version }}-linux-arm64
+          path: dist/log-documentation-system-*-linux-aarch64.AppImage
           if-no-files-found: error
 
   release:
     needs:
       - prepare
       - build
+      - build-arm64-appimage
     if: needs.prepare.outputs.is_release == 'true'
     runs-on: ubuntu-latest
 
@@ -441,7 +547,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p release-assets/flat
-          find release-assets -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.deb' \) -exec cp {} release-assets/flat/ \;
+          find release-assets -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \) -exec cp {} release-assets/flat/ \;
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2

@@ -11,6 +11,8 @@ The workflow uploads build artifacts for each OS:
 - `log-documentation-system-<version>-windows-installer.exe`
 - `log-documentation-system-<version>-macos.dmg`
 - `log-documentation-system-<version>-linux-amd64.deb`
+- `log-documentation-system-<version>-linux-x86_64.AppImage`
+- `log-documentation-system-<version>-linux-aarch64.AppImage`
 
 ## Create a Release
 
